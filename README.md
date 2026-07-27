@@ -1,148 +1,104 @@
-# ArkBar 🎚️
+# ArkBar
 
-Tiny macOS 14+ menu-bar app that keeps your **Volcengine Ark Coding / Agent Plan usage** visible — inspired by [CodexBar](https://github.com/steipete/CodexBar), focused on the Volcengine Ark plans.
+[中文文档](README.zh-CN.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
 
-The menu-bar icon is a capsule that fills according to the **tightest** usage window across all your plans (session / 5-hour / weekly / monthly). Click it for a per-plan breakdown with reset countdowns.
+ArkBar is a native macOS menu-bar app for Volcengine Ark Coding Plan and Agent Plan usage. It keeps the quota you have **left** visible without a Dock icon.
 
-## Install & run
+## Highlights
+
+- Native AppKit UI for macOS 14+.
+- Per-plan session, weekly, and monthly remaining quota with reset countdowns.
+- A gradient ring that becomes visually deeper as remaining quota gets low.
+- Auto, `arkcli` SSO, AK/SK, and Ark API key data-source modes.
+- System, Simplified Chinese, and English interfaces.
+- No telemetry, browser-cookie access, Keychain access, or credential storage.
+
+## Quick start
+
+### Build from source
+
+Requirements: macOS 14+, Swift 6.0, and one supported authentication source.
 
 ```bash
+git clone https://github.com/youwei792/ArkBar.git
+cd ArkBar
 swift build
 .build/debug/ArkBar
 ```
 
-No Dock icon — it lives entirely in the menu bar. Quit it from the dropdown menu.
-
-## Authentication (three paths, same as CodexBar's Doubao provider)
-
-In **Auto** mode, ArkBar tries configured API credentials first, then falls back
-to `arkcli`; the first source that succeeds wins. This keeps a GUI launch from
-silently showing a different SSO account when explicit credentials are present.
-
-| Mode | How | When to use |
-|---|---|---|
-| **AK/SK** | `VOLCENGINE_ACCESS_KEY_ID` + `VOLCENGINE_SECRET_ACCESS_KEY`, Volcengine V4 signed `GetCodingPlanUsage` OpenAPI | CI / headless / when SSO token expires. Coding Plan only. |
-| **Ark API Key** | `ARK_API_KEY` probes `/api/coding/v3/chat/completions` and reads `x-ratelimit-*` headers | Fallback after AK/SK. Single request-limit window only. Set `ARK_MODEL_ID` to use a model/endpoint available to your key. |
-| **arkcli (SSO)** | `arkcli usage plan --format json` reads your Volc SSO session | Fallback; gives all plans (personal + team Coding/Agent). |
-
-### Set up arkcli (recommended)
+### Package a local app
 
 ```bash
-brew install arkcli          # or your install path
-arkcli auth login volc-sso   # one-time sign-in
+./Scripts/package_app.sh
 ```
 
-If you see "arkcli is not signed in" in the menu, the SSO token expired — just run `arkcli auth login volc-sso` again. The "Open arkcli auth login" menu item does this for you.
+This development script builds an Apple Silicon (`arm64`) app, replaces the local `ArkBar.app` bundle, and replaces `/Applications/ArkBar.app`. It ad-hoc signs the result; it is not a notarized release installer.
 
-### Use AK/SK instead
+## Authentication and data sources
+
+In **Auto** mode, ArkBar prefers explicitly configured credentials, then falls back to `arkcli`. The first successful source is shown in the menu.
+
+| Source | Configuration | Coverage and limits |
+| --- | --- | --- |
+| `arkcli` SSO (recommended) | `npm install -g @volcengine/ark-cli` then `arkcli auth login volc-sso` | Personal and team Coding/Agent Plan usage exposed by `arkcli usage plan`. |
+| Volcengine AK/SK | `VOLCENGINE_ACCESS_KEY_ID` and `VOLCENGINE_SECRET_ACCESS_KEY` | Coding Plan usage only, via signed `GetCodingPlanUsage`. |
+| Ark API key | `ARK_API_KEY`; optionally `ARK_MODEL_ID` | One request-rate-limit window only. The probe sends a minimal API request, so it can consume request quota. |
+
+See the official [Ark CLI installation guide](https://github.com/volcengine/ark-cli) for the current CLI setup.
+
+Never commit credentials. Set them in your shell environment before launching ArkBar:
 
 ```bash
-export VOLCENGINE_ACCESS_KEY_ID=AK...
-export VOLCENGINE_SECRET_ACCESS_KEY=SK...
+export VOLCENGINE_ACCESS_KEY_ID='...'
+export VOLCENGINE_SECRET_ACCESS_KEY='...'
 .build/debug/ArkBar
 ```
 
-### Use an Ark API key
+## Reading the UI
 
-```bash
-export ARK_API_KEY=...
-.build/debug/ArkBar
-```
+- All prominent percentages mean **remaining** quota, not consumed quota.
+- The menu-bar capsule reflects the tightest quota window across available plans.
+- The three ring rows are Session, Weekly, and Monthly remaining quota; each row keeps its own reset countdown.
+- A refresh failure preserves the last confirmed data and marks it stale.
+- The interface follows the system language by default. Change it in **Settings → Language**.
 
-## What you see
+## Subscription-expiry data
 
-**Icon** — a capsule progress bar reflecting the *remaining* percent of your tightest window. Template-tinted, so it adapts to light/dark mode automatically. Dimmed when data is stale or a fetch failed.
-
-**Dropdown** — grouped by plan:
-
-```
-ArkBar  ·  arkcli
-Coding Plan  -  personal
-    Session ███████░░░  73%   -/-    resets in 2h 14m
-    Weekly  ███░░░░░░░  31%   -/-    resets in 3d 4h
-    Monthly █░░░░░░░░░  12%   -/-    resets in 18d
-Agent Plan  -  medium
-    5-hour  ██████░░░░  58%   250/1000   resets in 1h
-    ...
-─────────────────────
-Last updated 14:32
-Refresh Now
-Open arkcli auth login
-Open Ark Console
-─────────────────────
-Quit ArkBar
-```
-
-## Refresh
-
-- Default every 5 minutes. Change it in `Settings.refreshInterval` (1/2/5/15/30 min).
-- Opening the menu forces a refresh if the last fetch was >1 minute ago.
-- `Refresh Now` always refreshes.
-- Changing the interval takes effect immediately. If a later refresh fails, the
-  last successful snapshot remains visible and is explicitly marked as stale.
-
-## Language and accessibility
-
-- Choose **System Default**, **简体中文**, or **English** in Settings. The setting
-  persists, and the current Settings window is rebuilt immediately after a
-  language change.
-- The ring gauge uses a short 0.26 s entrance transition. It is disabled when
-  macOS **Reduce Motion** is enabled.
-
-## Adding new plans or subscriptions
-
-ArkBar is provider-driven, exactly like CodexBar (which also extends via code, not runtime plugins — see their [provider authoring guide](https://github.com/steipete/CodexBar/blob/main/docs/provider.md)).
-
-To add a new usage source:
-
-1. Conform a type to `UsageProvider`:
-   ```swift
-   final class MyProvider: UsageProvider {
-       let displayName = "My Plan"
-       func isAvailable(environment: [String: String]) -> Bool { true }
-       func fetch(environment: [String: String]) async throws -> ProviderSnapshot { ... }
-   }
-   ```
-2. Register it in `UsageStore.rebuildProviders()` so it joins the priority list.
-
-That's it — the icon aggregation and menu rendering pick it up automatically. `ProviderSnapshot` carries `[PlanSnapshot]`, each with `[UsageWindow]`; windows carry `usedPercent` / `used` / `total` / `resetsAt`, so most quota shapes map onto it directly.
-
-## Architecture
-
-```
-UsageProvider (protocol)
-├── ArkCLIProvider     — arkcli SSO, parses viewer + items[].periods[]
-├── VolcAPIProvider    — AK/SK Volcengine V4 signed GetCodingPlanUsage
-└── ArkAPIKeyProvider  — ARK_API_KEY probe of x-ratelimit headers
-
-UsageStore             — provider priority + refresh timer + aggregated state
-StatusItemController   — NSStatusItem, icon, click → menu
-IconRenderer           — 18×18pt 2× template capsule (ported from CodexBar)
-MenuBuilder            — NSMenu with per-plan sections, block progress bars, countdowns
-VolcSigner             — Volcengine V4 HMAC-SHA256 (ported from CodexBar DoubaoVolcengineSigner)
-```
-
-## Data source contract
-
-`arkcli usage plan --format json` returns `{ viewer, items[] }` where each item has `product` (`coding-plan` / `agent-plan` / `coding-plan-team` / `agent-plan-team`), `subscribed`, and `periods[]`. Each period has `label` (`session`/`5h`/`weekly`/`monthly`), `percent` (**used** percent 0–100), optional `used`/`total` (AgentPlan only), and `reset_at` (RFC3339 Beijing time). `updated_at` may be epoch seconds or milliseconds — detected by magnitude (≥1e11 → ms).
+Quota reset time is not subscription expiry. ArkBar displays a plan-expiry badge only when a provider exposes a verified order end date. The currently supported `arkcli usage plan` response does not provide that value, so ArkBar intentionally hides the badge instead of guessing from a reset time or local profile cache.
 
 ## Privacy
 
-- No Keychain reads, no browser cookies, no disk scanning.
-- arkcli owns the SSO session; ArkBar only reads its stdout.
-- AK/SK and API keys come from environment variables you set.
-- All network calls go directly to Volcengine endpoints — nothing else.
+- ArkBar does not read browser cookies, Keychain entries, or arbitrary files.
+- `arkcli` keeps ownership of its SSO session; ArkBar only runs `arkcli usage plan --format json` and parses its output.
+- AK/SK and API keys are read from the launch environment and are never written to disk by ArkBar.
+- Network requests go only to Volcengine Ark endpoints required by the selected source.
 
-## Testing
+## Development
 
 ```bash
 swift test
 ```
 
-Covers arkcli JSON decoding (multi-plan, auth=none, subscribed=false, ms/s timestamp detection), Volcengine OpenAPI decoding, menu progress-bar/countdown formatting, and icon rendering.
+The test suite covers Ark CLI and OpenAPI decoding, time formatting, icon rendering, and menu-card layout regressions. GitHub Actions runs the same test command for pull requests and pushes to `main`.
 
-## Requirements
+## Project structure
 
-- macOS 14+ (Sonoma)
-- Swift 6.0 toolchain
-- `arkcli` (recommended) **or** Volcengine AK/SK **or** an Ark API key
+```text
+Sources/ArkBar/
+  ArkCLIFetcher.swift    arkcli SSO usage provider
+  VolcAPIProvider.swift  AK/SK signed Coding Plan provider
+  ArkAPIKeyProvider.swift API-key rate-limit probe provider
+  UsageStore.swift       source selection and refresh lifecycle
+  PlanCardView.swift     menu-card layout and remaining-quota ring
+  Localization.swift     Simplified Chinese and English catalog
+Scripts/package_app.sh   local Apple Silicon app packaging
+Tests/ArkBarTests/       decoding and visual regression tests
+```
+
+## Contributing
+
+Issues and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md), keep credentials out of logs and fixtures, and run `swift test` before opening a pull request.
+
+## License and attribution
+
+ArkBar is released under the [MIT License](LICENSE). Parts of the architecture and rendering approach were adapted from CodexBar; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

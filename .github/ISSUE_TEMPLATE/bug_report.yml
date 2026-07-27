@@ -1,0 +1,23 @@
+name: Bug report
+description: Report a reproducible ArkBar problem without private credentials or usage data.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Do not include API keys, tokens, account IDs, or unredacted screenshots."
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: macOS and ArkBar version

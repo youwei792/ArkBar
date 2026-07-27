@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 APP_NAME="ArkBar"
-BUNDLE_ID="com.wangyouwei.arkbar"
+BUNDLE_ID="com.wwwsidequest.arkbar"
 VERSION="0.1.0"
 BUILD="1"
 
@@ -46,6 +46,7 @@ cp "$ROOT/Resources/AppIcon.icns" "$RESOURCES/AppIcon.icns"
 # Rewrite Info.plist with exact version/build.
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$CONTENTS/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$CONTENTS/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$CONTENTS/Info.plist"
 
 echo "=== Ad-hoc codesign ==="
 # Remove any pre-existing signature, then sign ad-hoc with the current identity.
