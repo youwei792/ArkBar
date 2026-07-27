@@ -304,6 +304,74 @@ struct IconRendererTests {
     }
 }
 
+@Suite("Ring arc coverage")
+struct RingArcCoverageTests {
+    /// Regression: the filled arc used to sweep the wrong direction / wrong span,
+    /// so a window with e.g. 69% remaining rendered as a ~full ring. Sample the
+    /// bitmap at the ring's radius and assert the filled span matches remaining.
+    @MainActor
+    private static func filledSpanDegrees(image: NSImage, ringIndex: Int) -> Int {
+        let rep = NSBitmapImageRep(data: image.tiffRepresentation!)!
+        let size = Int(rep.size.width)
+        let cx = size / 2
+        let cy = size / 2
+        let ringWidth = 8.0
+        let ringGap = 5.0
+        let baseRadius = Double(size) / 2 - ringWidth / 2 - 4
+        let radius = baseRadius - Double(ringIndex) * (ringWidth + ringGap)
+        // Sweep CCW from top (0°). Count contiguous filled degrees from the top;
+        // the arc starts at 12 o'clock, so the filled run begins at deg=0.
+        var filled = 0
+        for deg in stride(from: 0, through: 359, by: 5) {
+            let r = Double(deg) * .pi / 180
+            // CCW from top in y-up: x = cx - sin*r, y = cy + cos*r
+            let mx = Double(cx) - sin(r) * radius
+            let my = Double(cy) + cos(r) * radius
+            let px = Int(mx.rounded())
+            let py = Int((Double(size) - my).rounded())
+            guard px >= 0, px < size, py >= 0, py < size else { continue }
+            let c = rep.colorAt(x: px, y: py)!
+            if c.alphaComponent > 0.5 {
+                filled += 5
+            } else {
+                break  // arc is contiguous from the top; first gap ends it
+            }
+        }
+        return filled
+    }
+
+    @Test("A 69%-remaining ring fills ~249°, not the full circle")
+    @MainActor
+    func partialRingFillsProportionally() throws {
+        let ring = RingRenderer.makeImage(
+            rings: [.init(id: "monthly", label: "Monthly", remainingPercent: 69, tone: .monthly)],
+            primaryRemaining: 69, primaryLabel: "Monthly", size: 132)
+        let span = Self.filledSpanDegrees(image: ring, ringIndex: 0)
+        // 69% of 360° = 248.4°. Allow ±20° for the round line-cap overhang.
+        #expect(span >= 228 && span <= 268, "expected ~249°, got \(span)°")
+    }
+
+    @Test("Real arkcli data: three rings each fill to their own remaining percent")
+    @MainActor
+    func realDataThreeRings() throws {
+        // Exact windows from `arkcli usage plan --format json`.
+        let ring = RingRenderer.makeImage(
+            rings: [
+                .init(id: "monthly", label: "Monthly", remainingPercent: 69.23, tone: .monthly),
+                .init(id: "weekly",  label: "Weekly",  remainingPercent: 91.40, tone: .weekly),
+                .init(id: "session", label: "Session", remainingPercent: 97.31, tone: .session),
+            ],
+            primaryRemaining: 97.31, primaryLabel: "Session", size: 132)
+        // monthly 69% -> ~249°, weekly 91% -> ~329°, session 97% -> ~350°.
+        let monthly = Self.filledSpanDegrees(image: ring, ringIndex: 0)
+        let weekly  = Self.filledSpanDegrees(image: ring, ringIndex: 1)
+        let session = Self.filledSpanDegrees(image: ring, ringIndex: 2)
+        #expect(monthly >= 228 && monthly <= 268, "monthly expected ~249°, got \(monthly)°")
+        #expect(weekly  >= 308 && weekly  <= 348, "weekly expected ~329°, got \(weekly)°")
+        #expect(session >= 329 && session <= 360, "session expected ~350°, got \(session)°")
+    }
+}
+
 @Suite("Menu card visual regression")
 struct MenuCardVisualTests {
     @Test("Long plan metadata and error text stay inside their cards")
