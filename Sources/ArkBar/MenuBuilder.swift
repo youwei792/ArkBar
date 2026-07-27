@@ -16,8 +16,6 @@ enum MenuBuilder {
         }
 
         let status: Status
-        /// Which provider tab is currently shown; drives the switcher's
-        /// selected button and the per-tab card theme.
         let selectedTab: ProviderTab
         let onSelectTab: (ProviderTab) -> Void
         let lastUpdatedAt: Date?
@@ -38,12 +36,20 @@ enum MenuBuilder {
     @MainActor
     static func build(_ state: State) -> NSMenu {
         let menu = NSMenu()
+        populate(menu, with: state)
+        return menu
+    }
+
+    /// Reuses an already-attached menu instead of replacing
+    /// `NSStatusItem.menu`. AppKit keeps that menu's tracking session alive, so
+    /// provider switches and refresh completions update immediately without
+    /// closing the popover or requiring a second status-item click.
+    @MainActor
+    static func populate(_ menu: NSMenu, with state: State) {
+        menu.removeAllItems()
         // NSMenu reserves horizontal insets around custom item views. Keep the
         // menu slightly wider than the card so AppKit never clips its right edge.
         menu.minimumWidth = 360
-
-        // Top tab switcher (Ark | OpenCode). Always present so the user can
-        // flip between tracks regardless of load state.
         menu.addItem(switcherItem(state: state))
 
         switch state.status {
@@ -54,35 +60,35 @@ enum MenuBuilder {
         case let .error(message):
             menu.addItem(errorItem(message: message))
         case let .stale(snapshot, message):
-            menu.addItem(headerItem(snapshot: snapshot, tab: state.selectedTab))
+            menu.addItem(headerItem(snapshot: snapshot))
             menu.addItem(errorItem(message: "\(L(.staleData))\n\(message)", isWarning: true))
             for plan in snapshot.plans {
-                menu.addItem(planItem(plan: plan, now: state.now, tab: state.selectedTab))
+                menu.addItem(planItem(plan: plan, now: state.now))
             }
         case let .ok(snapshot):
             // Header card.
-            menu.addItem(headerItem(snapshot: snapshot, tab: state.selectedTab))
+            menu.addItem(headerItem(snapshot: snapshot))
             if let message = snapshot.errorMessage, !message.isEmpty {
                 menu.addItem(errorItem(message: message, isWarning: true))
             }
             // One rich card per plan.
             for plan in snapshot.plans {
-                menu.addItem(planItem(plan: plan, now: state.now, tab: state.selectedTab))
+                menu.addItem(planItem(plan: plan, now: state.now))
             }
         }
 
         menu.addItem(.separator())
 
         menu.addItem(refreshItem(state: state))
-        // Ark-tab-only quick actions (login / console) don't apply to OpenCode.
-        if state.selectedTab == .ark {
+        switch state.selectedTab {
+        case .ark:
             menu.addItem(actionItem(L(.openArkcliLogin), action: {
                 Self.openTerminal(command: "arkcli auth login volc-sso")
             }))
             menu.addItem(actionItem(L(.openArkConsole), action: {
                 NSWorkspace.shared.open(URL(string: "https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&advancedActiveKey=subscribe")!)
             }))
-        } else {
+        case .opencode:
             menu.addItem(actionItem(L(.openCodeGo), action: {
                 NSWorkspace.shared.open(URL(string: "https://opencode.ai")!)
             }))
@@ -90,7 +96,6 @@ enum MenuBuilder {
         menu.addItem(actionItem(L(.settings), action: state.onSettings))
         menu.addItem(.separator())
         menu.addItem(actionItem(L(.quitArkBar), action: state.onQuit))
-        return menu
     }
 
     // MARK: - Card items (AppKit-based)
@@ -100,28 +105,27 @@ enum MenuBuilder {
     @MainActor
     private static func switcherItem(state: State) -> NSMenuItem {
         let item = NSMenuItem()
-        let view = ProviderSwitcherView(selected: state.selectedTab, width: cardWidth) { tab in
-            state.onSelectTab(tab)
-        }
+        item.view = ProviderSwitcherView(selected: state.selectedTab, width: cardWidth, onSelect: state.onSelectTab)
+        // Unlike passive card rows, this custom view contains real NSButtons.
+        // A disabled NSMenuItem prevents the buttons from receiving menu-tracking
+        // events on some macOS versions.
+        item.isEnabled = true
+        return item
+    }
+
+    @MainActor
+    private static func headerItem(snapshot: ProviderSnapshot) -> NSMenuItem {
+        let item = NSMenuItem()
+        let view = HeaderCardView(snapshot: snapshot, width: cardWidth)
         item.view = view
         item.isEnabled = false
         return item
     }
 
     @MainActor
-    private static func headerItem(snapshot: ProviderSnapshot, tab: ProviderTab) -> NSMenuItem {
+    private static func planItem(plan: PlanSnapshot, now: Date) -> NSMenuItem {
         let item = NSMenuItem()
-        let view = HeaderCardView(snapshot: snapshot, width: cardWidth, tab: tab)
-        item.view = view
-        item.isEnabled = false
-        return item
-    }
-
-    @MainActor
-    private static func planItem(plan: PlanSnapshot, now: Date, tab: ProviderTab) -> NSMenuItem {
-        let item = NSMenuItem()
-        let theme: RingRenderer.CardTheme = (tab == .opencode) ? .opencode : .ark
-        let view = PlanCardView(plan: plan, now: now, width: cardWidth, theme: theme)
+        let view = PlanCardView(plan: plan, now: now, width: cardWidth)
         item.view = view
         item.isEnabled = false
         return item
@@ -204,27 +208,16 @@ enum MenuBuilder {
 final class HeaderCardView: NSView {
     override var isFlipped: Bool { true }
 
-    init(snapshot: ProviderSnapshot, width: CGFloat, tab: ProviderTab = .ark) {
+    init(snapshot: ProviderSnapshot, width: CGFloat) {
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 54))
         wantsLayer = true
 
         let accent = CAGradientLayer()
-        // Accent gradient follows the tab theme: Ark keeps the original
-        // mint->blue->indigo; OpenCode swaps to violet->indigo->amber.
-        switch tab {
-        case .ark:
-            accent.colors = [
-                NSColor.systemMint.withAlphaComponent(0.92).cgColor,
-                NSColor.systemBlue.withAlphaComponent(0.9).cgColor,
-                NSColor.systemIndigo.withAlphaComponent(0.9).cgColor,
-            ]
-        case .opencode:
-            accent.colors = [
-                NSColor(red: 0.62, green: 0.36, blue: 0.92, alpha: 0.92).cgColor,  // violet
-                NSColor.systemIndigo.withAlphaComponent(0.9).cgColor,
-                NSColor.systemOrange.withAlphaComponent(0.85).cgColor,              // amber
-            ]
-        }
+        accent.colors = [
+            NSColor.systemMint.withAlphaComponent(0.92).cgColor,
+            NSColor.systemBlue.withAlphaComponent(0.9).cgColor,
+            NSColor.systemIndigo.withAlphaComponent(0.9).cgColor,
+        ]
         accent.startPoint = CGPoint(x: 0, y: 0.5)
         accent.endPoint = CGPoint(x: 1, y: 0.5)
         accent.frame = NSRect(x: 14, y: 50, width: width - 28, height: 2)
@@ -269,6 +262,7 @@ final class LoadingCardView: NSView {
     init(text: String, width: CGFloat) {
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 44))
         wantsLayer = true
+        layer?.cornerRadius = 12
         let field = NSTextField(labelWithString: text)
         field.font = .systemFont(ofSize: 12)
         field.textColor = .secondaryLabelColor
@@ -291,13 +285,19 @@ final class ErrorCardView: NSView {
         let height = Self.height(message: message, width: width)
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: height))
         wantsLayer = true
+        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.10).cgColor
+        layer?.cornerRadius = 12
+        layer?.borderWidth = 0.8
+        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.55).cgColor
 
-        let icon = NSTextField(labelWithString: "⚠")
-        icon.font = .systemFont(ofSize: 16)
-        icon.textColor = isWarning ? .systemOrange : .systemRed
-        icon.sizeToFit()
-        let iconSize = icon.intrinsicContentSize
-        icon.frame = NSRect(x: 14, y: 12, width: iconSize.width, height: iconSize.height)
+        let icon = NSImageView(frame: NSRect(x: 14, y: 13, width: 16, height: 16))
+        icon.image = NSImage(
+            systemSymbolName: "exclamationmark.triangle.fill",
+            accessibilityDescription: L(.fetchFailed))
+        icon.image?.isTemplate = true
+        icon.contentTintColor = isWarning ? .systemOrange : .systemRed
+        icon.symbolConfiguration = .init(pointSize: 14, weight: .semibold)
+        icon.imageScaling = .scaleProportionallyDown
         addSubview(icon)
 
         let title = NSTextField(labelWithString: L(.fetchFailed))

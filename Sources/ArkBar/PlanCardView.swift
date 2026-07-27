@@ -18,50 +18,20 @@ import AppKit
 final class PlanCardView: NSView {
     private let plan: PlanSnapshot
     private let now: Date
-    private let theme: RingRenderer.CardTheme
 
     private let horizontalPadding: CGFloat = 14
     private let verticalPadding: CGFloat = 12
     private let ringSize: CGFloat = 132
-    private var hoverTrackingArea: NSTrackingArea?
 
-    init(plan: PlanSnapshot, now: Date, width: CGFloat, theme: RingRenderer.CardTheme = .ark) {
+    init(plan: PlanSnapshot, now: Date, width: CGFloat) {
         self.plan = plan
         self.now = now
-        self.theme = theme
         let height = Self.computeHeight(plan)
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: height))
-        wantsLayer = true
-        layer?.cornerRadius = 10
         build()
     }
 
     required init?(coder: NSCoder) { fatalError() }
-
-    override func updateTrackingAreas() {
-        if let hoverTrackingArea { removeTrackingArea(hoverTrackingArea) }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
-            owner: self,
-            userInfo: nil)
-        addTrackingArea(area)
-        hoverTrackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) { setHovered(true) }
-    override func mouseExited(with event: NSEvent) { setHovered(false) }
-
-    private func setHovered(_ hovered: Bool) {
-        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
-            layer?.backgroundColor = hovered ? NSColor.controlAccentColor.withAlphaComponent(0.08).cgColor : nil
-            return
-        }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.16
-            layer?.backgroundColor = hovered ? NSColor.controlAccentColor.withAlphaComponent(0.08).cgColor : nil
-        }
-    }
 
     nonisolated static func computeHeight(_ plan: PlanSnapshot) -> CGFloat {
         // The reset details live beside the gauge, so the card stays compact and
@@ -109,16 +79,19 @@ final class PlanCardView: NSView {
         // Render the ring gauge into an NSImage and display via NSImageView.
         // This bypasses NSMenu's compositing issues with NSView.draw(_:).
         let primaryWindow = plan.windows.sorted { $0.sortRank < $1.sortRank }.first
+        let primaryLabel = primaryWindow.map { window in
+            RingRenderer.tone(for: window.label) == .session ? L(.session) : window.displayName
+        }
         let ringImage = RingRenderer.makeImage(
             rings: rings,
             primaryRemaining: primaryWindow?.remainingPercent,
-            primaryLabel: primaryWindow?.displayName,
-            size: ringSize,
-            theme: theme)
+            primaryLabel: primaryLabel,
+            size: ringSize)
         let imageView = NSImageView(frame: NSRect(x: horizontalPadding, y: y - ringSize,
                                                   width: ringSize, height: ringSize))
         imageView.image = ringImage
-        imageView.imageScaling = .scaleProportionallyUpOrDown
+        imageView.imageScaling = .scaleNone
+        imageView.imageAlignment = .alignCenter
         imageView.wantsLayer = true
         addSubview(imageView)
         animateGaugeEntrance(imageView)
@@ -163,7 +136,10 @@ final class PlanCardView: NSView {
             let resetText = row.window.resetsAt.map {
                 "\(L(.resets)) \(MenuBuilder.countdown(from: now, to: $0))"
             } ?? L(.noResetTime)
-            let resetField = label(resetText, font: .systemFont(ofSize: 10), color: .secondaryLabelColor)
+            let resetField = label(
+                resetText,
+                font: .systemFont(ofSize: 10),
+                color: .secondaryLabelColor)
             resetField.frame = NSRect(x: legendX + 14, y: legendY - 34,
                                       width: legendWidth - 14, height: 13)
             resetField.toolTip = resetText
@@ -235,9 +211,9 @@ final class PlanCardView: NSView {
         let session = find(["session", "5-hour", "5h", "five_hour"])
 
         return [
-            monthly.map { RingRenderer.Ring(id: "monthly", label: L(.monthly), remainingPercent: $0.remainingPercent, tone: .monthly, theme: theme) },
-            weekly.map { RingRenderer.Ring(id: "weekly", label: L(.weekly), remainingPercent: $0.remainingPercent, tone: .weekly, theme: theme) },
-            session.map { RingRenderer.Ring(id: "session", label: L(.session), remainingPercent: $0.remainingPercent, tone: .session, theme: theme) },
+            monthly.map { RingRenderer.Ring(id: "monthly", label: L(.monthly), remainingPercent: $0.remainingPercent, tone: .monthly) },
+            weekly.map { RingRenderer.Ring(id: "weekly", label: L(.weekly), remainingPercent: $0.remainingPercent, tone: .weekly) },
+            session.map { RingRenderer.Ring(id: "session", label: L(.session), remainingPercent: $0.remainingPercent, tone: .session) },
         ].compactMap { $0 }
     }
 
@@ -252,51 +228,35 @@ final class PlanCardView: NSView {
                     id: window.label,
                     label: window.displayName,
                     remainingPercent: window.remainingPercent,
-                    tone: RingRenderer.tone(for: window.label),
-                    theme: theme))
+                    tone: RingRenderer.tone(for: window.label)))
             }
     }
 }
 
 /// Text in a menu-backed NSTextField is baseline-aligned rather than vertically
-/// centered. Draw the capsule ourselves so its label remains optically centered
-/// on every macOS text rendering scale.
+/// centered. Use a fixed, inset label inside a layer-backed capsule so the label
+/// remains optically centered and is captured consistently by AppKit menus.
 private final class CapsuleBadgeView: NSView {
-    private let text: String
-    private let foregroundColor: NSColor
     private let font = NSFont.systemFont(ofSize: 10, weight: .semibold)
 
     init(text: String, foregroundColor: NSColor) {
-        self.text = text
-        self.foregroundColor = foregroundColor
         let textWidth = (text as NSString).size(withAttributes: [.font: font]).width
         super.init(frame: NSRect(x: 0, y: 0, width: ceil(textWidth) + 16, height: 20))
         wantsLayer = true
+        layer?.backgroundColor = foregroundColor.withAlphaComponent(0.16).cgColor
+        layer?.cornerRadius = bounds.height / 2
+
+        let label = NSTextField(labelWithString: text)
+        label.font = font
+        label.textColor = foregroundColor
+        label.alignment = .center
+        label.lineBreakMode = .byClipping
+        label.maximumNumberOfLines = 1
+        // 10pt text at a 20pt capsule needs a small optical upward adjustment
+        // on AppKit's baseline, rather than vertical centering by intrinsic size.
+        label.frame = NSRect(x: 6, y: 3, width: bounds.width - 12, height: 14)
+        addSubview(label)
     }
 
     required init?(coder: NSCoder) { fatalError() }
-
-    override func draw(_ dirtyRect: NSRect) {
-        foregroundColor.withAlphaComponent(0.16).setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
-
-        let style = NSMutableParagraphStyle()
-        style.alignment = .center
-        style.lineBreakMode = .byClipping
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: foregroundColor,
-            .paragraphStyle: style,
-        ]
-        let textHeight = (text as NSString).boundingRect(
-            with: NSSize(width: bounds.width - 8, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: attributes).height
-        let textRect = NSRect(
-            x: 4,
-            y: floor((bounds.height - textHeight) / 2),
-            width: bounds.width - 8,
-            height: ceil(textHeight))
-        (text as NSString).draw(with: textRect, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attributes)
-    }
 }
