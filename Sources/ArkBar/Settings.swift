@@ -30,6 +30,14 @@ final class AppSettings: ObservableObject {
         case api
     }
 
+    /// OpenCode Go can reuse a signed-in browser session or a manually pasted
+    /// Cookie header. Automatic is the default and mirrors CodexBar's provider
+    /// settings without using its inaccurate local quota estimate.
+    enum OpenCodeCookieSource: String, CaseIterable {
+        case automatic
+        case manual
+    }
+
     /// Menu-bar display layout. Mirrors CodexBar's MenuBarLayout options.
     enum DisplayMode: String, CaseIterable {
         /// Just the capsule progress icon.
@@ -70,31 +78,32 @@ final class AppSettings: ObservableObject {
             }
         }
     }
-    /// Currently selected menu-bar tab (Ark vs OpenCode Go).
+    /// The provider currently shown by the menu-bar popover. Provider state is
+    /// separate in `UsageStore`; this only persists the presentation choice.
     @Published var selectedTab: ProviderTab {
         didSet { UserDefaults.standard.set(selectedTab.rawValue, forKey: Keys.selectedTab) }
     }
-    /// OpenCode Go workspace ID. When empty, the provider auto-resolves it from
-    /// the cookie by hitting `opencode.ai/_server`.
+    /// Optional OpenCode workspace override. When empty, the provider resolves
+    /// the current workspace from the signed-in session.
     @Published var opencodeWorkspaceID: String {
         didSet { UserDefaults.standard.set(opencodeWorkspaceID, forKey: Keys.opencodeWorkspaceID) }
     }
-    /// OpenCode Go cookie header. Persisted to Keychain (not UserDefaults); the
-    /// in-memory copy drives `UsageStore` refresh on change. Load on init via
-    /// `loadOpenCodeCookieFromKeychain()`; set via `setOpenCodeCookie(_:)`.
+    @Published var opencodeCookieSource: OpenCodeCookieSource {
+        didSet { UserDefaults.standard.set(opencodeCookieSource.rawValue, forKey: Keys.opencodeCookieSource) }
+    }
+    /// In-memory mirror of the Keychain value. It is never written to defaults.
     @Published private(set) var opencodeCookie: String
 
-    /// Replace the persisted OpenCode Go cookie. Writes Keychain + updates the
-    /// in-memory `@Published` so `UsageStore` re-fetches. Pass nil/empty to clear.
     func setOpenCodeCookie(_ value: String?) {
-        let trimmed = value?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .nilIfEmpty
-        CookieKeychainStore.store(cookie: trimmed, provider: "opencode")
-        opencodeCookie = trimmed ?? ""
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cookie = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: cookie, provider: "opencode")
+        // Do not claim a new credential is configured when Keychain rejected
+        // the write; keep the in-memory mirror aligned with what can actually
+        // be read by the provider on the next refresh.
+        opencodeCookie = persisted ? (cookie ?? "") : (CookieKeychainStore.load(provider: "opencode") ?? "")
     }
 
-    /// Reload the OpenCode cookie from Keychain (e.g. after an external change).
     func loadOpenCodeCookieFromKeychain() {
         opencodeCookie = CookieKeychainStore.load(provider: "opencode") ?? ""
     }
@@ -109,6 +118,7 @@ final class AppSettings: ObservableObject {
         static let language = "arkbar.language"
         static let selectedTab = "arkbar.selectedTab"
         static let opencodeWorkspaceID = "arkbar.opencodeWorkspaceID"
+        static let opencodeCookieSource = "arkbar.opencodeCookieSource"
     }
 
     private init() {
@@ -125,12 +135,9 @@ final class AppSettings: ObservableObject {
         let tabRaw = defaults.string(forKey: Keys.selectedTab) ?? ProviderTab.ark.rawValue
         self.selectedTab = ProviderTab(rawValue: tabRaw) ?? .ark
         self.opencodeWorkspaceID = defaults.string(forKey: Keys.opencodeWorkspaceID) ?? ""
-        // Cookie lives in Keychain; load once at init. UserDefaults only tracks
-        // whether a cookie has ever been configured (for first-run UI hints).
+        let cookieSourceRaw = defaults.string(forKey: Keys.opencodeCookieSource)
+            ?? OpenCodeCookieSource.automatic.rawValue
+        self.opencodeCookieSource = OpenCodeCookieSource(rawValue: cookieSourceRaw) ?? .automatic
         self.opencodeCookie = CookieKeychainStore.load(provider: "opencode") ?? ""
     }
-}
-
-private extension String {
-    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
