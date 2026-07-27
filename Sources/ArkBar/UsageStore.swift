@@ -23,13 +23,11 @@ final class UsageStore: ObservableObject {
 
     @Published private(set) var status: LoadStatus = .never
     @Published private(set) var lastUpdatedAt: Date?
+    @Published private(set) var isRefreshing = false
 
     private let settings: AppSettings
     private var providers: [UsageProvider] = []
     private var timer: Timer?
-    private var lastFetchAt: Date?
-    private var inFlight = false
-    private var refreshQueued = false
     private var lastSuccessfulSnapshot: ProviderSnapshot?
     private var cancellables = Set<AnyCancellable>()
 
@@ -85,12 +83,13 @@ final class UsageStore: ObservableObject {
     }
 
     func refresh() {
-        guard !inFlight else {
-            // Preserve a manual refresh made while a slow source is running.
-            refreshQueued = true
+        guard !isRefreshing else {
+            // A menu click, timer tick, and explicit button can arrive while a
+            // slow CLI/API request is active. Coalescing them prevents a burst
+            // of follow-up requests (and the menu crash that used to cause).
             return
         }
-        inFlight = true
+        isRefreshing = true
         switch status {
         case .ok, .stale:
             // Keep confirmed data on screen while the next sync is in flight.
@@ -105,12 +104,6 @@ final class UsageStore: ObservableObject {
         }
     }
 
-    /// Force a refresh when the menu is opened and the last fetch is older than 1 minute.
-    func refreshIfStale() {
-        if let last = lastFetchAt, Date().timeIntervalSince(last) < 60 { return }
-        refresh()
-    }
-
     private func runProviders(_ providers: [UsageProvider], environment: [String: String]) async {
         guard !providers.isEmpty else {
             finishRefresh(error: L(.noProvider))
@@ -122,8 +115,10 @@ final class UsageStore: ObservableObject {
             do {
                 let snapshot = try await provider.fetch(environment: environment)
                 Self.log("✓ \(provider.displayName): \(snapshot.plans.count) plan(s), tightest=\(snapshot.tightestWindow?.usedPercent ?? -1)%")
-                self.lastFetchAt = Date()
-                self.lastUpdatedAt = snapshot.updatedAt
+                // This is the local completion moment of the current sync, not
+                // the provider's payload timestamp. It must advance on every
+                // successful Refresh so the menu can prove that the request ran.
+                self.lastUpdatedAt = Date()
                 self.lastSuccessfulSnapshot = snapshot
                 self.status = .ok(snapshot: snapshot)
                 finishRefresh()
@@ -142,7 +137,7 @@ final class UsageStore: ObservableObject {
     }
 
     private func finishRefresh(error: String? = nil) {
-        inFlight = false
+        isRefreshing = false
         if let error {
             if let snapshot = lastSuccessfulSnapshot {
                 status = .stale(snapshot: snapshot, message: error)
@@ -150,18 +145,19 @@ final class UsageStore: ObservableObject {
                 status = .error(message: error)
             }
         }
-        if refreshQueued {
-            refreshQueued = false
-            refresh()
-        }
     }
 
     private func scheduleNext() {
         timer?.invalidate()
         let interval = TimeInterval(settings.refreshInterval.rawValue)
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.refresh() }
         }
+        // Status menus run in an event-tracking mode. Adding the timer to the
+        // common modes keeps the configured refresh cadence alive while a menu
+        // is being opened or interacted with.
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     /// Diagnostic logger to stderr. Helps debug "menu bar shows nothing" issues;

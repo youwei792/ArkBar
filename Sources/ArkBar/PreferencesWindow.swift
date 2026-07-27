@@ -112,6 +112,8 @@ private final class PreferencesView: NSView {
         y -= sectionHeader(L(.sectionRefresh), atY: y)
         y -= 8
         y -= row(label: L(.interval), control: makeIntervalPopup(), atY: y)
+        y -= 4
+        y -= refreshOnOpenRow(atY: y)
         y -= 24
         y -= refreshRow(atY: y)
         y -= 24
@@ -241,6 +243,17 @@ private final class PreferencesView: NSView {
         return 28
     }
 
+    private func refreshOnOpenRow(atY y: CGFloat) -> CGFloat {
+        let checkbox = NSButton(checkboxWithTitle: L(.refreshWhenMenuOpens),
+                                target: self,
+                                action: #selector(refreshWhenMenuOpensChanged(_:)))
+        checkbox.font = .systemFont(ofSize: 12)
+        checkbox.state = settings.refreshWhenMenuOpens ? .on : .off
+        checkbox.frame = NSRect(x: 126, y: y - 20, width: bounds.width - 146, height: 20)
+        addSubview(checkbox)
+        return 24
+    }
+
     private func statusBlock(atY y: CGFloat) -> CGFloat {
         let status = NSTextField(labelWithString: "")
         status.font = .systemFont(ofSize: 11)
@@ -355,6 +368,10 @@ private final class PreferencesView: NSView {
         let idx = sender.indexOfSelectedItem
         guard let interval = AppSettings.RefreshInterval.allCases[safe: idx] else { return }
         settings.refreshInterval = interval
+    }
+
+    @objc private func refreshWhenMenuOpensChanged(_ sender: NSButton) {
+        settings.refreshWhenMenuOpens = sender.state == .on
     }
 
     @objc private func sourceModeChanged(_ sender: NSPopUpButton) {

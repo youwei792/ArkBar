@@ -51,6 +51,11 @@ final class AppSettings: ObservableObject {
     @Published var refreshInterval: RefreshInterval {
         didSet { UserDefaults.standard.set(refreshInterval.rawValue, forKey: Keys.refreshInterval) }
     }
+    /// When enabled, opening the menu-bar item starts a refresh. Disabled by
+    /// default so the configured interval remains the only automatic trigger.
+    @Published var refreshWhenMenuOpens: Bool {
+        didSet { UserDefaults.standard.set(refreshWhenMenuOpens, forKey: Keys.refreshWhenMenuOpens) }
+    }
     @Published var sourceMode: SourceMode {
         didSet { UserDefaults.standard.set(sourceMode.rawValue, forKey: Keys.sourceMode) }
     }
@@ -68,6 +73,7 @@ final class AppSettings: ObservableObject {
 
     private enum Keys {
         static let refreshInterval = "arkbar.refreshInterval"
+        static let refreshWhenMenuOpens = "arkbar.refreshWhenMenuOpens"
         static let sourceMode = "arkbar.sourceMode"
         static let displayMode = "arkbar.displayMode"
         static let language = "arkbar.language"
@@ -77,6 +83,7 @@ final class AppSettings: ObservableObject {
         let defaults = UserDefaults.standard
         let intervalRaw = defaults.object(forKey: Keys.refreshInterval) as? Int ?? RefreshInterval.fiveMinutes.rawValue
         self.refreshInterval = RefreshInterval(rawValue: intervalRaw) ?? .fiveMinutes
+        self.refreshWhenMenuOpens = defaults.object(forKey: Keys.refreshWhenMenuOpens) as? Bool ?? false
         let modeRaw = defaults.string(forKey: Keys.sourceMode) ?? SourceMode.auto.rawValue
         self.sourceMode = SourceMode(rawValue: modeRaw) ?? .auto
         let displayRaw = defaults.string(forKey: Keys.displayMode) ?? DisplayMode.iconAndPercent.rawValue

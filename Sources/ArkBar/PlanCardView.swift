@@ -106,9 +106,11 @@ final class PlanCardView: NSView {
     private func buildRingAndLegend(atY y: inout CGFloat) {
         // Render the ring gauge into an NSImage and display via NSImageView.
         // This bypasses NSMenu's compositing issues with NSView.draw(_:).
+        let primaryWindow = plan.windows.sorted { $0.sortRank < $1.sortRank }.first
         let ringImage = RingRenderer.makeImage(
             rings: rings,
-            tightestRemaining: plan.tightestWindow?.remainingPercent,
+            primaryRemaining: primaryWindow?.remainingPercent,
+            primaryLabel: primaryWindow?.displayName,
             size: ringSize)
         let imageView = NSImageView(frame: NSRect(x: horizontalPadding, y: y - ringSize,
                                                   width: ringSize, height: ringSize))
@@ -230,9 +232,9 @@ final class PlanCardView: NSView {
         let session = find(["session", "5-hour", "5h", "five_hour"])
 
         return [
-            monthly.map { RingRenderer.Ring(id: "monthly", label: L(.monthly), usedPercent: $0.usedPercent, color: RingRenderer.accentColor(remainingPercent: $0.remainingPercent)) },
-            weekly.map { RingRenderer.Ring(id: "weekly", label: L(.weekly), usedPercent: $0.usedPercent, color: RingRenderer.accentColor(remainingPercent: $0.remainingPercent)) },
-            session.map { RingRenderer.Ring(id: "session", label: L(.session), usedPercent: $0.usedPercent, color: RingRenderer.accentColor(remainingPercent: $0.remainingPercent)) },
+            monthly.map { RingRenderer.Ring(id: "monthly", label: L(.monthly), remainingPercent: $0.remainingPercent, tone: .monthly) },
+            weekly.map { RingRenderer.Ring(id: "weekly", label: L(.weekly), remainingPercent: $0.remainingPercent, tone: .weekly) },
+            session.map { RingRenderer.Ring(id: "session", label: L(.session), remainingPercent: $0.remainingPercent, tone: .session) },
         ].compactMap { $0 }
     }
 
@@ -246,8 +248,8 @@ final class PlanCardView: NSView {
                 (window, RingRenderer.Ring(
                     id: window.label,
                     label: window.displayName,
-                    usedPercent: window.usedPercent,
-                    color: RingRenderer.accentColor(remainingPercent: window.remainingPercent)))
+                    remainingPercent: window.remainingPercent,
+                    tone: RingRenderer.tone(for: window.label)))
             }
     }
 }

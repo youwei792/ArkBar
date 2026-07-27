@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import AppKit
+import ObjectiveC.runtime
 @testable import ArkBar
 
 @Suite("ArkCLIProvider decode")
@@ -76,6 +77,16 @@ struct ArkCLIDecodeTests {
         // Coding plan session is 73%, agent plan max is 25% -> 73% wins.
         #expect(snapshot.tightestWindow?.usedPercent == 73)
         #expect(snapshot.tightestWindow?.remainingPercent ?? 0 == 27)
+    }
+
+    @Test("Menu-bar session window is not replaced by the tightest monthly window")
+    func keepsSessionForMenuBar() throws {
+        let data = sampleJSON.data(using: .utf8)!
+        let snapshot = try ArkCLIProvider.decode(stdout: data, date: Date())
+        // The Coding Plan Session is 73% used / 27% remaining. It is the
+        // status-item value even though this snapshot may contain other windows.
+        #expect(snapshot.sessionWindow?.label == "Session")
+        #expect(snapshot.sessionWindow?.remainingPercent == 27)
     }
 
     @Test("auth_method=none throws not-authenticated")
@@ -181,6 +192,44 @@ struct MenuBuilderTests {
         // Past -> "now".
         #expect(MenuBuilder.countdown(from: now, to: now.addingTimeInterval(-10)) == "now")
     }
+
+    @Test("Refresh is a persistent menu row rather than a closing menu action")
+    @MainActor
+    func refreshRowStaysInTheMenu() {
+        let menu = MenuBuilder.build(.init(
+            status: .loading,
+            lastUpdatedAt: Date(),
+            isRefreshing: false,
+            now: Date(),
+            onRefresh: {},
+            onSettings: {},
+            onQuit: {}))
+        let refreshItem = menu.items.first { $0.title == L(.refreshNow) }
+        #expect(refreshItem?.action == nil)
+        #expect(refreshItem?.view is RefreshMenuItemView)
+    }
+
+    @Test("Refresh row switches to the in-flight state before its action returns")
+    @MainActor
+    func refreshRowShowsImmediateFeedback() {
+        var refreshCalls = 0
+        let view = RefreshMenuItemView(
+            title: L(.refreshNow),
+            isRefreshing: false,
+            lastUpdatedAt: Date(),
+            errorMessage: nil,
+            action: { refreshCalls += 1 },
+            width: 300)
+
+        #expect(view.accessibilityPerformPress())
+        #expect(refreshCalls == 1)
+        #expect(view.isAccessibilityEnabled() == false)
+        let labels = view.subviews.compactMap { $0 as? NSTextField }.map(\.stringValue)
+        #expect(labels.contains(L(.refreshing)))
+        #expect(labels.contains(L(.refreshDetails)))
+        let spinner = view.subviews.compactMap { $0 as? NSProgressIndicator }.first
+        #expect(spinner?.isHidden == false)
+    }
 }
 
 @Suite("IconRenderer")
@@ -225,6 +274,34 @@ struct IconRendererTests {
         try png.write(to: URL(fileURLWithPath: "/tmp/arkbar_icons.png"))
         #expect(FileManager.default.fileExists(atPath: "/tmp/arkbar_icons.png"))
     }
+
+    @Test("A 100 percent remaining ring is painted as a full ring")
+    func fullRemainingRingIsFilled() throws {
+        let full = RingRenderer.makeImage(
+            rings: [.init(id: "session", label: "Session", remainingPercent: 100, tone: .session)],
+            primaryRemaining: 100,
+            primaryLabel: "Session",
+            size: 100)
+        let empty = RingRenderer.makeImage(
+            rings: [.init(id: "session", label: "Session", remainingPercent: 0, tone: .session)],
+            primaryRemaining: 0,
+            primaryLabel: "Session",
+            size: 100)
+        let fullRep = NSBitmapImageRep(data: try #require(full.tiffRepresentation))!
+        let emptyRep = NSBitmapImageRep(data: try #require(empty.tiffRepresentation))!
+        // Bottom centre lies on the only ring. A filled ring is substantially
+        // more opaque there than an empty ring's quiet track.
+        let fullAlpha = try #require(fullRep.colorAt(x: 50, y: 8)).alphaComponent
+        let emptyAlpha = try #require(emptyRep.colorAt(x: 50, y: 8)).alphaComponent
+        #expect(fullAlpha > emptyAlpha + 0.4)
+    }
+
+    @Test("Status-item hover tracking uses AppKit selector names")
+    @MainActor
+    func statusItemTrackingSelectorsExist() {
+        #expect(class_getInstanceMethod(StatusItemController.self, NSSelectorFromString("mouseEntered:")) != nil)
+        #expect(class_getInstanceMethod(StatusItemController.self, NSSelectorFromString("mouseExited:")) != nil)
+    }
 }
 
 @Suite("Menu card visual regression")
@@ -252,13 +329,27 @@ struct MenuCardVisualTests {
             $0.frame.minX >= 0 && $0.frame.maxX <= view.bounds.maxX
         })
 
+        let header = HeaderCardView(
+            snapshot: ProviderSnapshot(
+                providerName: "arkcli",
+                authMethod: "sso",
+                plans: [plan],
+                updatedAt: now,
+                errorMessage: nil),
+            width: 340)
+        let wordmark = header.subviews
+            .compactMap { $0 as? NSTextField }
+            .first { $0.stringValue == "ArkBar" }
+        #expect(wordmark != nil)
+        #expect(wordmark?.frame.width ?? 0 >= ceil(wordmark?.intrinsicContentSize.width ?? 0) + 4)
+
         // Rendering the ring directly exercises the updated palette and endpoint glow.
         let ring = RingRenderer.makeImage(
             rings: [
-                .init(id: "monthly", label: "Monthly", usedPercent: 75, color: .systemIndigo),
-                .init(id: "weekly", label: "Weekly", usedPercent: 42, color: .systemBlue),
-                .init(id: "session", label: "5-hour", usedPercent: 13, color: .systemMint),
-            ], tightestRemaining: 25, size: 160)
+                .init(id: "monthly", label: "Monthly", remainingPercent: 25, tone: .monthly),
+                .init(id: "weekly", label: "Weekly", remainingPercent: 58, tone: .weekly),
+                .init(id: "session", label: "5-hour", remainingPercent: 87, tone: .session),
+            ], primaryRemaining: 87, primaryLabel: "5-hour", size: 160)
         let tiff = ring.tiffRepresentation!
         let rep = NSBitmapImageRep(data: tiff)!
         let png = rep.representation(using: .png, properties: [:])!

@@ -39,6 +39,11 @@ enum LKey: String {
     case settings = "menu.settings"
     case quitArkBar = "menu.quitArkBar"
     case updated = "menu.updated"
+    case updatedJustNow = "menu.updatedJustNow"
+    case updatedSecondsAgo = "menu.updatedSecondsAgo"
+    case updatedMinutesAgo = "menu.updatedMinutesAgo"
+    case updatedHoursAgo = "menu.updatedHoursAgo"
+    case refreshDetails = "menu.refreshDetails"
 
     // Menu - cards
     case loadingUsage = "menu.loadingUsage"
@@ -77,6 +82,7 @@ enum LKey: String {
     case sectionAdvanced = "settings.sectionAdvanced"
     case displayMode = "settings.displayMode"
     case interval = "settings.interval"
+    case refreshWhenMenuOpens = "settings.refreshWhenMenuOpens"
     case lastFetch = "settings.lastFetch"
     case source = "settings.source"
     case sourceAuto = "settings.sourceAuto"
@@ -222,6 +228,11 @@ final class L10n: ObservableObject {
         add(.settings, "设置…", "Settings…")
         add(.quitArkBar, "退出 ArkBar", "Quit ArkBar")
         add(.updated, "更新于", "Updated")
+        add(.updatedJustNow, "刚刚更新", "Updated just now")
+        add(.updatedSecondsAgo, "%d 秒前更新", "Updated %d seconds ago")
+        add(.updatedMinutesAgo, "%d 分钟前更新", "Updated %d minutes ago")
+        add(.updatedHoursAgo, "%d 小时前更新", "Updated %d hours ago")
+        add(.refreshDetails, "正在获取最新用量", "Fetching latest usage")
 
         // Menu - cards
         add(.loadingUsage, "正在加载用量…", "Loading usage…")
@@ -260,6 +271,7 @@ final class L10n: ObservableObject {
         add(.sectionAdvanced, "高级", "Advanced")
         add(.displayMode, "显示模式", "Display mode")
         add(.interval, "间隔", "Interval")
+        add(.refreshWhenMenuOpens, "点开菜单栏图标时刷新", "Refresh when opening the menu bar item")
         add(.lastFetch, "上次", "Last")
         add(.source, "来源", "Source")
         add(.sourceAuto, "自动 (AK/SK → API Key → arkcli)", "Auto (AK/SK -> API Key -> arkcli)")

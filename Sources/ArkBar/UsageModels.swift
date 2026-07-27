@@ -95,6 +95,20 @@ struct ProviderSnapshot: Sendable, Equatable {
     var tightestWindow: UsageWindow? {
         plans.compactMap(\.tightestWindow).max(by: { $0.usedPercent < $1.usedPercent })
     }
+
+    /// The immediate Session / 5-hour allowance is the single, stable metric
+    /// shown in the menu-bar status item. This avoids silently substituting a
+    /// monthly percentage for the session number users expect to see there.
+    var sessionWindow: UsageWindow? {
+        if let codingSession = plans.first(where: {
+            $0.product == .codingPlan || $0.product == .codingPlanTeam
+        })?.windows.first(where: { $0.sortRank == 0 }) {
+            return codingSession
+        }
+        return plans.lazy
+            .flatMap(\.windows)
+            .first { $0.sortRank == 0 }
+    }
 }
 
 // MARK: - Provider protocol

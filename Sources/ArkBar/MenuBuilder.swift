@@ -17,10 +17,18 @@ enum MenuBuilder {
 
         let status: Status
         let lastUpdatedAt: Date?
+        let isRefreshing: Bool
         let now: Date
         let onRefresh: () -> Void
         let onSettings: () -> Void
         let onQuit: () -> Void
+
+        var refreshErrorMessage: String? {
+            switch status {
+            case let .error(message), let .stale(_, message): message
+            default: nil
+            }
+        }
     }
 
     @MainActor
@@ -57,12 +65,7 @@ enum MenuBuilder {
 
         menu.addItem(.separator())
 
-        if let updated = state.lastUpdatedAt {
-            let item = NSMenuItem(title: "\(L(.updated)) \(Self.timeString(updated))", action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            menu.addItem(item)
-        }
-        menu.addItem(actionItem(L(.refreshNow), action: state.onRefresh))
+        menu.addItem(refreshItem(state: state))
         menu.addItem(actionItem(L(.openArkcliLogin), action: {
             Self.openTerminal(command: "arkcli auth login volc-sso")
         }))
@@ -132,18 +135,29 @@ enum MenuBuilder {
         return L10n.shared.countdown(days: days, hours: hours, minutes: minutes)
     }
 
-    private static func timeString(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = L10n.shared.locale
-        f.setLocalizedDateFormatFromTemplate("HHmm")
-        return f.string(from: date)
-    }
-
     private static func actionItem(_ title: String, action: @escaping () -> Void) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: #selector(MenuActionTarget.invoke), keyEquivalent: "")
         let target = MenuActionTarget(action: action)
         item.target = target
         item.representedObject = target
+        return item
+    }
+
+    @MainActor
+    private static func refreshItem(state: State) -> NSMenuItem {
+        let item = NSMenuItem()
+        item.title = L(.refreshNow)
+        item.view = RefreshMenuItemView(
+            title: L(.refreshNow),
+            isRefreshing: state.isRefreshing,
+            lastUpdatedAt: state.lastUpdatedAt,
+            errorMessage: state.refreshErrorMessage,
+            action: state.onRefresh,
+            width: cardWidth)
+        // The embedded gesture recognizer handles the click. Leaving the item
+        // without an NSMenu action means AppKit keeps tracking the menu open.
+        item.action = nil
+        item.target = nil
         return item
     }
 
@@ -181,9 +195,16 @@ final class HeaderCardView: NSView {
         let title = NSTextField(labelWithString: "ArkBar")
         title.font = .systemFont(ofSize: 14, weight: .bold)
         title.textColor = .labelColor
-        title.sizeToFit()
         let titleSize = title.intrinsicContentSize
-        title.frame = NSRect(x: 14, y: 16, width: titleSize.width, height: titleSize.height)
+        // NSTextField clips glyph overhangs when its frame exactly equals the
+        // intrinsic width. Give the wordmark a small trailing safety inset so
+        // the terminal “r” is fully antialiased instead of looking cut off.
+        let titleTrailingInset: CGFloat = 6
+        title.frame = NSRect(
+            x: 14,
+            y: 15,
+            width: ceil(titleSize.width) + titleTrailingInset,
+            height: ceil(titleSize.height) + 2)
         addSubview(title)
 
         let detail = [snapshot.providerName, snapshot.authMethod.map { "\(L(.auth)): \($0)" }]
@@ -275,4 +296,173 @@ final class MenuActionTarget: NSObject {
     private let action: () -> Void
     init(action: @escaping () -> Void) { self.action = action }
     @objc func invoke() { action() }
+}
+
+/// A persistent refresh row modelled after native menu-bar utilities: it stays
+/// inside the tracked menu, surfaces refreshing/success/failure state, and
+/// handles its own click rather than selecting a closing NSMenuItem.
+@MainActor
+final class RefreshMenuItemView: NSView {
+    private let hoverView = NSVisualEffectView()
+    private let iconView = NSImageView()
+    private let activityIndicator = NSProgressIndicator()
+    private let titleField = NSTextField(labelWithString: "")
+    private let detailField = NSTextField(labelWithString: "")
+    private let action: () -> Void
+    private var enabled = true
+    private var trackingArea: NSTrackingArea?
+    private var displayedTitle = ""
+    private var displayedLastUpdatedAt: Date?
+
+    override var isFlipped: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .button }
+    override func accessibilityLabel() -> String? { titleField.stringValue }
+    override func isAccessibilityEnabled() -> Bool { enabled }
+
+    init(
+        title: String,
+        isRefreshing: Bool,
+        lastUpdatedAt: Date?,
+        errorMessage: String?,
+        action: @escaping () -> Void,
+        width: CGFloat)
+    {
+        self.action = action
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 38))
+        setupViews()
+        let recognizer = NSClickGestureRecognizer(target: self, action: #selector(handleClick(_:)))
+        recognizer.buttonMask = 0x1
+        addGestureRecognizer(recognizer)
+        update(isRefreshing: isRefreshing, lastUpdatedAt: lastUpdatedAt, errorMessage: errorMessage, title: title)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func updateTrackingAreas() {
+        if let trackingArea { removeTrackingArea(trackingArea) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self,
+            userInfo: nil)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func layout() {
+        super.layout()
+        hoverView.frame = bounds.insetBy(dx: 5, dy: 1)
+        let iconSide: CGFloat = 15
+        iconView.frame = NSRect(x: 15, y: 12, width: iconSide, height: iconSide)
+        activityIndicator.frame = NSRect(x: 14, y: 11, width: 17, height: 17)
+        titleField.frame = NSRect(x: 39, y: 6, width: bounds.width - 54, height: 15)
+        detailField.frame = NSRect(x: 39, y: 21, width: bounds.width - 54, height: 12)
+    }
+
+    func update(isRefreshing: Bool, lastUpdatedAt: Date?, errorMessage: String?, title: String) {
+        displayedTitle = title
+        displayedLastUpdatedAt = lastUpdatedAt
+        enabled = !isRefreshing
+        iconView.isHidden = isRefreshing
+        activityIndicator.isHidden = !isRefreshing
+        if isRefreshing {
+            activityIndicator.startAnimation(nil)
+        } else {
+            activityIndicator.stopAnimation(nil)
+        }
+        titleField.stringValue = isRefreshing ? L(.refreshing) : title
+        if isRefreshing {
+            detailField.stringValue = L(.refreshDetails)
+            detailField.textColor = .secondaryLabelColor
+            iconView.contentTintColor = .secondaryLabelColor
+        } else if let errorMessage, !errorMessage.isEmpty {
+            detailField.stringValue = errorMessage
+            detailField.textColor = .systemRed
+            iconView.contentTintColor = .systemRed
+        } else {
+            detailField.stringValue = Self.relativeUpdateText(lastUpdatedAt)
+            detailField.textColor = .secondaryLabelColor
+            iconView.contentTintColor = .labelColor
+        }
+        titleField.textColor = enabled ? .labelColor : .secondaryLabelColor
+        needsDisplay = true
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard enabled else { return }
+        hoverView.isHidden = false
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hoverView.isHidden = true
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        guard enabled else { return false }
+        beginRefresh()
+        return true
+    }
+
+    private func setupViews() {
+        hoverView.material = .selection
+        hoverView.blendingMode = .withinWindow
+        hoverView.state = .active
+        hoverView.isEmphasized = true
+        hoverView.wantsLayer = true
+        hoverView.layer?.cornerRadius = 6
+        hoverView.isHidden = true
+        addSubview(hoverView)
+
+        let image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil)
+        image?.isTemplate = true
+        iconView.image = image
+        iconView.symbolConfiguration = .init(pointSize: 13, weight: .medium)
+        iconView.imageScaling = .scaleProportionallyDown
+        addSubview(iconView)
+
+        // A native indeterminate indicator keeps its own animation geometry
+        // inside this fixed frame. Rotating an NSImageView layer in a tracked
+        // status menu can make the glyph orbit outside its icon slot.
+        activityIndicator.style = .spinning
+        activityIndicator.controlSize = .small
+        activityIndicator.isIndeterminate = true
+        activityIndicator.isDisplayedWhenStopped = false
+        activityIndicator.isHidden = true
+        addSubview(activityIndicator)
+
+        titleField.font = .menuFont(ofSize: 0)
+        titleField.lineBreakMode = .byTruncatingTail
+        addSubview(titleField)
+        detailField.font = .systemFont(ofSize: 9)
+        detailField.lineBreakMode = .byTruncatingTail
+        addSubview(detailField)
+    }
+
+    @objc private func handleClick(_ recognizer: NSClickGestureRecognizer) {
+        guard recognizer.state == .ended, enabled else { return }
+        beginRefresh()
+    }
+
+    private func beginRefresh() {
+        // Give the click instant feedback before the async provider request
+        // starts. The controller then owns the success/error transition.
+        update(
+            isRefreshing: true,
+            lastUpdatedAt: displayedLastUpdatedAt,
+            errorMessage: nil,
+            title: displayedTitle)
+        action()
+    }
+
+    static func relativeUpdateText(_ date: Date?) -> String {
+        guard let date else { return L(.noDataYet) }
+        let seconds = max(0, Int(Date().timeIntervalSince(date)))
+        switch seconds {
+        case ..<15: return L(.updatedJustNow)
+        case ..<60: return String(format: L(.updatedSecondsAgo), seconds)
+        case ..<3_600: return String(format: L(.updatedMinutesAgo), seconds / 60)
+        default: return String(format: L(.updatedHoursAgo), seconds / 3_600)
+        }
+    }
 }
