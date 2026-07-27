@@ -110,11 +110,14 @@ final class StatusItemController {
         // this handler and double-toggle / loop).
     }
 
-    @objc func mouseEntered(with event: NSEvent) {
+    // NSTrackingArea sends the Objective-C selectors `mouseEntered:` and
+    // `mouseExited:`. StatusItemController is an NSObject rather than an
+    // NSResponder, so Swift's default `mouseEnteredWithEvent:` bridge crashes.
+    @objc(mouseEntered:) func mouseEntered(_ event: NSEvent) {
         animateStatusButton(hovered: true)
     }
 
-    @objc func mouseExited(with event: NSEvent) {
+    @objc(mouseExited:) func mouseExited(_ event: NSEvent) {
         animateStatusButton(hovered: false)
     }
 

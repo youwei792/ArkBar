@@ -7,12 +7,13 @@ import AppKit
 /// from non-layer-backed NSView.draw(_:) but keeps strokes.
 ///
 /// Layout: outer ring = monthly, middle = weekly, inner = session/5h.
-/// Center shows the remaining percent of the tightest window.
+/// Center shows the remaining percent of the primary (Session / 5-hour) window.
 enum RingRenderer {
     struct Ring: Identifiable {
         let id: String
         let label: String
-        let usedPercent: Double
+        /// All visible progress in ArkBar represents remaining quota.
+        let remainingPercent: Double
         let color: NSColor
     }
 
@@ -20,16 +21,16 @@ enum RingRenderer {
     private static let ringGap: CGFloat = 5
 
     /// Render the ring gauge into an NSImage of the given point size.
-    static func makeImage(rings: [Ring], tightestRemaining: Double?, size: CGFloat) -> NSImage {
+    static func makeImage(rings: [Ring], primaryRemaining: Double?, primaryLabel: String?, size: CGFloat) -> NSImage {
         let outputSize = NSSize(width: size, height: size)
         let image = NSImage(size: outputSize, flipped: false) { rect in
-            draw(rings: rings, tightestRemaining: tightestRemaining, in: rect)
+            draw(rings: rings, primaryRemaining: primaryRemaining, primaryLabel: primaryLabel, in: rect)
             return true
         }
         return image
     }
 
-    private static func draw(rings: [Ring], tightestRemaining: Double?, in rect: CGRect) {
+    private static func draw(rings: [Ring], primaryRemaining: Double?, primaryLabel: String?, in rect: CGRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
 
         let center = CGPoint(x: rect.midX, y: rect.midY)
@@ -38,12 +39,12 @@ enum RingRenderer {
             let maxRadius = min(rect.width, rect.height) / 2 - ringWidth / 2 - 4
             let radius = maxRadius - CGFloat(i) * (ringWidth + ringGap)
             drawRing(in: ctx, center: center, radius: radius, width: ringWidth,
-                     usedPercent: ring.usedPercent, color: ring.color)
+                     remainingPercent: ring.remainingPercent, color: ring.color)
         }
 
         // Center text (unflipped coords: y up). draw(at:) uses the point as the
         // text's lower-left, so to vertically center we subtract half the height.
-        if let remaining = tightestRemaining {
+        if let remaining = primaryRemaining {
             let text = "\(Int(remaining.rounded()))%"
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 20, weight: .semibold),
@@ -55,7 +56,7 @@ enum RingRenderer {
                       withAttributes: attrs)
 
             // Caption directly below the percentage.
-            let sub = L(.left)
+            let sub = [primaryLabel, L(.left)].compactMap { $0 }.joined(separator: " · ")
             let subAttrs: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 9),
                 .foregroundColor: NSColor.secondaryLabelColor,
@@ -78,8 +79,8 @@ enum RingRenderer {
     }
 
     private static func drawRing(in ctx: CGContext, center: CGPoint, radius: CGFloat,
-                                 width: CGFloat, usedPercent: Double, color: NSColor) {
-        let palette = progressPalette(remainingPercent: 100 - usedPercent)
+                                 width: CGFloat, remainingPercent: Double, color: NSColor) {
+        let palette = progressPalette(remainingPercent: remainingPercent)
         // Track: full circle, translucent.
         ctx.setLineWidth(width)
         ctx.setLineCap(.butt)
@@ -89,7 +90,7 @@ enum RingRenderer {
 
         // A subtle outer glow makes the current value easier to scan in a dense
         // menu without changing the existing concentric-ring layout.
-        let trim = CGFloat(min(100, max(0, usedPercent))) / 100
+        let trim = CGFloat(min(100, max(0, remainingPercent))) / 100
         guard trim > 0.005 else { return }
         ctx.setLineCap(.round)
         ctx.setStrokeColor(palette.start.withAlphaComponent(0.18).cgColor)
@@ -101,7 +102,8 @@ enum RingRenderer {
         ctx.strokePath()
 
         // Filled arc: starts at 12 o'clock (top), goes counter-clockwise
-        // (visually "downward on the left side" as usage grows).
+        // and grows as available quota grows. A 100% remaining window is a
+        // complete ring; a depleted window is empty.
         // In this CGContext, clockwise:true + decreasing endAngle produces the
         // counter-clockwise visual sweep we want (verified empirically).
         ctx.setLineCap(.round)

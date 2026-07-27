@@ -62,7 +62,10 @@ enum MenuBuilder {
             item.isEnabled = false
             menu.addItem(item)
         }
-        menu.addItem(actionItem(L(.refreshNow), action: state.onRefresh))
+        // A standard NSMenuItem dismisses the status menu before running its
+        // action. A control hosted in a custom menu-item view receives the
+        // click itself, so Refresh can keep the usage panel open.
+        menu.addItem(refreshItem(action: state.onRefresh))
         menu.addItem(actionItem(L(.openArkcliLogin), action: {
             Self.openTerminal(command: "arkcli auth login volc-sso")
         }))
@@ -144,6 +147,13 @@ enum MenuBuilder {
         let target = MenuActionTarget(action: action)
         item.target = target
         item.representedObject = target
+        return item
+    }
+
+    @MainActor
+    private static func refreshItem(action: @escaping () -> Void) -> NSMenuItem {
+        let item = NSMenuItem()
+        item.view = RefreshMenuItemView(title: L(.refreshNow), action: action, width: cardWidth)
         return item
     }
 
@@ -275,4 +285,27 @@ final class MenuActionTarget: NSObject {
     private let action: () -> Void
     init(action: @escaping () -> Void) { self.action = action }
     @objc func invoke() { action() }
+}
+
+/// An NSButton embedded in an NSMenuItem view. Unlike a selected standard menu
+/// item, this control does not end menu tracking after its action runs.
+private final class RefreshMenuItemView: NSView {
+    private let target: MenuActionTarget
+    private let button: NSButton
+
+    init(title: String, action: @escaping () -> Void, width: CGFloat) {
+        self.target = MenuActionTarget(action: action)
+        self.button = NSButton(title: title, target: target, action: #selector(MenuActionTarget.invoke))
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 30))
+        button.bezelStyle = .regularSquare
+        button.isBordered = false
+        button.alignment = .left
+        button.font = .systemFont(ofSize: 12)
+        button.contentTintColor = .labelColor
+        button.frame = bounds.insetBy(dx: 8, dy: 2)
+        button.autoresizingMask = [.width, .height]
+        addSubview(button)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
 }

@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import AppKit
+import ObjectiveC.runtime
 @testable import ArkBar
 
 @Suite("ArkCLIProvider decode")
@@ -225,6 +226,34 @@ struct IconRendererTests {
         try png.write(to: URL(fileURLWithPath: "/tmp/arkbar_icons.png"))
         #expect(FileManager.default.fileExists(atPath: "/tmp/arkbar_icons.png"))
     }
+
+    @Test("A 100 percent remaining ring is painted as a full ring")
+    func fullRemainingRingIsFilled() throws {
+        let full = RingRenderer.makeImage(
+            rings: [.init(id: "session", label: "Session", remainingPercent: 100, color: .systemMint)],
+            primaryRemaining: 100,
+            primaryLabel: "Session",
+            size: 100)
+        let empty = RingRenderer.makeImage(
+            rings: [.init(id: "session", label: "Session", remainingPercent: 0, color: .systemMint)],
+            primaryRemaining: 0,
+            primaryLabel: "Session",
+            size: 100)
+        let fullRep = NSBitmapImageRep(data: try #require(full.tiffRepresentation))!
+        let emptyRep = NSBitmapImageRep(data: try #require(empty.tiffRepresentation))!
+        // Bottom centre lies on the only ring. A filled ring is substantially
+        // more opaque there than an empty ring's quiet track.
+        let fullAlpha = try #require(fullRep.colorAt(x: 50, y: 8)).alphaComponent
+        let emptyAlpha = try #require(emptyRep.colorAt(x: 50, y: 8)).alphaComponent
+        #expect(fullAlpha > emptyAlpha + 0.4)
+    }
+
+    @Test("Status-item hover tracking uses AppKit selector names")
+    @MainActor
+    func statusItemTrackingSelectorsExist() {
+        #expect(class_getInstanceMethod(StatusItemController.self, NSSelectorFromString("mouseEntered:")) != nil)
+        #expect(class_getInstanceMethod(StatusItemController.self, NSSelectorFromString("mouseExited:")) != nil)
+    }
 }
 
 @Suite("Menu card visual regression")
@@ -255,10 +284,10 @@ struct MenuCardVisualTests {
         // Rendering the ring directly exercises the updated palette and endpoint glow.
         let ring = RingRenderer.makeImage(
             rings: [
-                .init(id: "monthly", label: "Monthly", usedPercent: 75, color: .systemIndigo),
-                .init(id: "weekly", label: "Weekly", usedPercent: 42, color: .systemBlue),
-                .init(id: "session", label: "5-hour", usedPercent: 13, color: .systemMint),
-            ], tightestRemaining: 25, size: 160)
+                .init(id: "monthly", label: "Monthly", remainingPercent: 25, color: .systemIndigo),
+                .init(id: "weekly", label: "Weekly", remainingPercent: 58, color: .systemBlue),
+                .init(id: "session", label: "5-hour", remainingPercent: 87, color: .systemMint),
+            ], primaryRemaining: 87, primaryLabel: "5-hour", size: 160)
         let tiff = ring.tiffRepresentation!
         let rep = NSBitmapImageRep(data: tiff)!
         let png = rep.representation(using: .png, properties: [:])!
