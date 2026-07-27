@@ -172,6 +172,76 @@ struct VolcAPIDecodeTests {
     }
 }
 
+@Suite("OpenCode Go provider decode")
+struct OpenCodeGoProviderTests {
+    @Test("Cookie header keeps only the OpenCode session credential")
+    func filtersCookieHeader() {
+        let header = OpenCodeGoCookieSupport.requestCookieHeader(
+            from: "Cookie: analytics=drop; auth=session-value; theme=dark; __Host-auth=host-value")
+        #expect(header == "auth=session-value; __Host-auth=host-value")
+        #expect(OpenCodeGoCookieSupport.requestCookieHeader(from: "theme=dark") == nil)
+    }
+
+    @Test("Nested usage payload decodes percentages, reset dates, and renewal")
+    func decodesNestedPayload() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let text = #"""
+        {
+          "data": {
+            "renewAt": "2026-09-24T23:59:00Z",
+            "usage": {
+              "rollingUsage": { "usagePercent": 0.4, "resetAt": 1700003600 },
+              "weeklyUsage": { "used": 12, "limit": 100, "resetInSec": 7200 },
+              "monthlyUsage": { "usagePercent": 66.5, "resetInSec": "86400" }
+            }
+          }
+        }
+        """#
+        let usage = try OpenCodeGoProvider.decodeUsagePage(text, now: now)
+        #expect(usage.rolling.usedPercent == 40)
+        #expect(usage.weekly?.usedPercent == 12)
+        #expect(usage.monthly?.usedPercent == 66.5)
+        #expect(usage.rolling.resetsAt?.timeIntervalSince1970 == 1_700_003_600)
+        #expect(usage.weekly?.resetsAt?.timeIntervalSince1970 == 1_700_007_200)
+        #expect(usage.expiryDate != nil)
+    }
+
+    @Test("Workspace override accepts a dashboard URL or bare ID")
+    func normalizesWorkspaceID() {
+        #expect(OpenCodeGoProvider.normalizeWorkspaceID("wrk_abc123") == "wrk_abc123")
+        #expect(OpenCodeGoProvider.normalizeWorkspaceID("https://opencode.ai/workspace/wrk_def456/go") == "wrk_def456")
+        #expect(OpenCodeGoProvider.normalizeWorkspaceID("not-a-workspace") == nil)
+    }
+
+    @Test("Authoritative 100 percent usage remains zero percent left")
+    func preservesExhaustedQuota() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let usage = try OpenCodeGoProvider.decodeUsagePage(
+            #"{"rollingUsage":{"usagePercent":100,"resetInSec":3600}}"#,
+            now: now)
+        let snapshot = OpenCodeGoProvider.makeProviderSnapshot(
+            usage,
+            authMethod: "browser")
+
+        #expect(snapshot.sessionWindow?.usedPercent == 100)
+        #expect(snapshot.sessionWindow?.remainingPercent == 0)
+    }
+
+    @Test("Zero usage is not replaced by a local estimate")
+    func preservesUnusedQuota() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let usage = try OpenCodeGoProvider.decodeUsagePage(
+            #"{"rollingUsage":{"usagePercent":0,"resetInSec":3600}}"#,
+            now: now)
+        let snapshot = OpenCodeGoProvider.makeProviderSnapshot(
+            usage,
+            authMethod: "browser")
+
+        #expect(snapshot.sessionWindow?.usedPercent == 0)
+        #expect(snapshot.sessionWindow?.remainingPercent == 100)
+    }
+}
+
 @Suite("MenuBuilder formatting")
 struct MenuBuilderTests {
     @Test("Progress bar fills proportionally")
@@ -209,6 +279,94 @@ struct MenuBuilderTests {
         let refreshItem = menu.items.first { $0.title == L(.refreshNow) }
         #expect(refreshItem?.action == nil)
         #expect(refreshItem?.view is RefreshMenuItemView)
+        let switcherItem = menu.items.first { $0.view is ProviderSwitcherView }
+        #expect(switcherItem?.isEnabled == true)
+    }
+
+    @Test("Provider switch mutates one persistent menu and replaces provider-specific actions")
+    @MainActor
+    func providerSwitchReusesMenu() {
+        let menu = NSMenu()
+        MenuBuilder.populate(menu, with: .init(
+            status: .loading,
+            selectedTab: .ark,
+            onSelectTab: { _ in },
+            lastUpdatedAt: nil,
+            isRefreshing: false,
+            now: Date(),
+            onRefresh: {},
+            onSettings: {},
+            onQuit: {}))
+        #expect(menu.items.contains { $0.title == L(.openArkcliLogin) })
+        #expect(!menu.items.contains { $0.title == L(.openCodeGo) })
+
+        let identity = ObjectIdentifier(menu)
+        MenuBuilder.populate(menu, with: .init(
+            status: .error(message: "OpenCode test error"),
+            selectedTab: .opencode,
+            onSelectTab: { _ in },
+            lastUpdatedAt: nil,
+            isRefreshing: false,
+            now: Date(),
+            onRefresh: {},
+            onSettings: {},
+            onQuit: {}))
+        #expect(ObjectIdentifier(menu) == identity)
+        #expect(!menu.items.contains { $0.title == L(.openArkcliLogin) })
+        #expect(menu.items.contains { $0.title == L(.openCodeGo) })
+    }
+
+    @Test("Provider switching uses a fixed-width live status-item anchor")
+    @MainActor
+    func providerSwitchKeepsStatusItemAnchor() {
+        #expect(StatusItemController.statusItemLength(for: .iconOnly) == 28)
+        #expect(StatusItemController.statusItemLength(for: .iconAndPercent) == 68)
+        #expect(StatusItemController.statusItemLength(for: .percentOnly) == 46)
+    }
+
+    @Test("Clicking OpenCode immediately replaces Ark content in the same menu")
+    @MainActor
+    func providerSwitcherClickUpdatesContentImmediately() {
+        var menu: NSMenu!
+        let openCodeState = MenuBuilder.State(
+            status: .error(message: "OpenCode test error"),
+            selectedTab: .opencode,
+            onSelectTab: { _ in },
+            lastUpdatedAt: nil,
+            isRefreshing: false,
+            now: Date(),
+            onRefresh: {},
+            onSettings: {},
+            onQuit: {})
+        menu = MenuBuilder.build(.init(
+            status: .loading,
+            selectedTab: .ark,
+            onSelectTab: { tab in
+                if tab == .opencode {
+                    MenuBuilder.populate(menu, with: openCodeState)
+                }
+            },
+            lastUpdatedAt: nil,
+            isRefreshing: false,
+            now: Date(),
+            onRefresh: {},
+            onSettings: {},
+            onQuit: {}))
+
+        let switcher = menu.items.compactMap { $0.view as? ProviderSwitcherView }.first
+        let openCodeButton = switcher?.subviews
+            .compactMap { $0 as? NSButton }
+            .first { $0.title == ProviderTab.opencode.displayName }
+        openCodeButton?.performClick(nil)
+
+        #expect(!menu.items.contains { $0.title == L(.openArkcliLogin) })
+        #expect(menu.items.contains { $0.title == L(.openCodeGo) })
+        let refreshedSwitcher = menu.items.compactMap { $0.view as? ProviderSwitcherView }.first
+        let selectedTitle = refreshedSwitcher?.subviews
+            .compactMap { $0 as? NSButton }
+            .first { $0.state == .on }?
+            .title
+        #expect(selectedTitle == ProviderTab.opencode.displayName)
     }
 
     @Test("Refresh row switches to the in-flight state before its action returns")
@@ -309,10 +467,11 @@ struct IconRendererTests {
 @Suite("Ring arc coverage")
 struct RingArcCoverageTests {
     /// Regression: the filled arc used to sweep the wrong direction / wrong span,
-    /// so a window with e.g. 69% remaining rendered as a ~full ring. Sample the
-    /// bitmap at the ring's radius and assert the filled span matches remaining.
+    /// so a window with e.g. 69% remaining rendered as a ~full ring. Count the
+    /// actual coloured pixels around the circumference rather than assuming the
+    /// arc begins at 12 o'clock.
     @MainActor
-    private static func filledSpanDegrees(image: NSImage, ringIndex: Int) -> Int {
+    private static func isFilled(image: NSImage, ringIndex: Int, at angleDegrees: Int) -> Bool {
         let rep = NSBitmapImageRep(data: image.tiffRepresentation!)!
         let size = Int(rep.size.width)
         let cx = size / 2
@@ -321,25 +480,20 @@ struct RingArcCoverageTests {
         let ringGap = 5.0
         let baseRadius = Double(size) / 2 - ringWidth / 2 - 4
         let radius = baseRadius - Double(ringIndex) * (ringWidth + ringGap)
-        // Sweep CCW from top (0°). Count contiguous filled degrees from the top;
-        // the arc starts at 12 o'clock, so the filled run begins at deg=0.
-        var filled = 0
-        for deg in stride(from: 0, through: 359, by: 5) {
-            let r = Double(deg) * .pi / 180
-            // CCW from top in y-up: x = cx - sin*r, y = cy + cos*r
-            let mx = Double(cx) - sin(r) * radius
-            let my = Double(cy) + cos(r) * radius
-            let px = Int(mx.rounded())
-            let py = Int((Double(size) - my).rounded())
-            guard px >= 0, px < size, py >= 0, py < size else { continue }
-            let c = rep.colorAt(x: px, y: py)!
-            if c.alphaComponent > 0.5 {
-                filled += 5
-            } else {
-                break  // arc is contiguous from the top; first gap ends it
+        let radians = Double(angleDegrees) * .pi / 180
+        let px = Int((Double(cx) + cos(radians) * radius).rounded())
+        let py = Int((Double(size) - (Double(cy) + sin(radians) * radius)).rounded())
+        guard px >= 0, px < size, py >= 0, py < size else { return false }
+        return rep.colorAt(x: px, y: py)!.alphaComponent > 0.5
+    }
+
+    @MainActor
+    private static func filledCoverageDegrees(image: NSImage, ringIndex: Int) -> Int {
+        stride(from: 0, through: 359, by: 5).reduce(into: 0) { total, degree in
+            if isFilled(image: image, ringIndex: ringIndex, at: degree) {
+                total += 5
             }
         }
-        return filled
     }
 
     @Test("A 69%-remaining ring fills ~249°, not the full circle")
@@ -348,7 +502,7 @@ struct RingArcCoverageTests {
         let ring = RingRenderer.makeImage(
             rings: [.init(id: "monthly", label: "Monthly", remainingPercent: 69, tone: .monthly)],
             primaryRemaining: 69, primaryLabel: "Monthly", size: 132)
-        let span = Self.filledSpanDegrees(image: ring, ringIndex: 0)
+        let span = Self.filledCoverageDegrees(image: ring, ringIndex: 0)
         // 69% of 360° = 248.4°. Allow ±20° for the round line-cap overhang.
         #expect(span >= 228 && span <= 268, "expected ~249°, got \(span)°")
     }
@@ -365,12 +519,28 @@ struct RingArcCoverageTests {
             ],
             primaryRemaining: 97.31, primaryLabel: "Session", size: 132)
         // monthly 69% -> ~249°, weekly 91% -> ~329°, session 97% -> ~350°.
-        let monthly = Self.filledSpanDegrees(image: ring, ringIndex: 0)
-        let weekly  = Self.filledSpanDegrees(image: ring, ringIndex: 1)
-        let session = Self.filledSpanDegrees(image: ring, ringIndex: 2)
+        let monthly = Self.filledCoverageDegrees(image: ring, ringIndex: 0)
+        let weekly  = Self.filledCoverageDegrees(image: ring, ringIndex: 1)
+        let session = Self.filledCoverageDegrees(image: ring, ringIndex: 2)
         #expect(monthly >= 228 && monthly <= 268, "monthly expected ~249°, got \(monthly)°")
         #expect(weekly  >= 308 && weekly  <= 348, "weekly expected ~329°, got \(weekly)°")
         #expect(session >= 329 && session <= 360, "session expected ~350°, got \(session)°")
+    }
+
+    @Test("Arcs start at 12 o'clock and the empty gap grows counterclockwise")
+    @MainActor
+    func arcsUseReferenceDirection() {
+        let ring = RingRenderer.makeImage(
+            rings: [.init(id: "session", label: "Session", remainingPercent: 25, tone: .session)],
+            primaryRemaining: 25,
+            primaryLabel: "Session",
+            size: 132)
+        // The remaining quarter starts at 12 o'clock and travels clockwise
+        // through the upper-right quadrant. The upper-left must stay empty.
+        #expect(Self.isFilled(image: ring, ringIndex: 0, at: 70))
+        #expect(Self.isFilled(image: ring, ringIndex: 0, at: 20))
+        #expect(!Self.isFilled(image: ring, ringIndex: 0, at: 110))
+        #expect(!Self.isFilled(image: ring, ringIndex: 0, at: 180))
     }
 }
 
@@ -395,6 +565,8 @@ struct MenuCardVisualTests {
             expiryDate: now.addingTimeInterval(86_400 * 12),
             errorMessage: nil)
         let view = PlanCardView(plan: plan, now: now, width: 340)
+        view.updateTrackingAreas()
+        #expect(view.trackingAreas.isEmpty)
         #expect(view.subviews.allSatisfy {
             $0.frame.minX >= 0 && $0.frame.maxX <= view.bounds.maxX
         })
@@ -413,90 +585,50 @@ struct MenuCardVisualTests {
         #expect(wordmark != nil)
         #expect(wordmark?.frame.width ?? 0 >= ceil(wordmark?.intrinsicContentSize.width ?? 0) + 4)
 
-        // Rendering the ring directly exercises the updated palette and endpoint glow.
+        // Rendering the ring directly exercises the updated palette and crisp,
+        // track-contained endpoint treatment.
         let ring = RingRenderer.makeImage(
             rings: [
                 .init(id: "monthly", label: "Monthly", remainingPercent: 25, tone: .monthly),
                 .init(id: "weekly", label: "Weekly", remainingPercent: 58, tone: .weekly),
                 .init(id: "session", label: "5-hour", remainingPercent: 87, tone: .session),
             ], primaryRemaining: 87, primaryLabel: "5-hour", size: 160)
-        let tiff = ring.tiffRepresentation!
+        // Composite the transparent ring onto the original dark menu-material
+        // approximation, so deep violet arcs cannot silently disappear.
+        let preview = NSImage(size: ring.size, flipped: false) { rect in
+            NSColor(calibratedWhite: 0.30, alpha: 1).setFill()
+            rect.fill()
+            ring.draw(in: rect)
+            return true
+        }
+        let tiff = preview.tiffRepresentation!
         let rep = NSBitmapImageRep(data: tiff)!
         let png = rep.representation(using: .png, properties: [:])!
         try png.write(to: URL(fileURLWithPath: "/tmp/arkbar_ring.png"))
         #expect(FileManager.default.fileExists(atPath: "/tmp/arkbar_ring.png"))
-    }
-}
 
-@Suite("OpenCodeGo cookie support")
-struct OpenCodeGoCookieSupportTests {
-    @Test("Cookie header filtering keeps only whitelisted names")
-    func cookieFiltering() {
-        // Only auth / __Host-auth should survive; other cookies dropped.
-        let raw = "auth=abc123; theme=dark; _ga=GA1.2.x; __Host-auth=xyz789"
-        let header = OpenCodeGoCookieSupport.requestCookieHeader(from: raw)
-        #expect(header == "auth=abc123; __Host-auth=xyz789")
-    }
+        // Render the real AppKit dashboard hierarchy—not a separately drawn
+        // mock—so palette, typography, clipping, and spacing can be inspected
+        // together after each visual change.
+        let switcher = ProviderSwitcherView(selected: .ark, width: 340, onSelect: { _ in })
+        let card = PlanCardView(plan: plan, now: now, width: 340)
+        let totalHeight = switcher.bounds.height + header.bounds.height + card.bounds.height
+        let dashboard = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: totalHeight))
+        dashboard.wantsLayer = true
+        dashboard.layer?.backgroundColor = NSColor(calibratedWhite: 0.30, alpha: 1).cgColor
+        card.frame.origin = .zero
+        header.frame.origin = NSPoint(x: 0, y: card.bounds.height)
+        switcher.frame.origin = NSPoint(x: 0, y: card.bounds.height + header.bounds.height)
+        dashboard.addSubview(card)
+        dashboard.addSubview(header)
+        dashboard.addSubview(switcher)
+        dashboard.layoutSubtreeIfNeeded()
 
-    @Test("Cookie header strips a `Cookie:` prefix")
-    func cookiePrefixStripped() {
-        let raw = "Cookie: auth=token123; other=drop"
-        let header = OpenCodeGoCookieSupport.requestCookieHeader(from: raw)
-        #expect(header == "auth=token123")
-    }
-
-    @Test("Cookie header returns nil when no whitelisted names present")
-    func cookieAllFiltered() {
-        #expect(OpenCodeGoCookieSupport.requestCookieHeader(from: "theme=dark; _ga=x") == nil)
-        #expect(OpenCodeGoCookieSupport.requestCookieHeader(from: "") == nil)
-        #expect(OpenCodeGoCookieSupport.requestCookieHeader(from: nil) == nil)
-    }
-
-    @Test("looksSignedOut detects login pages")
-    func signedOutDetection() {
-        #expect(OpenCodeGoCookieSupport.looksSignedOut(text: "Please sign in to continue"))
-        #expect(OpenCodeGoCookieSupport.looksSignedOut(text: "<title>Login</title>"))
-        #expect(OpenCodeGoCookieSupport.looksSignedOut(text: "redirect to auth/authorize"))
-        #expect(!OpenCodeGoCookieSupport.looksSignedOut(text: "rollingUsage: { usagePercent: 42 }"))
-    }
-
-    @Test("parseFirstWorkspaceID extracts wrk_ token from server response")
-    func workspaceIDParsing() {
-        let body = #"{"workspaces":[{"id":"wrk_abc123def456","name":"mine"}]}"#
-        #expect(OpenCodeGoCookieSupport.parseFirstWorkspaceID(text: body) == "wrk_abc123def456")
-    }
-
-    @Test("parseFirstWorkspaceID falls back to bare wrk_ token")
-    func workspaceIDFallback() {
-        let body = "some preamble wrk_xyz999 trailing text"
-        #expect(OpenCodeGoCookieSupport.parseFirstWorkspaceID(text: body) == "wrk_xyz999")
-    }
-
-    @Test("normalizeWorkspaceID accepts bare id, URL, or embedded token")
-    func workspaceIDNormalize() {
-        #expect(OpenCodeGoCookieSupport.normalizeWorkspaceID("wrk_abc123") == "wrk_abc123")
-        #expect(OpenCodeGoCookieSupport.normalizeWorkspaceID("https://opencode.ai/workspace/wrk_def456/go") == "wrk_def456")
-        #expect(OpenCodeGoCookieSupport.normalizeWorkspaceID("see wrk_ghi789 here") == "wrk_ghi789")
-        #expect(OpenCodeGoCookieSupport.normalizeWorkspaceID("") == nil)
-        #expect(OpenCodeGoCookieSupport.normalizeWorkspaceID(nil) == nil)
-    }
-
-    @Test("regex extraction parses usage percent and reset seconds from the page payload")
-    func regexExtraction() {
-        // Mirrors the shape CodexBar's fetcher scrapes from the /workspace/<id>/go page.
-        let page = """
-        rollingUsage: { usagePercent: 3.5, resetInSec: 14400 }
-        weeklyUsage: { usagePercent: 12, resetInSec: 86400 }
-        monthlyUsage: { usagePercent: 47.5, resetInSec: 604800 }
-        """
-        let rollingPct = OpenCodeGoCookieSupport.extractDouble(
-            pattern: #"rollingUsage[^}]*?usagePercent\s*:\s*([0-9]+(?:\.[0-9]+)?)"#, text: page)
-        let rollingReset = OpenCodeGoCookieSupport.extractInt(
-            pattern: #"rollingUsage[^}]*?resetInSec\s*:\s*([0-9]+)"#, text: page)
-        let monthlyPct = OpenCodeGoCookieSupport.extractDouble(
-            pattern: #"monthlyUsage[^}]*?usagePercent\s*:\s*([0-9]+(?:\.[0-9]+)?)"#, text: page)
-        #expect(rollingPct == 3.5)
-        #expect(rollingReset == 14400)
-        #expect(monthlyPct == 47.5)
+        let dashboardRep = try #require(dashboard.bitmapImageRepForCachingDisplay(in: dashboard.bounds))
+        dashboard.cacheDisplay(in: dashboard.bounds, to: dashboardRep)
+        let dashboardPNG = try #require(
+            dashboardRep.representation(using: .png, properties: [:]))
+        try dashboardPNG.write(to: URL(fileURLWithPath: "/tmp/arkbar_dashboard.png"))
+        #expect(FileManager.default.fileExists(atPath: "/tmp/arkbar_dashboard.png"))
     }
 }

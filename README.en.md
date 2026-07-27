@@ -2,7 +2,7 @@
 
 [简体中文](README.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
 
-ArkBar is a native macOS menu-bar app for Volcengine Ark Coding Plan and Agent Plan usage. It keeps the quota you have **left** visible without a Dock icon.
+ArkBar is a native macOS menu-bar app for Volcengine Ark Coding/Agent Plan and OpenCode Go usage. It keeps the quota you have **left** visible without a Dock icon.
 
 ## Highlights
 
@@ -10,8 +10,9 @@ ArkBar is a native macOS menu-bar app for Volcengine Ark Coding Plan and Agent P
 - Per-plan session, weekly, and monthly remaining quota with reset countdowns.
 - A gradient ring that becomes visually deeper as remaining quota gets low.
 - Auto, `arkcli` SSO, AK/SK, and Ark API key data-source modes.
+- Instant Ark/OpenCode Go switching with isolated refresh and error state.
 - System, Simplified Chinese, and English interfaces.
-- No telemetry, browser-cookie access, Keychain access, or credential storage.
+- No telemetry. OpenCode browser import runs only after an explicit user action and stores only the filtered authentication cookie in the local Keychain.
 
 ## Quick start
 
@@ -59,6 +60,7 @@ In **Auto** mode, ArkBar prefers explicitly configured credentials, then falls b
 | `arkcli` SSO (recommended) | `npm install -g @volcengine/ark-cli` then `arkcli auth login volc-sso` | Personal and team Coding/Agent Plan usage exposed by `arkcli usage plan`. |
 | Volcengine AK/SK | `VOLCENGINE_ACCESS_KEY_ID` and `VOLCENGINE_SECRET_ACCESS_KEY` | Coding Plan usage only, via signed `GetCodingPlanUsage`. |
 | Ark API key | `ARK_API_KEY`; optionally `ARK_MODEL_ID` | One request-rate-limit window only. The probe sends a minimal API request, so it can consume request quota. |
+| OpenCode Go | Explicitly choose **Re-import Browser Session** in **Settings → OpenCode Go**, or select a manual Cookie | Subscription usage returned by `opencode.ai`; ArkBar never substitutes a local spending estimate. |
 
 See the official [Ark CLI installation guide](https://github.com/volcengine/ark-cli) for the current CLI setup.
 
@@ -73,7 +75,7 @@ export VOLCENGINE_SECRET_ACCESS_KEY='...'
 ## Reading the UI
 
 - All prominent percentages mean **remaining** quota, not consumed quota.
-- The menu-bar capsule shows the current Session / 5-hour quota left.
+- The menu-bar capsule shows the selected tab's current Session / 5-hour quota left.
 - The ring centre shows the Session (or 5-hour) quota left, and every ring fills from its own **remaining** value—100% is a full ring.
 - The three ring rows are Session, Weekly, and Monthly remaining quota; each row keeps its own reset countdown.
 - A refresh failure preserves the last confirmed data and marks it stale.
@@ -87,10 +89,12 @@ Quota reset time is not subscription expiry. ArkBar displays a plan-expiry badge
 
 ## Privacy
 
-- ArkBar does not read browser cookies, Keychain entries, or arbitrary files.
+- OpenCode browser import reads the `opencode.ai` authentication cookie only after **Re-import Browser Session** is clicked. It does not read browsing history or scan arbitrary files.
+- ArkBar keeps only the `auth` / `__Host-auth` cookie and stores it in the local macOS Keychain. Startup, scheduled refresh, and ordinary manual refresh use that cache instead of repeatedly reading the browser.
+- A manually pasted OpenCode Cookie is also stored only in the local Keychain, never UserDefaults, source files, or logs.
 - `arkcli` keeps ownership of its SSO session; ArkBar only runs `arkcli usage plan --format json` and parses its output.
 - AK/SK and API keys are read from the launch environment and are never written to disk by ArkBar.
-- Network requests go only to Volcengine Ark endpoints required by the selected source.
+- Network requests go only to the required Volcengine Ark endpoints or `opencode.ai`.
 
 ## Development
 
@@ -98,7 +102,7 @@ Quota reset time is not subscription expiry. ArkBar displays a plan-expiry badge
 swift test
 ```
 
-The test suite covers Ark CLI and OpenAPI decoding, time formatting, icon rendering, and menu-card layout regressions. GitHub Actions runs the same test command for pull requests and pushes to `main`.
+The test suite covers Ark CLI, OpenAPI, and OpenCode Go decoding, time formatting, icon rendering, refresh interaction, and menu-card layout regressions. GitHub Actions runs the same test command for pull requests and pushes to `main`.
 
 ## Project structure
 
@@ -107,6 +111,8 @@ Sources/ArkBar/
   ArkCLIFetcher.swift    arkcli SSO usage provider
   VolcAPIProvider.swift  AK/SK signed Coding Plan provider
   ArkAPIKeyProvider.swift API-key rate-limit probe provider
+  OpenCodeGoProvider.swift authoritative OpenCode Go usage provider
+  OpenCodeGoBrowserSession.swift explicit browser-session importer
   UsageStore.swift       source selection and refresh lifecycle
   PlanCardView.swift     menu-card layout and remaining-quota ring
   Localization.swift     Simplified Chinese and English catalog
@@ -116,4 +122,4 @@ Tests/ArkBarTests/       decoding and visual regression tests
 
 ## License and attribution
 
-ArkBar is released under the [MIT License](LICENSE). Parts of the architecture and rendering approach were adapted from CodexBar; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+ArkBar is released under the [MIT License](LICENSE). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the CodexBar and SweetCookieKit notices.

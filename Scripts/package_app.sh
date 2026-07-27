@@ -43,6 +43,10 @@ cp "$ROOT/Resources/Info.plist" "$CONTENTS/Info.plist"
 # Icon.
 cp "$ROOT/Resources/AppIcon.icns" "$RESOURCES/AppIcon.icns"
 
+# License notices travel with the installed binary as well as the source.
+cp "$ROOT/LICENSE" "$RESOURCES/LICENSE.txt"
+cp "$ROOT/THIRD_PARTY_NOTICES.md" "$RESOURCES/THIRD_PARTY_NOTICES.md"
+
 # Rewrite Info.plist with exact version/build.
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$CONTENTS/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$CONTENTS/Info.plist"
