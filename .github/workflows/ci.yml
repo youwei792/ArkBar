@@ -9,6 +9,10 @@ on:
 jobs:
   test:
     runs-on: macos-15
+    env:
+      # SweetCookieKit requires Swift 6.2. macos-15 defaults to Xcode 16.4
+      # (Swift 6.1), while the hosted image also includes Xcode 26.2.
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
       - name: Show Swift version
