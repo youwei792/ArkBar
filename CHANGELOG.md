@@ -4,6 +4,13 @@ All notable public changes to ArkBar are documented here.
 
 ## Unreleased
 
+- Added an OpenCode Go tab backed by authoritative subscription-page data, with explicit browser-session import or a manual Keychain-stored Cookie.
+- Isolated Ark and OpenCode refresh, error, stale-data, and last-updated state so one provider cannot overwrite the other.
+- Prevented background and ordinary refreshes from repeatedly reading browser cookie stores or triggering recurring Keychain password prompts.
+- Kept one persistent menu attached to the status item, eliminating the first-click miss and allowing tab switches and refresh state to update in place.
+- Kept the menu-bar percentage synchronized with the selected provider's Session value while using a fixed-width anchor to avoid horizontal movement.
+- Reworked the settings window into compact General, Ark, OpenCode Go, and Diagnostics panes.
+- Refined the remaining-quota rings with distinct color families, a wider neutral track, contained progress strokes, and a clean full-ring state at 100%.
 - Added a persisted switch for refreshing when the menu-bar item opens; the default remains interval-only refresh.
 - Coalesced overlapping refresh triggers and scheduled the timer in common RunLoop modes to keep refreshes stable while the menu is open.
 - Fixed the status-item hover selector crash, kept Refresh inside the open menu, and made the primary ring/centre consistently represent remaining quota.
@@ -18,7 +25,7 @@ All notable public changes to ArkBar are documented here.
 
 - Added English and Simplified Chinese public documentation.
 - Documented provider limits, privacy boundaries, packaging behavior, and verified subscription-expiry behavior.
-- Added contribution and security-reporting guidance.
+- Added security-reporting guidance.
 
 ## 0.1.0
 

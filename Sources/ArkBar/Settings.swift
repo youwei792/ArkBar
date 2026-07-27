@@ -30,6 +30,14 @@ final class AppSettings: ObservableObject {
         case api
     }
 
+    /// OpenCode Go can reuse a signed-in browser session or a manually pasted
+    /// Cookie header. Automatic is the default and mirrors CodexBar's provider
+    /// settings without using its inaccurate local quota estimate.
+    enum OpenCodeCookieSource: String, CaseIterable {
+        case automatic
+        case manual
+    }
+
     /// Menu-bar display layout. Mirrors CodexBar's MenuBarLayout options.
     enum DisplayMode: String, CaseIterable {
         /// Just the capsule progress icon.
@@ -70,6 +78,37 @@ final class AppSettings: ObservableObject {
             }
         }
     }
+    /// The provider currently shown by the menu-bar popover. Provider state is
+    /// separate in `UsageStore`; this only persists the presentation choice.
+    @Published var selectedTab: ProviderTab {
+        didSet { UserDefaults.standard.set(selectedTab.rawValue, forKey: Keys.selectedTab) }
+    }
+    /// Optional OpenCode workspace override. When empty, the provider resolves
+    /// the current workspace from the signed-in session.
+    @Published var opencodeWorkspaceID: String {
+        didSet { UserDefaults.standard.set(opencodeWorkspaceID, forKey: Keys.opencodeWorkspaceID) }
+    }
+    @Published var opencodeCookieSource: OpenCodeCookieSource {
+        didSet { UserDefaults.standard.set(opencodeCookieSource.rawValue, forKey: Keys.opencodeCookieSource) }
+    }
+    /// In-memory mirror of the Keychain value. It is never written to defaults.
+    @Published private(set) var opencodeCookie: String
+
+    func setOpenCodeCookie(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cookie = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: cookie, provider: "opencode")
+        // Do not claim a new credential is configured when Keychain rejected
+        // the write; keep the in-memory mirror aligned with what can actually
+        // be read by the provider on the next refresh.
+        opencodeCookie = persisted ? (cookie ?? "") : (CookieKeychainStore.load(provider: "opencode") ?? "")
+    }
+
+    func loadOpenCodeCookieFromKeychain() {
+        opencodeCookie = CookieKeychainStore.load(provider: "opencode") ?? ""
+    }
+
+    var opencodeCookieHasValue: Bool { !opencodeCookie.isEmpty }
 
     private enum Keys {
         static let refreshInterval = "arkbar.refreshInterval"
@@ -77,6 +116,9 @@ final class AppSettings: ObservableObject {
         static let sourceMode = "arkbar.sourceMode"
         static let displayMode = "arkbar.displayMode"
         static let language = "arkbar.language"
+        static let selectedTab = "arkbar.selectedTab"
+        static let opencodeWorkspaceID = "arkbar.opencodeWorkspaceID"
+        static let opencodeCookieSource = "arkbar.opencodeCookieSource"
     }
 
     private init() {
@@ -90,5 +132,12 @@ final class AppSettings: ObservableObject {
         self.displayMode = DisplayMode(rawValue: displayRaw) ?? .iconAndPercent
         let langRaw = defaults.string(forKey: Keys.language) ?? Language.system.rawValue
         self.language = Language(rawValue: langRaw) ?? .system
+        let tabRaw = defaults.string(forKey: Keys.selectedTab) ?? ProviderTab.ark.rawValue
+        self.selectedTab = ProviderTab(rawValue: tabRaw) ?? .ark
+        self.opencodeWorkspaceID = defaults.string(forKey: Keys.opencodeWorkspaceID) ?? ""
+        let cookieSourceRaw = defaults.string(forKey: Keys.opencodeCookieSource)
+            ?? OpenCodeCookieSource.automatic.rawValue
+        self.opencodeCookieSource = OpenCodeCookieSource(rawValue: cookieSourceRaw) ?? .automatic
+        self.opencodeCookie = CookieKeychainStore.load(provider: "opencode") ?? ""
     }
 }

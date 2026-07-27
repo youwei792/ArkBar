@@ -37,6 +37,7 @@ struct PlanSnapshot: Sendable, Equatable, Identifiable {
         case agentPlan = "agent-plan"
         case codingPlanTeam = "coding-plan-team"
         case agentPlanTeam = "agent-plan-team"
+        case openCodeGo = "opencode-go"
 
         var displayName: String {
             L10n.shared.productName(self)
@@ -46,7 +47,7 @@ struct PlanSnapshot: Sendable, Equatable, Identifiable {
         var isTeam: Bool {
             switch self {
             case .codingPlanTeam, .agentPlanTeam: true
-            default: false
+            case .codingPlan, .agentPlan, .openCodeGo: false
             }
         }
     }
@@ -133,6 +134,9 @@ enum UsageError: LocalizedError, Sendable {
     case apiError(statusCode: Int, message: String)
     case parseFailed(String)
     case noPlanUsage(String?)
+    case openCodeCookieMissing
+    case openCodeCookieInvalid
+    case openCodeBrowserSessionMissing(String)
 
     var errorDescription: String? {
         switch self {
@@ -158,6 +162,12 @@ enum UsageError: LocalizedError, Sendable {
             } else {
                 String(format: L(.errorNoPlan), "-")
             }
+        case .openCodeCookieMissing:
+            L(.errorOpenCodeCookieMissing)
+        case .openCodeCookieInvalid:
+            L(.errorOpenCodeCookieInvalid)
+        case let .openCodeBrowserSessionMissing(message):
+            message
         }
     }
 }

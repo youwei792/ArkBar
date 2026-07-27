@@ -6,9 +6,15 @@ let package = Package(
     platforms: [
         .macOS(.v14),
     ],
+    dependencies: [
+        .package(url: "https://github.com/steipete/SweetCookieKit", exact: "0.4.1"),
+    ],
     targets: [
         .executableTarget(
             name: "ArkBar",
+            dependencies: [
+                .product(name: "SweetCookieKit", package: "SweetCookieKit"),
+            ],
             path: "Sources/ArkBar"),
         .testTarget(
             name: "ArkBarTests",

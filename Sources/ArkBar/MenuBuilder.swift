@@ -16,6 +16,8 @@ enum MenuBuilder {
         }
 
         let status: Status
+        let selectedTab: ProviderTab
+        let onSelectTab: (ProviderTab) -> Void
         let lastUpdatedAt: Date?
         let isRefreshing: Bool
         let now: Date
@@ -34,9 +36,21 @@ enum MenuBuilder {
     @MainActor
     static func build(_ state: State) -> NSMenu {
         let menu = NSMenu()
+        populate(menu, with: state)
+        return menu
+    }
+
+    /// Reuses an already-attached menu instead of replacing
+    /// `NSStatusItem.menu`. AppKit keeps that menu's tracking session alive, so
+    /// provider switches and refresh completions update immediately without
+    /// closing the popover or requiring a second status-item click.
+    @MainActor
+    static func populate(_ menu: NSMenu, with state: State) {
+        menu.removeAllItems()
         // NSMenu reserves horizontal insets around custom item views. Keep the
         // menu slightly wider than the card so AppKit never clips its right edge.
         menu.minimumWidth = 360
+        menu.addItem(switcherItem(state: state))
 
         switch state.status {
         case .never:
@@ -66,21 +80,38 @@ enum MenuBuilder {
         menu.addItem(.separator())
 
         menu.addItem(refreshItem(state: state))
-        menu.addItem(actionItem(L(.openArkcliLogin), action: {
-            Self.openTerminal(command: "arkcli auth login volc-sso")
-        }))
-        menu.addItem(actionItem(L(.openArkConsole), action: {
-            NSWorkspace.shared.open(URL(string: "https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&advancedActiveKey=subscribe")!)
-        }))
+        switch state.selectedTab {
+        case .ark:
+            menu.addItem(actionItem(L(.openArkcliLogin), action: {
+                Self.openTerminal(command: "arkcli auth login volc-sso")
+            }))
+            menu.addItem(actionItem(L(.openArkConsole), action: {
+                NSWorkspace.shared.open(URL(string: "https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&advancedActiveKey=subscribe")!)
+            }))
+        case .opencode:
+            menu.addItem(actionItem(L(.openCodeGo), action: {
+                NSWorkspace.shared.open(URL(string: "https://opencode.ai")!)
+            }))
+        }
         menu.addItem(actionItem(L(.settings), action: state.onSettings))
         menu.addItem(.separator())
         menu.addItem(actionItem(L(.quitArkBar), action: state.onQuit))
-        return menu
     }
 
     // MARK: - Card items (AppKit-based)
 
     private static let cardWidth: CGFloat = 340
+
+    @MainActor
+    private static func switcherItem(state: State) -> NSMenuItem {
+        let item = NSMenuItem()
+        item.view = ProviderSwitcherView(selected: state.selectedTab, width: cardWidth, onSelect: state.onSelectTab)
+        // Unlike passive card rows, this custom view contains real NSButtons.
+        // A disabled NSMenuItem prevents the buttons from receiving menu-tracking
+        // events on some macOS versions.
+        item.isEnabled = true
+        return item
+    }
 
     @MainActor
     private static func headerItem(snapshot: ProviderSnapshot) -> NSMenuItem {
@@ -231,6 +262,7 @@ final class LoadingCardView: NSView {
     init(text: String, width: CGFloat) {
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 44))
         wantsLayer = true
+        layer?.cornerRadius = 12
         let field = NSTextField(labelWithString: text)
         field.font = .systemFont(ofSize: 12)
         field.textColor = .secondaryLabelColor
@@ -253,13 +285,19 @@ final class ErrorCardView: NSView {
         let height = Self.height(message: message, width: width)
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: height))
         wantsLayer = true
+        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.10).cgColor
+        layer?.cornerRadius = 12
+        layer?.borderWidth = 0.8
+        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.55).cgColor
 
-        let icon = NSTextField(labelWithString: "⚠")
-        icon.font = .systemFont(ofSize: 16)
-        icon.textColor = isWarning ? .systemOrange : .systemRed
-        icon.sizeToFit()
-        let iconSize = icon.intrinsicContentSize
-        icon.frame = NSRect(x: 14, y: 12, width: iconSize.width, height: iconSize.height)
+        let icon = NSImageView(frame: NSRect(x: 14, y: 13, width: 16, height: 16))
+        icon.image = NSImage(
+            systemSymbolName: "exclamationmark.triangle.fill",
+            accessibilityDescription: L(.fetchFailed))
+        icon.image?.isTemplate = true
+        icon.contentTintColor = isWarning ? .systemOrange : .systemRed
+        icon.symbolConfiguration = .init(pointSize: 14, weight: .semibold)
+        icon.imageScaling = .scaleProportionallyDown
         addSubview(icon)
 
         let title = NSTextField(labelWithString: L(.fetchFailed))

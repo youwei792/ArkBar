@@ -2,7 +2,7 @@
 
 [English](README.en.md) · [安全报告](SECURITY.md) · [更新日志](CHANGELOG.md)
 
-ArkBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding Plan 与 Agent Plan 的剩余用量；不会显示 Dock 图标。
+ArkBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding/Agent Plan 与 OpenCode Go 的剩余用量；不会显示 Dock 图标。
 
 ## 特性
 
@@ -10,8 +10,9 @@ ArkBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding P
 - 分套餐展示会话、每周和每月的**剩余**用量与重置倒计时。
 - 用量越低，圆环渐变颜色越深，便于快速识别风险。
 - 支持自动选择、`arkcli` SSO、Volcengine AK/SK 和 Ark API Key。
+- 支持在 Ark 与 OpenCode Go 之间即时切换，并隔离两边的刷新状态与错误。
 - 支持跟随系统、简体中文和 English。
-- 不含遥测；不读取浏览器 Cookie、Keychain 或本地凭据文件。
+- 不含遥测；OpenCode 自动接入只在用户明确操作时读取认证 Cookie，并将过滤后的认证项保存在本机 Keychain。
 
 ## 快速开始
 
@@ -59,6 +60,7 @@ lipo -archs ArkBar
 | `arkcli` SSO（推荐） | `npm install -g @volcengine/ark-cli`，随后执行 `arkcli auth login volc-sso` | 可读取 `arkcli usage plan` 提供的个人版/团队版 Coding 与 Agent Plan 用量。 |
 | Volcengine AK/SK | `VOLCENGINE_ACCESS_KEY_ID` 和 `VOLCENGINE_SECRET_ACCESS_KEY` | 仅 Coding Plan，用 Volcengine V4 签名请求读取。 |
 | Ark API Key | `ARK_API_KEY`；可选 `ARK_MODEL_ID` | 仅单个请求限额窗口。探测会发送最小 API 请求，可能消耗请求额度。 |
+| OpenCode Go | 在“设置 → OpenCode Go”中明确点击“重新读取浏览器登录”，或选择手动 Cookie | 从 `opencode.ai` 的订阅页面读取其返回的套餐用量；不会用本地消费记录估算余额。 |
 
 Ark CLI 的最新安装方式请以官方 [Ark CLI 文档](https://github.com/volcengine/ark-cli) 为准。
 
@@ -73,7 +75,7 @@ export VOLCENGINE_SECRET_ACCESS_KEY='...'
 ## 如何理解界面
 
 - 所有核心百分比都表示**剩余**，不是已用。
-- 菜单栏胶囊显示当前 Session / 5 小时的剩余量。
+- 菜单栏胶囊显示当前所选标签的 Session / 5 小时剩余量。
 - 圆环中心显示会话（或 5 小时）剩余量；每一圈也按自己的**剩余**量填充，因此 100% 会显示为满环。
 - 圆环右侧依次为会话、每周、每月剩余量；每项配有自身的重置倒计时。
 - 刷新失败时会保留上次确认的数据，并标记为过期数据。
@@ -87,10 +89,12 @@ export VOLCENGINE_SECRET_ACCESS_KEY='...'
 
 ## 隐私
 
-- 不读取浏览器 Cookie、Keychain 或任意文件扫描。
+- OpenCode 自动接入只会在用户点击“重新读取浏览器登录”后读取 `opencode.ai` 的认证 Cookie；不读取浏览历史，也不会扫描任意文件。
+- ArkBar 只保留 `auth` / `__Host-auth` 认证项，并存入本机 macOS Keychain；常规启动、定时刷新和手动刷新只使用这份缓存，不会反复读取浏览器。
+- 手动粘贴的 OpenCode Cookie 同样只保存在本机 Keychain，不会写入 UserDefaults、源码或日志。
 - `arkcli` 自己管理 SSO 会话；ArkBar 只运行 `arkcli usage plan --format json` 并解析输出。
 - AK/SK 与 API Key 仅从启动环境读取，ArkBar 不会把它们写入磁盘。
-- 网络请求仅发送到所选数据源需要的火山方舟接口。
+- 网络请求仅发送到所选数据源需要的火山方舟接口或 `opencode.ai`。
 
 ## 开发与测试
 
@@ -98,7 +102,7 @@ export VOLCENGINE_SECRET_ACCESS_KEY='...'
 swift test
 ```
 
-测试覆盖 Ark CLI/OpenAPI 解码、时间格式、图标渲染和菜单卡片视觉回归。GitHub Actions 会在 pull request 和 `main` 推送时执行同一测试命令。
+测试覆盖 Ark CLI/OpenAPI/OpenCode Go 解码、时间格式、图标渲染、刷新交互和菜单卡片视觉回归。GitHub Actions 会在 pull request 和 `main` 推送时执行同一测试命令。
 
 ## 目录结构
 
@@ -110,4 +114,4 @@ Tests/ArkBarTests/       解码与视觉回归测试
 
 ## 许可证与致谢
 
-ArkBar 使用 [MIT License](LICENSE)。部分架构和渲染思路改编自 CodexBar，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+ArkBar 使用 [MIT License](LICENSE)。CodexBar 与 SweetCookieKit 的相关许可详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

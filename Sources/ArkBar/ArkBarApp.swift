@@ -21,11 +21,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // No Dock icon; pure menu-bar accessory.
-        NSApp.setActivationPolicy(.accessory)
+        let visualQA = ProcessInfo.processInfo.environment["ARKBAR_SHOW_SETTINGS"] == "1"
+        NSApp.setActivationPolicy(visualQA ? .regular : .accessory)
+        OpenCodeGoBrowserSession.configureKeychainPrompt()
 
         let store = UsageStore()
         self.store = store
         self.statusItem = StatusItemController(store: store)
         store.start()
+
+        // Read-only visual QA hook for local development. Normal launches never
+        // set this environment variable and retain the menu-bar-only behavior.
+        if visualQA {
+            statusItem?.showSettings()
+        }
     }
 }

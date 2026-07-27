@@ -1,39 +1,54 @@
-import Foundation
 import Combine
+import Foundation
 
-/// Owns the providers and the refresh loop, and publishes the current aggregated state
-/// the UI renders. Adding a new subscription/plan = add a new `UsageProvider` to `providers`.
+/// Owns the providers and the refresh loop. Ark and OpenCode Go intentionally
+/// remain separate tracks: a slow or failed web request must never make the Ark
+/// card spin, disable its Refresh row, or overwrite its last successful data.
 @MainActor
 final class UsageStore: ObservableObject {
     enum LoadStatus: Equatable {
         case never
         case loading
         case ok(snapshot: ProviderSnapshot)
-        /// A refresh failed, but the last confirmed snapshot is still useful.
+        /// A refresh failed, but the last confirmed snapshot remains useful.
         case stale(snapshot: ProviderSnapshot, message: String)
         case error(message: String)
 
         var snapshot: ProviderSnapshot? {
             switch self {
-            case let .ok(snapshot), let .stale(snapshot, _): return snapshot
-            default: return nil
+            case let .ok(snapshot), let .stale(snapshot, _): snapshot
+            case .never, .loading, .error: nil
             }
         }
     }
 
-    @Published private(set) var status: LoadStatus = .never
-    @Published private(set) var lastUpdatedAt: Date?
-    @Published private(set) var isRefreshing = false
+    @Published private(set) var arkStatus: LoadStatus = .never
+    @Published private(set) var opencodeStatus: LoadStatus = .never
+    @Published private(set) var arkLastUpdatedAt: Date?
+    @Published private(set) var opencodeLastUpdatedAt: Date?
+    @Published private(set) var arkIsRefreshing = false
+    @Published private(set) var opencodeIsRefreshing = false
+
+    /// Compatibility conveniences for views that only need the selected tab.
+    var status: LoadStatus { currentStatus }
+    var lastUpdatedAt: Date? { currentLastUpdatedAt }
+    var isRefreshing: Bool { currentIsRefreshing }
+    var currentStatus: LoadStatus { status(for: settings.selectedTab) }
+    var currentLastUpdatedAt: Date? { lastUpdatedAt(for: settings.selectedTab) }
+    var currentIsRefreshing: Bool { isRefreshing(for: settings.selectedTab) }
 
     private let settings: AppSettings
-    private var providers: [UsageProvider] = []
+    private var arkProviders: [UsageProvider] = []
+    private var openCodeProvider: OpenCodeGoProvider?
     private var timer: Timer?
-    private var lastSuccessfulSnapshot: ProviderSnapshot?
+    private var lastSuccessfulArkSnapshot: ProviderSnapshot?
+    private var lastSuccessfulOpenCodeSnapshot: ProviderSnapshot?
     private var cancellables = Set<AnyCancellable>()
 
     init(settings: AppSettings = .shared) {
         self.settings = settings
-        self.rebuildProviders()
+        rebuildProviders()
+
         settings.$refreshInterval
             .dropFirst()
             .sink { [weak self] _ in self?.scheduleNext() }
@@ -42,108 +57,243 @@ final class UsageStore: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in
                 self?.rebuildProviders()
-                self?.refresh()
+                self?.refresh(tab: .ark)
+            }
+            .store(in: &cancellables)
+        settings.$opencodeCookie
+            .dropFirst()
+            .sink { [weak self] _ in self?.refresh(tab: .opencode) }
+            .store(in: &cancellables)
+        settings.$opencodeCookieSource
+            .dropFirst()
+            .sink { [weak self] _ in self?.refresh(tab: .opencode) }
+            .store(in: &cancellables)
+        settings.$opencodeWorkspaceID
+            .dropFirst()
+            .debounce(for: .milliseconds(350), scheduler: RunLoop.main)
+            .sink { [weak self] _ in self?.refresh(tab: .opencode) }
+            .store(in: &cancellables)
+        settings.$selectedTab
+            .dropFirst()
+            .sink { [weak self] tab in
+                guard let self, self.status(for: tab) == .never else { return }
+                self.refresh(tab: tab)
             }
             .store(in: &cancellables)
     }
 
-    /// Rebuild the provider list from the current settings + environment.
-    /// In `auto`: prefer AK/SK, then API key, then arkcli (matches CodexBar's auto order:
-    /// configured API credentials first so an ambient arkcli session can't switch accounts).
+    /// Rebuild the Ark provider priority. OpenCode is a distinct provider, not
+    /// a fallback candidate, because its account data must never be merged with
+    /// Ark usage.
     func rebuildProviders() {
-        let env = ProcessInfo.processInfo.environment
-        var built: [UsageProvider] = []
+        let environment = ProcessInfo.processInfo.environment
+        var providers: [UsageProvider] = []
         switch settings.sourceMode {
         case .cli:
-            built.append(ArkCLIProvider())
+            providers.append(ArkCLIProvider())
         case .api:
-            if let creds = VolcCredentialResolver.resolve(environment: env) {
-                built.append(VolcAPIProvider(credentials: creds))
+            if let credentials = VolcCredentialResolver.resolve(environment: environment) {
+                providers.append(VolcAPIProvider(credentials: credentials))
             }
-            if let key = ArkAPIKeyResolver.resolve(environment: env) {
-                built.append(ArkAPIKeyProvider(apiKey: key))
+            if let key = ArkAPIKeyResolver.resolve(environment: environment) {
+                providers.append(ArkAPIKeyProvider(apiKey: key))
             }
         case .auto:
-            if let creds = VolcCredentialResolver.resolve(environment: env) {
-                built.append(VolcAPIProvider(credentials: creds))
+            if let credentials = VolcCredentialResolver.resolve(environment: environment) {
+                providers.append(VolcAPIProvider(credentials: credentials))
             }
-            if let key = ArkAPIKeyResolver.resolve(environment: env) {
-                built.append(ArkAPIKeyProvider(apiKey: key))
+            if let key = ArkAPIKeyResolver.resolve(environment: environment) {
+                providers.append(ArkAPIKeyProvider(apiKey: key))
             }
-            // arkcli is always appended last in auto so it only runs if no API creds configured.
-            // (CodexBar returns early when API creds exist; we instead let it be selectable in UI.)
-            built.append(ArkCLIProvider())
+            providers.append(ArkCLIProvider())
         }
-        self.providers = built
+        arkProviders = providers
+        openCodeProvider = OpenCodeGoProvider(settings: settings)
     }
 
     func start() {
-        self.refresh()
-        self.scheduleNext()
+        refreshAllConfigured()
+        scheduleNext()
     }
 
+    /// Refresh the currently visible provider. Manual Refresh and the optional
+    /// “refresh when opening” setting both use this path, so the UI feedback is
+    /// always scoped to the card the user is looking at.
     func refresh() {
-        guard !isRefreshing else {
-            // A menu click, timer tick, and explicit button can arrive while a
-            // slow CLI/API request is active. Coalescing them prevents a burst
-            // of follow-up requests (and the menu crash that used to cause).
+        refresh(tab: settings.selectedTab)
+    }
+
+    func refresh(tab: ProviderTab) {
+        switch tab {
+        case .ark: refreshArk()
+        case .opencode: refreshOpenCode()
+        }
+    }
+
+    /// The only path allowed to interactively read the browser cookie store.
+    /// Routine refreshes only use the cached ArkBar Keychain credential.
+    func reimportOpenCodeBrowserSession() {
+        guard !opencodeIsRefreshing else { return }
+        guard let provider = openCodeProvider,
+              provider.isAvailable(environment: ProcessInfo.processInfo.environment)
+        else {
+            if lastSuccessfulOpenCodeSnapshot == nil {
+                opencodeStatus = .error(message: L(.errorOpenCodeBrowserAuthorizationRequired))
+            }
             return
         }
-        isRefreshing = true
-        switch status {
+
+        opencodeIsRefreshing = true
+        switch opencodeStatus {
         case .ok, .stale:
-            // Keep confirmed data on screen while the next sync is in flight.
             break
         case .never, .loading, .error:
-            status = .loading
+            opencodeStatus = .loading
         }
-        let providers = self.providers
-        let env = ProcessInfo.processInfo.environment
+
+        let environment = ProcessInfo.processInfo.environment
+        let browser = OpenCodeGoBrowserSession.browserForInteractiveImport()
         Task { [weak self] in
-            await self?.runProviders(providers, environment: env)
+            guard let self else { return }
+            do {
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try OpenCodeGoBrowserSession.importSessionInteractively(from: browser)
+                }.value
+                await self.runOpenCodeProvider(provider, environment: environment)
+            } catch {
+                Self.log("✗ OpenCode Go browser import: \(error.localizedDescription)")
+                self.finishOpenCodeRefresh(error: error.localizedDescription)
+            }
         }
     }
 
-    private func runProviders(_ providers: [UsageProvider], environment: [String: String]) async {
+    private func refreshAllConfigured() {
+        refreshArk()
+        refreshOpenCode()
+    }
+
+    private func refreshArk() {
+        guard !arkIsRefreshing else { return }
+        arkIsRefreshing = true
+        switch arkStatus {
+        case .ok, .stale:
+            break // retain usable data while the request is in flight
+        case .never, .loading, .error:
+            arkStatus = .loading
+        }
+        let providers = arkProviders
+        let environment = ProcessInfo.processInfo.environment
+        Task { [weak self] in
+            await self?.runArkProviders(providers, environment: environment)
+        }
+    }
+
+    private func refreshOpenCode() {
+        guard !opencodeIsRefreshing else { return }
+        guard let provider = openCodeProvider,
+              provider.isAvailable(environment: ProcessInfo.processInfo.environment)
+        else {
+            if lastSuccessfulOpenCodeSnapshot == nil {
+                opencodeStatus = .error(message: L(.errorOpenCodeCookieMissing))
+            }
+            return
+        }
+        opencodeIsRefreshing = true
+        switch opencodeStatus {
+        case .ok, .stale:
+            break
+        case .never, .loading, .error:
+            opencodeStatus = .loading
+        }
+        let environment = ProcessInfo.processInfo.environment
+        Task { [weak self] in
+            await self?.runOpenCodeProvider(provider, environment: environment)
+        }
+    }
+
+    private func runArkProviders(_ providers: [UsageProvider], environment: [String: String]) async {
         guard !providers.isEmpty else {
-            finishRefresh(error: L(.noProvider))
+            finishArkRefresh(error: L(.noProvider))
             return
         }
         var lastError = L(.noProvider)
-        // Try each provider in priority order; first success wins.
         for provider in providers {
             do {
                 let snapshot = try await provider.fetch(environment: environment)
-                Self.log("✓ \(provider.displayName): \(snapshot.plans.count) plan(s), tightest=\(snapshot.tightestWindow?.usedPercent ?? -1)%")
-                // This is the local completion moment of the current sync, not
-                // the provider's payload timestamp. It must advance on every
-                // successful Refresh so the menu can prove that the request ran.
-                self.lastUpdatedAt = Date()
-                self.lastSuccessfulSnapshot = snapshot
-                self.status = .ok(snapshot: snapshot)
-                finishRefresh()
+                Self.log("✓ \(provider.displayName): \(snapshot.plans.count) plan(s)")
+                arkLastUpdatedAt = Date()
+                lastSuccessfulArkSnapshot = snapshot
+                arkStatus = .ok(snapshot: snapshot)
+                finishArkRefresh()
                 return
             } catch let error as UsageError {
                 Self.log("✗ \(provider.displayName): \(error.errorDescription ?? "Unknown error")")
                 lastError = error.errorDescription ?? "Unknown error"
-                continue
             } catch {
                 Self.log("✗ \(provider.displayName): \(error.localizedDescription)")
                 lastError = error.localizedDescription
-                continue
             }
         }
-        finishRefresh(error: lastError)
+        finishArkRefresh(error: lastError)
     }
 
-    private func finishRefresh(error: String? = nil) {
-        isRefreshing = false
+    private func runOpenCodeProvider(_ provider: OpenCodeGoProvider, environment: [String: String]) async {
+        do {
+            let snapshot = try await provider.fetch(environment: environment)
+            Self.log("✓ \(provider.displayName): \(snapshot.plans.count) plan(s)")
+            opencodeLastUpdatedAt = Date()
+            lastSuccessfulOpenCodeSnapshot = snapshot
+            opencodeStatus = .ok(snapshot: snapshot)
+            finishOpenCodeRefresh()
+        } catch let error as UsageError {
+            Self.log("✗ \(provider.displayName): \(error.errorDescription ?? "Unknown error")")
+            finishOpenCodeRefresh(error: error.errorDescription ?? "Unknown error")
+        } catch {
+            Self.log("✗ \(provider.displayName): \(error.localizedDescription)")
+            finishOpenCodeRefresh(error: error.localizedDescription)
+        }
+    }
+
+    private func finishArkRefresh(error: String? = nil) {
+        arkIsRefreshing = false
         if let error {
-            if let snapshot = lastSuccessfulSnapshot {
-                status = .stale(snapshot: snapshot, message: error)
+            if let snapshot = lastSuccessfulArkSnapshot {
+                arkStatus = .stale(snapshot: snapshot, message: error)
             } else {
-                status = .error(message: error)
+                arkStatus = .error(message: error)
             }
+        }
+    }
+
+    private func finishOpenCodeRefresh(error: String? = nil) {
+        opencodeIsRefreshing = false
+        if let error {
+            if let snapshot = lastSuccessfulOpenCodeSnapshot {
+                opencodeStatus = .stale(snapshot: snapshot, message: error)
+            } else {
+                opencodeStatus = .error(message: error)
+            }
+        }
+    }
+
+    func status(for tab: ProviderTab) -> LoadStatus {
+        switch tab {
+        case .ark: return arkStatus
+        case .opencode: return opencodeStatus
+        }
+    }
+
+    func lastUpdatedAt(for tab: ProviderTab) -> Date? {
+        switch tab {
+        case .ark: return arkLastUpdatedAt
+        case .opencode: return opencodeLastUpdatedAt
+        }
+    }
+
+    func isRefreshing(for tab: ProviderTab) -> Bool {
+        switch tab {
+        case .ark: return arkIsRefreshing
+        case .opencode: return opencodeIsRefreshing
         }
     }
 
@@ -151,22 +301,19 @@ final class UsageStore: ObservableObject {
         timer?.invalidate()
         let interval = TimeInterval(settings.refreshInterval.rawValue)
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.refresh() }
+            Task { @MainActor [weak self] in self?.refreshAllConfigured() }
         }
-        // Status menus run in an event-tracking mode. Adding the timer to the
-        // common modes keeps the configured refresh cadence alive while a menu
-        // is being opened or interacted with.
+        // Menu tracking uses a different run-loop mode. Common modes keep the
+        // configured cadence alive while the popover is open.
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }
 
-    /// Diagnostic logger to stderr. Helps debug "menu bar shows nothing" issues;
-    // run from terminal to see: `open /Applications/ArkBar.app` won't show this,
-    // but launching the binary directly will.
     nonisolated static func log(_ message: String) {
-        let stderr = FileHandle.standardError
-        let timestamp = ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withInternetDateTime])
-        let line = "[ArkBar \(timestamp)] \(message)\n"
-        stderr.write(Data(line.utf8))
+        let timestamp = ISO8601DateFormatter.string(
+            from: Date(),
+            timeZone: .current,
+            formatOptions: [.withInternetDateTime])
+        FileHandle.standardError.write(Data("[ArkBar \(timestamp)] \(message)\n".utf8))
     }
 }
