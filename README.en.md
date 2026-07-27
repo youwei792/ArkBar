@@ -1,6 +1,6 @@
 # ArkBar
 
-[中文文档](README.zh-CN.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
+[简体中文](README.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
 
 ArkBar is a native macOS menu-bar app for Volcengine Ark Coding Plan and Agent Plan usage. It keeps the quota you have **left** visible without a Dock icon.
 
@@ -60,6 +60,7 @@ export VOLCENGINE_SECRET_ACCESS_KEY='...'
 - The menu-bar capsule reflects the tightest quota window across available plans.
 - The three ring rows are Session, Weekly, and Monthly remaining quota; each row keeps its own reset countdown.
 - A refresh failure preserves the last confirmed data and marks it stale.
+- By default, data refreshes only on the interval selected in **Settings → Refresh**. Enable **Refresh when opening the menu bar item** to also refresh whenever the status item is opened; overlapping triggers are coalesced into one request.
 - The interface follows the system language by default. Change it in **Settings → Language**.
 
 ## Subscription-expiry data

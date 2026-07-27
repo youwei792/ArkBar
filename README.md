@@ -1,6 +1,6 @@
 # ArkBar
 
-[English](README.md) · [贡献指南](CONTRIBUTING.md) · [安全报告](SECURITY.md) · [更新日志](CHANGELOG.md)
+[English](README.en.md) · [贡献指南](CONTRIBUTING.md) · [安全报告](SECURITY.md) · [更新日志](CHANGELOG.md)
 
 ArkBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding Plan 与 Agent Plan 的剩余用量；不会显示 Dock 图标。
 
@@ -60,6 +60,7 @@ export VOLCENGINE_SECRET_ACCESS_KEY='...'
 - 菜单栏胶囊反映全部套餐中最紧张的时间窗口。
 - 圆环右侧依次为会话、每周、每月剩余量；每项配有自身的重置倒计时。
 - 刷新失败时会保留上次确认的数据，并标记为过期数据。
+- 默认仅按“设置 → 刷新 → 间隔”自动同步；可开启“点开菜单栏图标时刷新”，在每次打开角标时额外刷新。重复触发会合并为一次请求。
 - 默认跟随系统语言，可在“设置 → 语言”中修改。
 
 ## 套餐到期日

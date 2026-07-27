@@ -101,7 +101,9 @@ final class StatusItemController {
 
     @objc private func handleClick(_ sender: NSStatusBarButton) {
         // Rebuild the menu fresh each time it's opened (so countdowns update).
-        store.refreshIfStale()
+        if settings.refreshWhenMenuOpens {
+            store.refresh()
+        }
         rebuildMenu()
         // Setting statusItem.menu makes the button pop the menu on click
         // automatically; no need to call performClick (which would re-enter

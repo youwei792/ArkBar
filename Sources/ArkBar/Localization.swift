@@ -77,6 +77,7 @@ enum LKey: String {
     case sectionAdvanced = "settings.sectionAdvanced"
     case displayMode = "settings.displayMode"
     case interval = "settings.interval"
+    case refreshWhenMenuOpens = "settings.refreshWhenMenuOpens"
     case lastFetch = "settings.lastFetch"
     case source = "settings.source"
     case sourceAuto = "settings.sourceAuto"
@@ -260,6 +261,7 @@ final class L10n: ObservableObject {
         add(.sectionAdvanced, "高级", "Advanced")
         add(.displayMode, "显示模式", "Display mode")
         add(.interval, "间隔", "Interval")
+        add(.refreshWhenMenuOpens, "点开菜单栏图标时刷新", "Refresh when opening the menu bar item")
         add(.lastFetch, "上次", "Last")
         add(.source, "来源", "Source")
         add(.sourceAuto, "自动 (AK/SK → API Key → arkcli)", "Auto (AK/SK -> API Key -> arkcli)")
