@@ -1,0 +1,30 @@
+# SwiftPM and local macOS build products
+.build/
+ArkBar.app/
+DerivedData/
+*.xcarchive/
+
+# Local agent/editor state and macOS metadata
+.zcode/
+.DS_Store
+.swiftpm/
+*.xcuserstate
+xcuserdata/
+
+# Credentials, certificates, and machine-specific configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.p8
+*.mobileprovision
+*.cer
+credentials.json
+token.json
+
+# Logs and local data
+*.log
+*.sqlite
+*.sqlite3
