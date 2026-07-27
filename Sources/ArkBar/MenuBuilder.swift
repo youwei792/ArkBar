@@ -298,6 +298,7 @@ final class MenuActionTarget: NSObject {
 final class RefreshMenuItemView: NSView {
     private let hoverView = NSVisualEffectView()
     private let iconView = NSImageView()
+    private let activityIndicator = NSProgressIndicator()
     private let titleField = NSTextField(labelWithString: "")
     private let detailField = NSTextField(labelWithString: "")
     private let action: () -> Void
@@ -347,6 +348,7 @@ final class RefreshMenuItemView: NSView {
         hoverView.frame = bounds.insetBy(dx: 5, dy: 1)
         let iconSide: CGFloat = 15
         iconView.frame = NSRect(x: 15, y: 12, width: iconSide, height: iconSide)
+        activityIndicator.frame = NSRect(x: 14, y: 11, width: 17, height: 17)
         titleField.frame = NSRect(x: 39, y: 6, width: bounds.width - 54, height: 15)
         detailField.frame = NSRect(x: 39, y: 21, width: bounds.width - 54, height: 12)
     }
@@ -355,6 +357,13 @@ final class RefreshMenuItemView: NSView {
         displayedTitle = title
         displayedLastUpdatedAt = lastUpdatedAt
         enabled = !isRefreshing
+        iconView.isHidden = isRefreshing
+        activityIndicator.isHidden = !isRefreshing
+        if isRefreshing {
+            activityIndicator.startAnimation(nil)
+        } else {
+            activityIndicator.stopAnimation(nil)
+        }
         titleField.stringValue = isRefreshing ? L(.refreshing) : title
         if isRefreshing {
             detailField.stringValue = L(.refreshDetails)
@@ -370,7 +379,6 @@ final class RefreshMenuItemView: NSView {
             iconView.contentTintColor = .labelColor
         }
         titleField.textColor = enabled ? .labelColor : .secondaryLabelColor
-        updateRefreshAnimation(isRefreshing: isRefreshing)
         needsDisplay = true
     }
 
@@ -404,8 +412,17 @@ final class RefreshMenuItemView: NSView {
         iconView.image = image
         iconView.symbolConfiguration = .init(pointSize: 13, weight: .medium)
         iconView.imageScaling = .scaleProportionallyDown
-        iconView.wantsLayer = true
         addSubview(iconView)
+
+        // A native indeterminate indicator keeps its own animation geometry
+        // inside this fixed frame. Rotating an NSImageView layer in a tracked
+        // status menu can make the glyph orbit outside its icon slot.
+        activityIndicator.style = .spinning
+        activityIndicator.controlSize = .small
+        activityIndicator.isIndeterminate = true
+        activityIndicator.isDisplayedWhenStopped = false
+        activityIndicator.isHidden = true
+        addSubview(activityIndicator)
 
         titleField.font = .menuFont(ofSize: 0)
         titleField.lineBreakMode = .byTruncatingTail
@@ -429,25 +446,6 @@ final class RefreshMenuItemView: NSView {
             errorMessage: nil,
             title: displayedTitle)
         action()
-    }
-
-    private func updateRefreshAnimation(isRefreshing: Bool) {
-        guard let layer = iconView.layer else { return }
-        let key = "arkbar.refreshRotation"
-        guard isRefreshing,
-              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        else {
-            layer.removeAnimation(forKey: key)
-            return
-        }
-        guard layer.animation(forKey: key) == nil else { return }
-        let animation = CABasicAnimation(keyPath: "transform.rotation.z")
-        animation.fromValue = 0
-        animation.toValue = Double.pi * 2
-        animation.duration = 0.85
-        animation.repeatCount = .infinity
-        animation.timingFunction = CAMediaTimingFunction(name: .linear)
-        layer.add(animation, forKey: key)
     }
 
     static func relativeUpdateText(_ date: Date?) -> String {

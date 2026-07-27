@@ -227,6 +227,8 @@ struct MenuBuilderTests {
         let labels = view.subviews.compactMap { $0 as? NSTextField }.map(\.stringValue)
         #expect(labels.contains(L(.refreshing)))
         #expect(labels.contains(L(.refreshDetails)))
+        let spinner = view.subviews.compactMap { $0 as? NSProgressIndicator }.first
+        #expect(spinner?.isHidden == false)
     }
 }
 
