@@ -1,23 +1,23 @@
 # ArkBar
 
-[中文文档](README.zh-CN.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
+[English](README.md) · [贡献指南](CONTRIBUTING.md) · [安全报告](SECURITY.md) · [更新日志](CHANGELOG.md)
 
-ArkBar is a native macOS menu-bar app for Volcengine Ark Coding Plan and Agent Plan usage. It keeps the quota you have **left** visible without a Dock icon.
+ArkBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding Plan 与 Agent Plan 的剩余用量；不会显示 Dock 图标。
 
-## Highlights
+## 特性
 
-- Native AppKit UI for macOS 14+.
-- Per-plan session, weekly, and monthly remaining quota with reset countdowns.
-- A gradient ring that becomes visually deeper as remaining quota gets low.
-- Auto, `arkcli` SSO, AK/SK, and Ark API key data-source modes.
-- System, Simplified Chinese, and English interfaces.
-- No telemetry, browser-cookie access, Keychain access, or credential storage.
+- 面向 macOS 14+ 的原生 AppKit 界面。
+- 分套餐展示会话、每周和每月的**剩余**用量与重置倒计时。
+- 用量越低，圆环渐变颜色越深，便于快速识别风险。
+- 支持自动选择、`arkcli` SSO、Volcengine AK/SK 和 Ark API Key。
+- 支持跟随系统、简体中文和 English。
+- 不含遥测；不读取浏览器 Cookie、Keychain 或本地凭据文件。
 
-## Quick start
+## 快速开始
 
-### Build from source
+### 从源码运行
 
-Requirements: macOS 14+, Swift 6.0, and one supported authentication source.
+要求：macOS 14+、Swift 6.0，以及任一受支持的数据源。
 
 ```bash
 git clone https://github.com/youwei792/ArkBar.git
@@ -26,27 +26,27 @@ swift build
 .build/debug/ArkBar
 ```
 
-### Package a local app
+### 打包本地应用
 
 ```bash
 ./Scripts/package_app.sh
 ```
 
-This development script builds an Apple Silicon (`arm64`) app, replaces the local `ArkBar.app` bundle, and replaces `/Applications/ArkBar.app`. It ad-hoc signs the result; it is not a notarized release installer.
+该开发脚本仅构建 Apple Silicon（`arm64`）版本，会替换工作目录的 `ArkBar.app` 和 `/Applications/ArkBar.app`，并进行 ad-hoc 签名；它不是公证过的正式发布安装包。
 
-## Authentication and data sources
+## 认证与数据源
 
-In **Auto** mode, ArkBar prefers explicitly configured credentials, then falls back to `arkcli`. The first successful source is shown in the menu.
+自动模式优先使用显式设置的凭据，随后回退到 `arkcli`；菜单会显示实际成功的数据源。
 
-| Source | Configuration | Coverage and limits |
+| 数据源 | 配置方式 | 覆盖范围与限制 |
 | --- | --- | --- |
-| `arkcli` SSO (recommended) | `npm install -g @volcengine/ark-cli` then `arkcli auth login volc-sso` | Personal and team Coding/Agent Plan usage exposed by `arkcli usage plan`. |
-| Volcengine AK/SK | `VOLCENGINE_ACCESS_KEY_ID` and `VOLCENGINE_SECRET_ACCESS_KEY` | Coding Plan usage only, via signed `GetCodingPlanUsage`. |
-| Ark API key | `ARK_API_KEY`; optionally `ARK_MODEL_ID` | One request-rate-limit window only. The probe sends a minimal API request, so it can consume request quota. |
+| `arkcli` SSO（推荐） | `npm install -g @volcengine/ark-cli`，随后执行 `arkcli auth login volc-sso` | 可读取 `arkcli usage plan` 提供的个人版/团队版 Coding 与 Agent Plan 用量。 |
+| Volcengine AK/SK | `VOLCENGINE_ACCESS_KEY_ID` 和 `VOLCENGINE_SECRET_ACCESS_KEY` | 仅 Coding Plan，用 Volcengine V4 签名请求读取。 |
+| Ark API Key | `ARK_API_KEY`；可选 `ARK_MODEL_ID` | 仅单个请求限额窗口。探测会发送最小 API 请求，可能消耗请求额度。 |
 
-See the official [Ark CLI installation guide](https://github.com/volcengine/ark-cli) for the current CLI setup.
+Ark CLI 的最新安装方式请以官方 [Ark CLI 文档](https://github.com/volcengine/ark-cli) 为准。
 
-Never commit credentials. Set them in your shell environment before launching ArkBar:
+请勿提交凭据。可在启动前设置环境变量：
 
 ```bash
 export VOLCENGINE_ACCESS_KEY_ID='...'
@@ -54,51 +54,45 @@ export VOLCENGINE_SECRET_ACCESS_KEY='...'
 .build/debug/ArkBar
 ```
 
-## Reading the UI
+## 如何理解界面
 
-- All prominent percentages mean **remaining** quota, not consumed quota.
-- The menu-bar capsule reflects the tightest quota window across available plans.
-- The three ring rows are Session, Weekly, and Monthly remaining quota; each row keeps its own reset countdown.
-- A refresh failure preserves the last confirmed data and marks it stale.
-- The interface follows the system language by default. Change it in **Settings → Language**.
+- 所有核心百分比都表示**剩余**，不是已用。
+- 菜单栏胶囊反映全部套餐中最紧张的时间窗口。
+- 圆环右侧依次为会话、每周、每月剩余量；每项配有自身的重置倒计时。
+- 刷新失败时会保留上次确认的数据，并标记为过期数据。
+- 默认跟随系统语言，可在“设置 → 语言”中修改。
 
-## Subscription-expiry data
+## 套餐到期日
 
-Quota reset time is not subscription expiry. ArkBar displays a plan-expiry badge only when a provider exposes a verified order end date. The currently supported `arkcli usage plan` response does not provide that value, so ArkBar intentionally hides the badge instead of guessing from a reset time or local profile cache.
+配额重置时间不等于套餐到期日。只有数据源提供经过验证的订单终止时间时，ArkBar 才显示到期徽标。当前 `arkcli usage plan` 没有提供该字段，因此应用会隐藏它，不会用重置时间或本地缓存猜测。
 
-## Privacy
+## 隐私
 
-- ArkBar does not read browser cookies, Keychain entries, or arbitrary files.
-- `arkcli` keeps ownership of its SSO session; ArkBar only runs `arkcli usage plan --format json` and parses its output.
-- AK/SK and API keys are read from the launch environment and are never written to disk by ArkBar.
-- Network requests go only to Volcengine Ark endpoints required by the selected source.
+- 不读取浏览器 Cookie、Keychain 或任意文件扫描。
+- `arkcli` 自己管理 SSO 会话；ArkBar 只运行 `arkcli usage plan --format json` 并解析输出。
+- AK/SK 与 API Key 仅从启动环境读取，ArkBar 不会把它们写入磁盘。
+- 网络请求仅发送到所选数据源需要的火山方舟接口。
 
-## Development
+## 开发与测试
 
 ```bash
 swift test
 ```
 
-The test suite covers Ark CLI and OpenAPI decoding, time formatting, icon rendering, and menu-card layout regressions. GitHub Actions runs the same test command for pull requests and pushes to `main`.
+测试覆盖 Ark CLI/OpenAPI 解码、时间格式、图标渲染和菜单卡片视觉回归。GitHub Actions 会在 pull request 和 `main` 推送时执行同一测试命令。
 
-## Project structure
+## 目录结构
 
 ```text
-Sources/ArkBar/
-  ArkCLIFetcher.swift    arkcli SSO usage provider
-  VolcAPIProvider.swift  AK/SK signed Coding Plan provider
-  ArkAPIKeyProvider.swift API-key rate-limit probe provider
-  UsageStore.swift       source selection and refresh lifecycle
-  PlanCardView.swift     menu-card layout and remaining-quota ring
-  Localization.swift     Simplified Chinese and English catalog
-Scripts/package_app.sh   local Apple Silicon app packaging
-Tests/ArkBarTests/       decoding and visual regression tests
+Sources/ArkBar/          应用源码
+Scripts/package_app.sh   本地 Apple Silicon 打包脚本
+Tests/ArkBarTests/       解码与视觉回归测试
 ```
 
-## Contributing
+## 参与贡献
 
-Issues and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md), keep credentials out of logs and fixtures, and run `swift test` before opening a pull request.
+欢迎提交 Issue 和 Pull Request。请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，不要在日志或测试夹具中加入凭据，并在提交前运行 `swift test`。
 
-## License and attribution
+## 许可证与致谢
 
-ArkBar is released under the [MIT License](LICENSE). Parts of the architecture and rendering approach were adapted from CodexBar; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+ArkBar 使用 [MIT License](LICENSE)。部分架构和渲染思路改编自 CodexBar，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
