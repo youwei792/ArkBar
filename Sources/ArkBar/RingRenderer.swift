@@ -101,74 +101,48 @@ enum RingRenderer {
         ctx.addArc(center: center, radius: radius, startAngle: 0, endAngle: .pi * 2, clockwise: false)
         ctx.strokePath()
 
-        // Filled arc: starts at 12 o'clock (top) and sweeps counter-clockwise
-        // (i.e. top -> left -> bottom -> right) as remaining quota grows.
-        // A 100% remaining window is a complete ring; a depleted window is empty.
-        //
-        // Core Graphics angle convention: 0 rad = 3 o'clock (right), angles
-        // increase counter-clockwise. So 12 o'clock = π/2. Sweeping CCW by
-        // `2π·trim` radians reaches endAngle = π/2 + 2π·trim. Using
-        // clockwise:false with an increasing endAngle draws exactly that arc,
-        // unambiguously, in every bitmap context.
-        let trim = CGFloat(min(100, max(0, remainingPercent))) / 100
-        guard trim > 0.005 else { return }
-
-        let startAngle: CGFloat = .pi / 2
-        let endAngle: CGFloat = .pi / 2 + .pi * 2 * trim
-        let sweep = .pi * 2 * trim  // radians, always positive
-
         // A subtle outer glow makes the current value easier to scan in a dense
         // menu without changing the existing concentric-ring layout.
+        let trim = CGFloat(min(100, max(0, remainingPercent))) / 100
+        guard trim > 0.005 else { return }
         ctx.setLineCap(.round)
         ctx.setStrokeColor(palette.start.withAlphaComponent(0.18).cgColor)
         ctx.setLineWidth(width + 5)
         ctx.addArc(center: center, radius: radius,
-                   startAngle: startAngle,
-                   endAngle: endAngle,
-                   clockwise: false)
+                   startAngle: .pi / 2,
+                   endAngle: .pi / 2 - .pi * 2 * trim,
+                   clockwise: true)
         ctx.strokePath()
 
-        // Filled arc stroked with a directional gradient. The palette gets
-        // deeper as the remaining quota approaches zero.
+        // Filled arc: starts at 12 o'clock (top), goes counter-clockwise
+        // and grows as available quota grows. A 100% remaining window is a
+        // complete ring; a depleted window is empty.
+        // In this CGContext, clockwise:true + decreasing endAngle produces the
+        // counter-clockwise visual sweep we want (verified empirically).
         ctx.setLineCap(.round)
-        ctx.setLineWidth(width)
-        ctx.setStrokeColor(palette.start.cgColor)
-        ctx.addArc(center: center, radius: radius,
-                   startAngle: startAngle,
-                   endAngle: endAngle,
-                   clockwise: false)
-        ctx.strokePath()
-
-        // Overlay the gradient only where the arc is, by clipping to the stroked
-        // arc path. This keeps the directional color shift without the full-ring
-        // fill that the previous replacePathWithStrokedPath+clip produced.
+        // Clip the arc's stroked path and fill it with a directional gradient.
+        // The palette gets deeper as the remaining quota approaches zero.
         ctx.saveGState()
         ctx.setLineWidth(width)
         ctx.addArc(center: center, radius: radius,
-                   startAngle: startAngle,
-                   endAngle: endAngle,
-                   clockwise: false)
+                   startAngle: .pi / 2,
+                   endAngle: .pi / 2 - .pi * 2 * trim,
+                   clockwise: true)
         ctx.replacePathWithStrokedPath()
         ctx.clip()
         let colors = [palette.start.cgColor, palette.end.cgColor] as CFArray
         if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1]) {
-            // Gradient runs along the arc's chord direction so the deepening
-            // tracks the sweep from start to end of the filled portion.
-            let startX = center.x + cos(startAngle) * radius
-            let startY = center.y + sin(startAngle) * radius
-            let endX = center.x + cos(endAngle) * radius
-            let endY = center.y + sin(endAngle) * radius
             ctx.drawLinearGradient(gradient,
-                                   start: CGPoint(x: startX, y: startY),
-                                   end: CGPoint(x: endX, y: endY),
+                                   start: CGPoint(x: center.x - radius, y: center.y + radius),
+                                   end: CGPoint(x: center.x + radius, y: center.y - radius),
                                    options: [])
         }
         ctx.restoreGState()
 
         // A small endpoint indicator gives the most immediate window a lively,
         // dashboard-like focal point while remaining legible in Dark Mode.
-        // It sits at the END of the filled arc (where remaining quota runs out).
-        let point = CGPoint(x: center.x + cos(endAngle) * radius, y: center.y + sin(endAngle) * radius)
+        let angle = CGFloat.pi / 2 - .pi * 2 * trim
+        let point = CGPoint(x: center.x + cos(angle) * radius, y: center.y + sin(angle) * radius)
         ctx.setFillColor(NSColor.white.withAlphaComponent(0.82).cgColor)
         ctx.fillEllipse(in: CGRect(x: point.x - 2.2, y: point.y - 2.2, width: 4.4, height: 4.4))
     }
