@@ -208,6 +208,26 @@ struct MenuBuilderTests {
         #expect(refreshItem?.action == nil)
         #expect(refreshItem?.view is RefreshMenuItemView)
     }
+
+    @Test("Refresh row switches to the in-flight state before its action returns")
+    @MainActor
+    func refreshRowShowsImmediateFeedback() {
+        var refreshCalls = 0
+        let view = RefreshMenuItemView(
+            title: L(.refreshNow),
+            isRefreshing: false,
+            lastUpdatedAt: Date(),
+            errorMessage: nil,
+            action: { refreshCalls += 1 },
+            width: 300)
+
+        #expect(view.accessibilityPerformPress())
+        #expect(refreshCalls == 1)
+        #expect(view.isAccessibilityEnabled() == false)
+        let labels = view.subviews.compactMap { $0 as? NSTextField }.map(\.stringValue)
+        #expect(labels.contains(L(.refreshing)))
+        #expect(labels.contains(L(.refreshDetails)))
+    }
 }
 
 @Suite("IconRenderer")

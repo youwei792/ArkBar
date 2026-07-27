@@ -33,23 +33,26 @@ final class StatusItemController {
             hoverTrackingArea = trackingArea
         }
 
+        // UsageStore is main-actor isolated. Do not hop through
+        // `RunLoop.main` here: an NSMenu tracks events in a different run-loop
+        // mode, so a default-mode hop leaves the refresh row visually stale
+        // until the user closes the menu. Consume the published value directly
+        // as `@Published` emits before its backing property is written.
         store.$status
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
-                self?.updateIcon()
-                self?.updateActiveRefreshView()
+            .sink { [weak self] status in
+                self?.updateIcon(for: status)
+                self?.updateActiveRefreshView(status: status)
             }
             .store(in: &cancellables)
         store.$lastUpdatedAt
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
-                self?.updateIcon()
-                self?.updateActiveRefreshView()
+            .sink { [weak self] lastUpdatedAt in
+                self?.updateActiveRefreshView(lastUpdatedAt: lastUpdatedAt)
             }
             .store(in: &cancellables)
         store.$isRefreshing
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
+            .sink { [weak self] isRefreshing in
+                self?.updateActiveRefreshView(isRefreshing: isRefreshing)
+            }
             .store(in: &cancellables)
         settings.$displayMode
             .receive(on: RunLoop.main)
@@ -65,10 +68,10 @@ final class StatusItemController {
         updateIcon()
     }
 
-    private func updateIcon() {
+    private func updateIcon(for loadStatus: UsageStore.LoadStatus? = nil) {
         let remaining: Double?
         let stale: Bool
-        switch store.status {
+        switch loadStatus ?? store.status {
         case .never, .loading:
             remaining = nil
             stale = true
@@ -159,7 +162,7 @@ final class StatusItemController {
             lastUpdatedAt: store.lastUpdatedAt,
             isRefreshing: store.isRefreshing,
             now: Date(),
-            onRefresh: { [weak self] in self?.store.refresh() },
+            onRefresh: { [weak self] in self?.refreshFromMenu() },
             onSettings: { [weak self] in self?.showSettings() },
             onQuit: { NSApp.terminate(nil) })
         let menu = MenuBuilder.build(state)
@@ -174,15 +177,27 @@ final class StatusItemController {
         rebuildMenu()
     }
 
-    private func updateActiveRefreshView() {
+    private func refreshFromMenu() {
+        store.refresh()
+        // The row also transitions itself before invoking this callback. This
+        // explicit update covers accessibility activation and any AppKit menu
+        // delivery quirk without waiting for a publisher scheduling hop.
+        updateActiveRefreshView(isRefreshing: store.isRefreshing)
+    }
+
+    private func updateActiveRefreshView(
+        isRefreshing: Bool? = nil,
+        lastUpdatedAt: Date? = nil,
+        status: UsageStore.LoadStatus? = nil)
+    {
         let errorMessage: String?
-        switch store.status {
+        switch status ?? store.status {
         case let .error(message), let .stale(_, message): errorMessage = message
         default: errorMessage = nil
         }
         activeRefreshView?.update(
-            isRefreshing: store.isRefreshing,
-            lastUpdatedAt: store.lastUpdatedAt,
+            isRefreshing: isRefreshing ?? store.isRefreshing,
+            lastUpdatedAt: lastUpdatedAt ?? store.lastUpdatedAt,
             errorMessage: errorMessage,
             title: L(.refreshNow))
     }

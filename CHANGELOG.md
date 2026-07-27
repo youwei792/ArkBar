@@ -10,6 +10,7 @@ All notable public changes to ArkBar are documented here.
 - Changed the menu-bar capsule to show the current Session / 5-hour remaining percentage rather than the lowest remaining period.
 - Refresh now records its local completion time in the visible “Updated at” label and remains available whether or not refresh-on-open is enabled.
 - Added a persistent, live refresh row with in-place refreshing, success, relative-time, and failure states.
+- Fixed the live refresh row so it changes to “Refreshing…” immediately while the menu is open, then returns to its success or error state without requiring the menu to close.
 - Made Simplified Chinese the default repository README and moved the English version to `README.en.md`.
 
 - Added English and Simplified Chinese public documentation.

@@ -303,6 +303,8 @@ final class RefreshMenuItemView: NSView {
     private let action: () -> Void
     private var enabled = true
     private var trackingArea: NSTrackingArea?
+    private var displayedTitle = ""
+    private var displayedLastUpdatedAt: Date?
 
     override var isFlipped: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -350,6 +352,8 @@ final class RefreshMenuItemView: NSView {
     }
 
     func update(isRefreshing: Bool, lastUpdatedAt: Date?, errorMessage: String?, title: String) {
+        displayedTitle = title
+        displayedLastUpdatedAt = lastUpdatedAt
         enabled = !isRefreshing
         titleField.stringValue = isRefreshing ? L(.refreshing) : title
         if isRefreshing {
@@ -366,6 +370,7 @@ final class RefreshMenuItemView: NSView {
             iconView.contentTintColor = .labelColor
         }
         titleField.textColor = enabled ? .labelColor : .secondaryLabelColor
+        updateRefreshAnimation(isRefreshing: isRefreshing)
         needsDisplay = true
     }
 
@@ -380,7 +385,7 @@ final class RefreshMenuItemView: NSView {
 
     override func accessibilityPerformPress() -> Bool {
         guard enabled else { return false }
-        action()
+        beginRefresh()
         return true
     }
 
@@ -399,6 +404,7 @@ final class RefreshMenuItemView: NSView {
         iconView.image = image
         iconView.symbolConfiguration = .init(pointSize: 13, weight: .medium)
         iconView.imageScaling = .scaleProportionallyDown
+        iconView.wantsLayer = true
         addSubview(iconView)
 
         titleField.font = .menuFont(ofSize: 0)
@@ -411,7 +417,37 @@ final class RefreshMenuItemView: NSView {
 
     @objc private func handleClick(_ recognizer: NSClickGestureRecognizer) {
         guard recognizer.state == .ended, enabled else { return }
+        beginRefresh()
+    }
+
+    private func beginRefresh() {
+        // Give the click instant feedback before the async provider request
+        // starts. The controller then owns the success/error transition.
+        update(
+            isRefreshing: true,
+            lastUpdatedAt: displayedLastUpdatedAt,
+            errorMessage: nil,
+            title: displayedTitle)
         action()
+    }
+
+    private func updateRefreshAnimation(isRefreshing: Bool) {
+        guard let layer = iconView.layer else { return }
+        let key = "arkbar.refreshRotation"
+        guard isRefreshing,
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        else {
+            layer.removeAnimation(forKey: key)
+            return
+        }
+        guard layer.animation(forKey: key) == nil else { return }
+        let animation = CABasicAnimation(keyPath: "transform.rotation.z")
+        animation.fromValue = 0
+        animation.toValue = Double.pi * 2
+        animation.duration = 0.85
+        animation.repeatCount = .infinity
+        animation.timingFunction = CAMediaTimingFunction(name: .linear)
+        layer.add(animation, forKey: key)
     }
 
     static func relativeUpdateText(_ date: Date?) -> String {
