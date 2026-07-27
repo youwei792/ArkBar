@@ -9,6 +9,14 @@ import AppKit
 /// Layout: outer ring = monthly, middle = weekly, inner = session/5h.
 /// Center shows the remaining percent of the primary (Session / 5-hour) window.
 enum RingRenderer {
+    /// Per-provider color theme. `.ark` is the original mint/blue/indigo palette
+    /// and stays the default so all existing call sites render unchanged.
+    /// `.opencode` swaps to a violet + amber palette to distinguish the tab.
+    enum CardTheme {
+        case ark
+        case opencode
+    }
+
     enum Tone {
         case session
         case weekly
@@ -21,9 +29,11 @@ enum RingRenderer {
         /// All visible progress in ArkBar represents remaining quota.
         let remainingPercent: Double
         let tone: Tone
+        /// Color theme. Defaults to `.ark` for backward compatibility.
+        var theme: CardTheme = .ark
 
         var color: NSColor {
-            RingRenderer.progressPalette(tone: tone, remainingPercent: remainingPercent).start
+            RingRenderer.progressPalette(tone: tone, remainingPercent: remainingPercent, theme: theme).start
         }
     }
 
@@ -31,16 +41,16 @@ enum RingRenderer {
     private static let ringGap: CGFloat = 5
 
     /// Render the ring gauge into an NSImage of the given point size.
-    static func makeImage(rings: [Ring], primaryRemaining: Double?, primaryLabel: String?, size: CGFloat) -> NSImage {
+    static func makeImage(rings: [Ring], primaryRemaining: Double?, primaryLabel: String?, size: CGFloat, theme: CardTheme = .ark) -> NSImage {
         let outputSize = NSSize(width: size, height: size)
         let image = NSImage(size: outputSize, flipped: false) { rect in
-            draw(rings: rings, primaryRemaining: primaryRemaining, primaryLabel: primaryLabel, in: rect)
+            draw(rings: rings, primaryRemaining: primaryRemaining, primaryLabel: primaryLabel, in: rect, theme: theme)
             return true
         }
         return image
     }
 
-    private static func draw(rings: [Ring], primaryRemaining: Double?, primaryLabel: String?, in rect: CGRect) {
+    private static func draw(rings: [Ring], primaryRemaining: Double?, primaryLabel: String?, in rect: CGRect, theme: CardTheme) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
 
         let center = CGPoint(x: rect.midX, y: rect.midY)
@@ -49,7 +59,7 @@ enum RingRenderer {
             let maxRadius = min(rect.width, rect.height) / 2 - ringWidth / 2 - 4
             let radius = maxRadius - CGFloat(i) * (ringWidth + ringGap)
             drawRing(in: ctx, center: center, radius: radius, width: ringWidth,
-                     remainingPercent: ring.remainingPercent, tone: ring.tone)
+                     remainingPercent: ring.remainingPercent, tone: ring.tone, theme: ring.theme)
         }
 
         // Center text (unflipped coords: y up). draw(at:) uses the point as the
@@ -92,8 +102,8 @@ enum RingRenderer {
     }
 
     private static func drawRing(in ctx: CGContext, center: CGPoint, radius: CGFloat,
-                                 width: CGFloat, remainingPercent: Double, tone: Tone) {
-        let palette = progressPalette(tone: tone, remainingPercent: remainingPercent)
+                                 width: CGFloat, remainingPercent: Double, tone: Tone, theme: CardTheme) {
+        let palette = progressPalette(tone: tone, remainingPercent: remainingPercent, theme: theme)
         // Track: full circle, translucent.
         ctx.setLineWidth(width)
         ctx.setLineCap(.butt)
@@ -183,27 +193,58 @@ enum RingRenderer {
 
     /// Periods use distinct hue families, while the same semantic rule applies
     /// to all of them: less remaining quota lowers luminance and deepens color.
-    private static func progressPalette(tone: Tone, remainingPercent: Double) -> (start: NSColor, end: NSColor) {
+    private static func progressPalette(tone: Tone, remainingPercent: Double, theme: CardTheme) -> (start: NSColor, end: NSColor) {
         let remaining = max(0, min(100, remainingPercent)) / 100
         let depth = 1 - remaining
-        let baseHue: CGFloat
-        switch tone {
-        case .session: baseHue = 0.47   // mint / cyan
-        case .weekly: baseHue = 0.57    // blue
-        case .monthly: baseHue = 0.66   // indigo
+
+        switch theme {
+        case .ark:
+            // Original mint/blue/indigo palette. Unchanged.
+            let baseHue: CGFloat
+            switch tone {
+            case .session: baseHue = 0.47   // mint / cyan
+            case .weekly: baseHue = 0.57    // blue
+            case .monthly: baseHue = 0.66   // indigo
+            }
+            let saturation = 0.70 + 0.20 * depth
+            let startBrightness = 0.95 - 0.50 * depth
+            let endBrightness = 0.86 - 0.45 * depth
+            return (
+                NSColor(calibratedHue: baseHue,
+                        saturation: saturation,
+                        brightness: startBrightness,
+                        alpha: 1),
+                NSColor(calibratedHue: min(0.75, baseHue + 0.045),
+                        saturation: min(1, saturation + 0.04),
+                        brightness: endBrightness,
+                        alpha: 1)
+            )
+        case .opencode:
+            // Violet base per tone (deeper violet for longer windows). As
+            // remaining quota drops, the gradient end shifts toward amber
+            // (hue ~0.10) so a depleted window reads as a warm warning.
+            let baseHue: CGFloat
+            switch tone {
+            case .session: baseHue = 0.78   // violet
+            case .weekly: baseHue = 0.82    // deeper violet
+            case .monthly: baseHue = 0.86   // indigo-violet
+            }
+            let saturation = 0.62 + 0.25 * depth
+            let startBrightness = 0.92 - 0.45 * depth
+            // Amber drift: 0 depth -> stay violet; 1 depth -> hue ~0.10 (amber).
+            let endHue = baseHue + (0.10 + 1.0 - baseHue).truncatingRemainder(dividingBy: 1.0) * depth
+            let normalizedEndHue = endHue.truncatingRemainder(dividingBy: 1.0)
+            let endBrightness = 0.88 - 0.30 * depth
+            return (
+                NSColor(calibratedHue: baseHue,
+                        saturation: saturation,
+                        brightness: startBrightness,
+                        alpha: 1),
+                NSColor(calibratedHue: normalizedEndHue,
+                        saturation: min(1, saturation + 0.10 * depth),
+                        brightness: endBrightness,
+                        alpha: 1)
+            )
         }
-        let saturation = 0.70 + 0.20 * depth
-        let startBrightness = 0.95 - 0.50 * depth
-        let endBrightness = 0.86 - 0.45 * depth
-        return (
-            NSColor(calibratedHue: baseHue,
-                    saturation: saturation,
-                    brightness: startBrightness,
-                    alpha: 1),
-            NSColor(calibratedHue: min(0.75, baseHue + 0.045),
-                    saturation: min(1, saturation + 0.04),
-                    brightness: endBrightness,
-                    alpha: 1)
-        )
     }
 }

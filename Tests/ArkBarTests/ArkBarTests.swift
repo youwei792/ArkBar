@@ -198,6 +198,8 @@ struct MenuBuilderTests {
     func refreshRowStaysInTheMenu() {
         let menu = MenuBuilder.build(.init(
             status: .loading,
+            selectedTab: .ark,
+            onSelectTab: { _ in },
             lastUpdatedAt: Date(),
             isRefreshing: false,
             now: Date(),
@@ -423,5 +425,78 @@ struct MenuCardVisualTests {
         let png = rep.representation(using: .png, properties: [:])!
         try png.write(to: URL(fileURLWithPath: "/tmp/arkbar_ring.png"))
         #expect(FileManager.default.fileExists(atPath: "/tmp/arkbar_ring.png"))
+    }
+}
+
+@Suite("OpenCodeGo cookie support")
+struct OpenCodeGoCookieSupportTests {
+    @Test("Cookie header filtering keeps only whitelisted names")
+    func cookieFiltering() {
+        // Only auth / __Host-auth should survive; other cookies dropped.
+        let raw = "auth=abc123; theme=dark; _ga=GA1.2.x; __Host-auth=xyz789"
+        let header = OpenCodeGoCookieSupport.requestCookieHeader(from: raw)
+        #expect(header == "auth=abc123; __Host-auth=xyz789")
+    }
+
+    @Test("Cookie header strips a `Cookie:` prefix")
+    func cookiePrefixStripped() {
+        let raw = "Cookie: auth=token123; other=drop"
+        let header = OpenCodeGoCookieSupport.requestCookieHeader(from: raw)
+        #expect(header == "auth=token123")
+    }
+
+    @Test("Cookie header returns nil when no whitelisted names present")
+    func cookieAllFiltered() {
+        #expect(OpenCodeGoCookieSupport.requestCookieHeader(from: "theme=dark; _ga=x") == nil)
+        #expect(OpenCodeGoCookieSupport.requestCookieHeader(from: "") == nil)
+        #expect(OpenCodeGoCookieSupport.requestCookieHeader(from: nil) == nil)
+    }
+
+    @Test("looksSignedOut detects login pages")
+    func signedOutDetection() {
+        #expect(OpenCodeGoCookieSupport.looksSignedOut(text: "Please sign in to continue"))
+        #expect(OpenCodeGoCookieSupport.looksSignedOut(text: "<title>Login</title>"))
+        #expect(OpenCodeGoCookieSupport.looksSignedOut(text: "redirect to auth/authorize"))
+        #expect(!OpenCodeGoCookieSupport.looksSignedOut(text: "rollingUsage: { usagePercent: 42 }"))
+    }
+
+    @Test("parseFirstWorkspaceID extracts wrk_ token from server response")
+    func workspaceIDParsing() {
+        let body = #"{"workspaces":[{"id":"wrk_abc123def456","name":"mine"}]}"#
+        #expect(OpenCodeGoCookieSupport.parseFirstWorkspaceID(text: body) == "wrk_abc123def456")
+    }
+
+    @Test("parseFirstWorkspaceID falls back to bare wrk_ token")
+    func workspaceIDFallback() {
+        let body = "some preamble wrk_xyz999 trailing text"
+        #expect(OpenCodeGoCookieSupport.parseFirstWorkspaceID(text: body) == "wrk_xyz999")
+    }
+
+    @Test("normalizeWorkspaceID accepts bare id, URL, or embedded token")
+    func workspaceIDNormalize() {
+        #expect(OpenCodeGoCookieSupport.normalizeWorkspaceID("wrk_abc123") == "wrk_abc123")
+        #expect(OpenCodeGoCookieSupport.normalizeWorkspaceID("https://opencode.ai/workspace/wrk_def456/go") == "wrk_def456")
+        #expect(OpenCodeGoCookieSupport.normalizeWorkspaceID("see wrk_ghi789 here") == "wrk_ghi789")
+        #expect(OpenCodeGoCookieSupport.normalizeWorkspaceID("") == nil)
+        #expect(OpenCodeGoCookieSupport.normalizeWorkspaceID(nil) == nil)
+    }
+
+    @Test("regex extraction parses usage percent and reset seconds from the page payload")
+    func regexExtraction() {
+        // Mirrors the shape CodexBar's fetcher scrapes from the /workspace/<id>/go page.
+        let page = """
+        rollingUsage: { usagePercent: 3.5, resetInSec: 14400 }
+        weeklyUsage: { usagePercent: 12, resetInSec: 86400 }
+        monthlyUsage: { usagePercent: 47.5, resetInSec: 604800 }
+        """
+        let rollingPct = OpenCodeGoCookieSupport.extractDouble(
+            pattern: #"rollingUsage[^}]*?usagePercent\s*:\s*([0-9]+(?:\.[0-9]+)?)"#, text: page)
+        let rollingReset = OpenCodeGoCookieSupport.extractInt(
+            pattern: #"rollingUsage[^}]*?resetInSec\s*:\s*([0-9]+)"#, text: page)
+        let monthlyPct = OpenCodeGoCookieSupport.extractDouble(
+            pattern: #"monthlyUsage[^}]*?usagePercent\s*:\s*([0-9]+(?:\.[0-9]+)?)"#, text: page)
+        #expect(rollingPct == 3.5)
+        #expect(rollingReset == 14400)
+        #expect(monthlyPct == 47.5)
     }
 }

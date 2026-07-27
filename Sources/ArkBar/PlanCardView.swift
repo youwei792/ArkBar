@@ -18,15 +18,17 @@ import AppKit
 final class PlanCardView: NSView {
     private let plan: PlanSnapshot
     private let now: Date
+    private let theme: RingRenderer.CardTheme
 
     private let horizontalPadding: CGFloat = 14
     private let verticalPadding: CGFloat = 12
     private let ringSize: CGFloat = 132
     private var hoverTrackingArea: NSTrackingArea?
 
-    init(plan: PlanSnapshot, now: Date, width: CGFloat) {
+    init(plan: PlanSnapshot, now: Date, width: CGFloat, theme: RingRenderer.CardTheme = .ark) {
         self.plan = plan
         self.now = now
+        self.theme = theme
         let height = Self.computeHeight(plan)
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: height))
         wantsLayer = true
@@ -111,7 +113,8 @@ final class PlanCardView: NSView {
             rings: rings,
             primaryRemaining: primaryWindow?.remainingPercent,
             primaryLabel: primaryWindow?.displayName,
-            size: ringSize)
+            size: ringSize,
+            theme: theme)
         let imageView = NSImageView(frame: NSRect(x: horizontalPadding, y: y - ringSize,
                                                   width: ringSize, height: ringSize))
         imageView.image = ringImage
@@ -232,9 +235,9 @@ final class PlanCardView: NSView {
         let session = find(["session", "5-hour", "5h", "five_hour"])
 
         return [
-            monthly.map { RingRenderer.Ring(id: "monthly", label: L(.monthly), remainingPercent: $0.remainingPercent, tone: .monthly) },
-            weekly.map { RingRenderer.Ring(id: "weekly", label: L(.weekly), remainingPercent: $0.remainingPercent, tone: .weekly) },
-            session.map { RingRenderer.Ring(id: "session", label: L(.session), remainingPercent: $0.remainingPercent, tone: .session) },
+            monthly.map { RingRenderer.Ring(id: "monthly", label: L(.monthly), remainingPercent: $0.remainingPercent, tone: .monthly, theme: theme) },
+            weekly.map { RingRenderer.Ring(id: "weekly", label: L(.weekly), remainingPercent: $0.remainingPercent, tone: .weekly, theme: theme) },
+            session.map { RingRenderer.Ring(id: "session", label: L(.session), remainingPercent: $0.remainingPercent, tone: .session, theme: theme) },
         ].compactMap { $0 }
     }
 
@@ -249,7 +252,8 @@ final class PlanCardView: NSView {
                     id: window.label,
                     label: window.displayName,
                     remainingPercent: window.remainingPercent,
-                    tone: RingRenderer.tone(for: window.label)))
+                    tone: RingRenderer.tone(for: window.label),
+                    theme: theme))
             }
     }
 }

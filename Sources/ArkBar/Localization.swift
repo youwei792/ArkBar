@@ -135,6 +135,22 @@ enum LKey: String {
     case interval5m = "interval.5m"
     case interval15m = "interval.15m"
     case interval30m = "interval.30m"
+
+    // Provider tabs + OpenCode Go
+    case tabArk = "tab.ark"
+    case tabOpenCode = "tab.opencode"
+    case openCodeGo = "provider.opencodeGo"
+    case sectionOpenCode = "settings.sectionOpenCode"
+    case opencodeCookie = "settings.opencodeCookie"
+    case opencodeCookiePlaceholder = "settings.opencodeCookiePlaceholder"
+    case opencodeWorkspaceID = "settings.opencodeWorkspaceID"
+    case opencodeWorkspaceIDPlaceholder = "settings.opencodeWorkspaceIDPlaceholder"
+    case opencodeTestRefresh = "settings.opencodeTestRefresh"
+    case opencodeCookieNotSet = "settings.opencodeCookieNotSet"
+    case opencodeCookieSet = "settings.opencodeCookieSet"
+    case errorInvalidCookie = "error.invalidCookie"
+    case errorSignedOut = "error.signedOut"
+    case opencodePlanName = "product.opencodeGo"
 }
 
 /// Runtime localization manager. Observable so SwiftUI views re-render on
@@ -324,6 +340,22 @@ final class L10n: ObservableObject {
         add(.interval5m, "5 分钟", "5 minutes")
         add(.interval15m, "15 分钟", "15 minutes")
         add(.interval30m, "30 分钟", "30 minutes")
+
+        // Provider tabs + OpenCode Go
+        add(.tabArk, "Ark", "Ark")
+        add(.tabOpenCode, "OpenCode", "OpenCode")
+        add(.openCodeGo, "OpenCode Go", "OpenCode Go")
+        add(.sectionOpenCode, "OpenCode Go", "OpenCode Go")
+        add(.opencodeCookie, "Cookie", "Cookie")
+        add(.opencodeCookiePlaceholder, "粘贴 opencode.ai 的 Cookie 头", "Paste Cookie header from opencode.ai")
+        add(.opencodeWorkspaceID, "Workspace ID", "Workspace ID")
+        add(.opencodeWorkspaceIDPlaceholder, "留空自动解析 (wrk_…)", "Leave empty to auto-resolve (wrk_…)")
+        add(.opencodeTestRefresh, "测试 / 刷新", "Test / Refresh")
+        add(.opencodeCookieNotSet, "未配置", "Not configured")
+        add(.opencodeCookieSet, "已配置", "Configured")
+        add(.errorInvalidCookie, "OpenCode Go Cookie 无效或已过期。请在设置中重新粘贴。", "OpenCode Go cookie is invalid or expired. Re-paste it in Settings.")
+        add(.errorSignedOut, "OpenCode Go 会话已登出。请重新粘贴 Cookie。", "OpenCode Go session signed out. Re-paste the cookie.")
+        add(.opencodePlanName, "Go 套餐", "Go Plan")
 
         return t
     }()

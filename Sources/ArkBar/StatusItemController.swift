@@ -38,15 +38,48 @@ final class StatusItemController {
         // mode, so a default-mode hop leaves the refresh row visually stale
         // until the user closes the menu. Consume the published value directly
         // as `@Published` emits before its backing property is written.
-        store.$status
+        //
+        // We subscribe to both tracks' status + the selected tab. Any change
+        // re-evaluates the icon (current tab) and the in-flight refresh row.
+        let statusUpdate: (UsageStore.LoadStatus?) -> Void = { [weak self] status in
+            self?.updateIcon(for: status)
+            self?.updateActiveRefreshView(status: status)
+        }
+        store.$arkStatus
             .sink { [weak self] status in
-                self?.updateIcon(for: status)
-                self?.updateActiveRefreshView(status: status)
+                guard let self else { return }
+                guard self.settings.selectedTab == .ark else { return }
+                statusUpdate(status)
             }
             .store(in: &cancellables)
-        store.$lastUpdatedAt
+        store.$opencodeStatus
+            .sink { [weak self] status in
+                guard let self else { return }
+                guard self.settings.selectedTab == .opencode else { return }
+                statusUpdate(status)
+            }
+            .store(in: &cancellables)
+        settings.$selectedTab
+            .sink { [weak self] _ in
+                // Tab switched: re-render icon for the now-current track and,
+                // if the menu is open, rebuild it so cards flip live.
+                self?.updateIcon()
+                self?.rebuildMenuIfOpen()
+                self?.updateActiveRefreshView()
+            }
+            .store(in: &cancellables)
+        store.$arkLastUpdatedAt
             .sink { [weak self] lastUpdatedAt in
-                self?.updateActiveRefreshView(lastUpdatedAt: lastUpdatedAt)
+                guard let self else { return }
+                guard self.settings.selectedTab == .ark else { return }
+                self.updateActiveRefreshView(lastUpdatedAt: lastUpdatedAt)
+            }
+            .store(in: &cancellables)
+        store.$opencodeLastUpdatedAt
+            .sink { [weak self] lastUpdatedAt in
+                guard let self else { return }
+                guard self.settings.selectedTab == .opencode else { return }
+                self.updateActiveRefreshView(lastUpdatedAt: lastUpdatedAt)
             }
             .store(in: &cancellables)
         store.$isRefreshing
@@ -69,9 +102,10 @@ final class StatusItemController {
     }
 
     private func updateIcon(for loadStatus: UsageStore.LoadStatus? = nil) {
+        let resolved = loadStatus ?? store.currentStatus
         let remaining: Double?
         let stale: Bool
-        switch loadStatus ?? store.status {
+        switch resolved {
         case .never, .loading:
             remaining = nil
             stale = true
@@ -150,7 +184,7 @@ final class StatusItemController {
     /// Rebuild the dropdown menu from the current store state.
     private func rebuildMenu() {
         let status: MenuBuilder.State.Status
-        switch store.status {
+        switch store.currentStatus {
         case .never: status = .never
         case .loading: status = .loading
         case let .error(message): status = .error(message: message)
@@ -159,7 +193,11 @@ final class StatusItemController {
         }
         let state = MenuBuilder.State(
             status: status,
-            lastUpdatedAt: store.lastUpdatedAt,
+            selectedTab: settings.selectedTab,
+            onSelectTab: { [weak self] tab in
+                self?.settings.selectedTab = tab
+            },
+            lastUpdatedAt: store.currentLastUpdatedAt,
             isRefreshing: store.isRefreshing,
             now: Date(),
             onRefresh: { [weak self] in self?.refreshFromMenu() },
@@ -190,14 +228,15 @@ final class StatusItemController {
         lastUpdatedAt: Date? = nil,
         status: UsageStore.LoadStatus? = nil)
     {
+        let resolvedStatus = status ?? store.currentStatus
         let errorMessage: String?
-        switch status ?? store.status {
+        switch resolvedStatus {
         case let .error(message), let .stale(_, message): errorMessage = message
         default: errorMessage = nil
         }
         activeRefreshView?.update(
             isRefreshing: isRefreshing ?? store.isRefreshing,
-            lastUpdatedAt: lastUpdatedAt ?? store.lastUpdatedAt,
+            lastUpdatedAt: lastUpdatedAt ?? store.currentLastUpdatedAt,
             errorMessage: errorMessage,
             title: L(.refreshNow))
     }

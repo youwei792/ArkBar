@@ -3,6 +3,13 @@ import Combine
 
 /// Owns the providers and the refresh loop, and publishes the current aggregated state
 /// the UI renders. Adding a new subscription/plan = add a new `UsageProvider` to `providers`.
+///
+/// ArkBar tracks two independent provider tracks:
+/// - **Ark**: the existing priority-ordered list (arkcli / AK-SK / API key).
+/// - **OpenCode Go**: a single cookie-authenticated web provider.
+/// Each track has its own `LoadStatus` and last-updated timestamp so the user can
+/// switch tabs without losing the other track's data. The menu-bar icon reflects
+/// whichever tab `AppSettings.selectedTab` currently points at.
 @MainActor
 final class UsageStore: ObservableObject {
     enum LoadStatus: Equatable {
@@ -21,14 +28,31 @@ final class UsageStore: ObservableObject {
         }
     }
 
-    @Published private(set) var status: LoadStatus = .never
-    @Published private(set) var lastUpdatedAt: Date?
+    // Per-track published state. The UI subscribes to whichever track the
+    // selected tab points at; see `currentStatus` / `currentLastUpdatedAt`.
+    @Published private(set) var arkStatus: LoadStatus = .never
+    @Published private(set) var opencodeStatus: LoadStatus = .never
+    @Published private(set) var arkLastUpdatedAt: Date?
+    @Published private(set) var opencodeLastUpdatedAt: Date?
     @Published private(set) var isRefreshing = false
 
+    /// Currently-selected tab's status. Convenience for one-off reads.
+    var currentStatus: LoadStatus {
+        settings.selectedTab == .ark ? arkStatus : opencodeStatus
+    }
+
+    var currentLastUpdatedAt: Date? {
+        settings.selectedTab == .ark ? arkLastUpdatedAt : opencodeLastUpdatedAt
+    }
+
     private let settings: AppSettings
-    private var providers: [UsageProvider] = []
+    private var arkProviders: [UsageProvider] = []
+    private var opencodeProvider: OpenCodeGoProvider?
     private var timer: Timer?
-    private var lastSuccessfulSnapshot: ProviderSnapshot?
+    private var lastSuccessfulArkSnapshot: ProviderSnapshot?
+    private var lastSuccessfulOpenCodeSnapshot: ProviderSnapshot?
+    private var arkRefreshInProgress = false
+    private var opencodeRefreshInProgress = false
     private var cancellables = Set<AnyCancellable>()
 
     init(settings: AppSettings = .shared) {
@@ -44,6 +68,12 @@ final class UsageStore: ObservableObject {
                 self?.rebuildProviders()
                 self?.refresh()
             }
+            .store(in: &cancellables)
+        // Cookie change: rebuild the OpenCode provider (its URLSession is fine
+        // to reuse, but `isAvailable` flips, so a refresh is what matters).
+        settings.$opencodeCookie
+            .dropFirst()
+            .sink { [weak self] _ in self?.refresh() }
             .store(in: &cancellables)
     }
 
@@ -74,7 +104,8 @@ final class UsageStore: ObservableObject {
             // (CodexBar returns early when API creds exist; we instead let it be selectable in UI.)
             built.append(ArkCLIProvider())
         }
-        self.providers = built
+        self.arkProviders = built
+        self.opencodeProvider = OpenCodeGoProvider(settings: settings)
     }
 
     func start() {
@@ -82,31 +113,52 @@ final class UsageStore: ObservableObject {
         self.scheduleNext()
     }
 
+    /// Refresh both tracks concurrently. Each track writes its own status; the
+    /// merged `isRefreshing` flag is true while either is in flight.
     func refresh() {
-        guard !isRefreshing else {
-            // A menu click, timer tick, and explicit button can arrive while a
-            // slow CLI/API request is active. Coalescing them prevents a burst
-            // of follow-up requests (and the menu crash that used to cause).
-            return
-        }
-        isRefreshing = true
-        switch status {
-        case .ok, .stale:
-            // Keep confirmed data on screen while the next sync is in flight.
-            break
-        case .never, .loading, .error:
-            status = .loading
-        }
-        let providers = self.providers
         let env = ProcessInfo.processInfo.environment
-        Task { [weak self] in
-            await self?.runProviders(providers, environment: env)
+
+        // Ark track.
+        if !arkRefreshInProgress {
+            arkRefreshInProgress = true
+            updateMergedRefreshing()
+            switch arkStatus {
+            case .ok, .stale:
+                break   // keep confirmed data on screen
+            case .never, .loading, .error:
+                arkStatus = .loading
+            }
+            let providers = self.arkProviders
+            Task { [weak self] in
+                await self?.runArkProviders(providers, environment: env)
+            }
+        }
+
+        // OpenCode Go track. Only runs if the provider is configured.
+        if !opencodeRefreshInProgress, let opencode = self.opencodeProvider {
+            if opencode.isAvailable(environment: env) {
+                opencodeRefreshInProgress = true
+                updateMergedRefreshing()
+                switch opencodeStatus {
+                case .ok, .stale:
+                    break
+                case .never, .loading, .error:
+                    opencodeStatus = .loading
+                }
+                Task { [weak self] in
+                    await self?.runOpenCodeProvider(opencode, environment: env)
+                }
+            } else if case .never = opencodeStatus {
+                // Unconfigured: surface a soft error so the OpenCode tab shows
+                // a "configure in Settings" hint instead of an infinite spinner.
+                opencodeStatus = .error(message: L(.opencodeCookieNotSet))
+            }
         }
     }
 
-    private func runProviders(_ providers: [UsageProvider], environment: [String: String]) async {
+    private func runArkProviders(_ providers: [UsageProvider], environment: [String: String]) async {
         guard !providers.isEmpty else {
-            finishRefresh(error: L(.noProvider))
+            finishArkRefresh(error: L(.noProvider))
             return
         }
         var lastError = L(.noProvider)
@@ -115,13 +167,10 @@ final class UsageStore: ObservableObject {
             do {
                 let snapshot = try await provider.fetch(environment: environment)
                 Self.log("✓ \(provider.displayName): \(snapshot.plans.count) plan(s), tightest=\(snapshot.tightestWindow?.usedPercent ?? -1)%")
-                // This is the local completion moment of the current sync, not
-                // the provider's payload timestamp. It must advance on every
-                // successful Refresh so the menu can prove that the request ran.
-                self.lastUpdatedAt = Date()
-                self.lastSuccessfulSnapshot = snapshot
-                self.status = .ok(snapshot: snapshot)
-                finishRefresh()
+                self.arkLastUpdatedAt = Date()
+                self.lastSuccessfulArkSnapshot = snapshot
+                self.arkStatus = .ok(snapshot: snapshot)
+                finishArkRefresh()
                 return
             } catch let error as UsageError {
                 Self.log("✗ \(provider.displayName): \(error.errorDescription ?? "Unknown error")")
@@ -133,17 +182,54 @@ final class UsageStore: ObservableObject {
                 continue
             }
         }
-        finishRefresh(error: lastError)
+        finishArkRefresh(error: lastError)
     }
 
-    private func finishRefresh(error: String? = nil) {
-        isRefreshing = false
+    private func runOpenCodeProvider(_ provider: OpenCodeGoProvider, environment: [String: String]) async {
+        do {
+            let snapshot = try await provider.fetch(environment: environment)
+            Self.log("✓ \(provider.displayName): \(snapshot.plans.count) plan(s)")
+            self.opencodeLastUpdatedAt = Date()
+            self.lastSuccessfulOpenCodeSnapshot = snapshot
+            self.opencodeStatus = .ok(snapshot: snapshot)
+            finishOpenCodeRefresh()
+        } catch let error as UsageError {
+            Self.log("✗ \(provider.displayName): \(error.errorDescription ?? "Unknown error")")
+            finishOpenCodeRefresh(error: error.errorDescription ?? "Unknown error")
+        } catch {
+            Self.log("✗ \(provider.displayName): \(error.localizedDescription)")
+            finishOpenCodeRefresh(error: error.localizedDescription)
+        }
+    }
+
+    private func finishArkRefresh(error: String? = nil) {
+        arkRefreshInProgress = false
         if let error {
-            if let snapshot = lastSuccessfulSnapshot {
-                status = .stale(snapshot: snapshot, message: error)
+            if let snapshot = lastSuccessfulArkSnapshot {
+                arkStatus = .stale(snapshot: snapshot, message: error)
             } else {
-                status = .error(message: error)
+                arkStatus = .error(message: error)
             }
+        }
+        updateMergedRefreshing()
+    }
+
+    private func finishOpenCodeRefresh(error: String? = nil) {
+        opencodeRefreshInProgress = false
+        if let error {
+            if let snapshot = lastSuccessfulOpenCodeSnapshot {
+                opencodeStatus = .stale(snapshot: snapshot, message: error)
+            } else {
+                opencodeStatus = .error(message: error)
+            }
+        }
+        updateMergedRefreshing()
+    }
+
+    private func updateMergedRefreshing() {
+        let merged = arkRefreshInProgress || opencodeRefreshInProgress
+        if merged != isRefreshing {
+            isRefreshing = merged
         }
     }
 

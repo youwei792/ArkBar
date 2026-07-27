@@ -83,11 +83,14 @@ private final class PreferencesView: NSView {
     private var arkcliPathLabel: NSTextField!
     private var arkcliVersionLabel: NSTextField!
     private var shellLabel: NSTextField!
+    private var opencodeCookieField: NSSecureTextField!
+    private var opencodeWorkspaceField: NSTextField!
+    private var opencodeStatusLabel: NSTextField!
 
     init(settings: AppSettings, store: UsageStore) {
         self.settings = settings
         self.store = store
-        super.init(frame: NSRect(x: 0, y: 0, width: 460, height: 720))
+        super.init(frame: NSRect(x: 0, y: 0, width: 460, height: 880))
         wantsLayer = true
         build()
         observeStore()
@@ -124,6 +127,12 @@ private final class PreferencesView: NSView {
         y -= row(label: L(.source), control: makeSourcePopup(), atY: y)
         y -= 24
         y -= statusBlock(atY: y)
+        y -= 24
+
+        // Section: OpenCode Go.
+        y -= sectionHeader(L(.sectionOpenCode), atY: y)
+        y -= 8
+        y -= opencodeBlock(atY: y)
         y -= 24
 
         // Section: Diagnostics.
@@ -357,6 +366,109 @@ private final class PreferencesView: NSView {
         return 64
     }
 
+    /// OpenCode Go configuration: cookie + workspace ID + status + test button.
+    private func opencodeBlock(atY y: CGFloat) -> CGFloat {
+        let labelWidth = bounds.width - 40
+
+        // Cookie label + secure field.
+        let cookieLabel = NSTextField(labelWithString: L(.opencodeCookie))
+        cookieLabel.font = .systemFont(ofSize: 11)
+        cookieLabel.textColor = .secondaryLabelColor
+        cookieLabel.sizeToFit()
+        cookieLabel.frame = NSRect(x: 20, y: y - 14, width: cookieLabel.frame.width, height: 14)
+        addSubview(cookieLabel)
+
+        let cookieField = NSSecureTextField(frame: NSRect(x: 20, y: y - 36, width: labelWidth, height: 22))
+        cookieField.placeholderString = L(.opencodeCookiePlaceholder)
+        cookieField.font = .systemFont(ofSize: 11)
+        cookieField.target = self
+        cookieField.action = #selector(opencodeCookieChanged(_:))
+        // Show the stored cookie so the user knows whether one is configured.
+        // NSSecureTextField masks it; the user can clear+re-paste to update.
+        cookieField.stringValue = settings.opencodeCookie
+        addSubview(cookieField)
+        opencodeCookieField = cookieField
+
+        // Workspace ID label + field.
+        let wsLabel = NSTextField(labelWithString: L(.opencodeWorkspaceID))
+        wsLabel.font = .systemFont(ofSize: 11)
+        wsLabel.textColor = .secondaryLabelColor
+        wsLabel.sizeToFit()
+        wsLabel.frame = NSRect(x: 20, y: y - 58, width: wsLabel.frame.width, height: 14)
+        addSubview(wsLabel)
+
+        let wsField = NSTextField(frame: NSRect(x: 20, y: y - 80, width: labelWidth, height: 22))
+        wsField.placeholderString = L(.opencodeWorkspaceIDPlaceholder)
+        wsField.font = .systemFont(ofSize: 11)
+        wsField.stringValue = settings.opencodeWorkspaceID
+        wsField.target = self
+        wsField.action = #selector(opencodeWorkspaceChanged(_:))
+        addSubview(wsField)
+        opencodeWorkspaceField = wsField
+
+        // Test / Refresh button + status line.
+        let testButton = NSButton(title: L(.opencodeTestRefresh), target: self,
+                                  action: #selector(opencodeTestRefresh))
+        testButton.bezelStyle = .rounded
+        testButton.frame = NSRect(x: 20, y: y - 112, width: 140, height: 24)
+        addSubview(testButton)
+
+        let status = NSTextField(labelWithString: "")
+        status.font = .systemFont(ofSize: 10)
+        status.textColor = .secondaryLabelColor
+        status.lineBreakMode = .byTruncatingTail
+        status.frame = NSRect(x: 20, y: y - 132, width: labelWidth, height: 14)
+        addSubview(status)
+        opencodeStatusLabel = status
+        updateOpencodeStatus()
+
+        return 146
+    }
+
+    // MARK: - OpenCode actions
+
+    @objc private func opencodeCookieChanged(_ sender: NSSecureTextField) {
+        settings.setOpenCodeCookie(sender.stringValue)
+        updateOpencodeStatus()
+        store.refresh()
+    }
+
+    @objc private func opencodeWorkspaceChanged(_ sender: NSTextField) {
+        settings.opencodeWorkspaceID = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    @objc private func opencodeTestRefresh() {
+        // Commit the field values first (in case the user typed but didn't hit
+        // Enter, which doesn't fire the action), then refresh.
+        settings.setOpenCodeCookie(opencodeCookieField.stringValue)
+        settings.opencodeWorkspaceID = opencodeWorkspaceField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        updateOpencodeStatus()
+        store.refresh()
+    }
+
+    private func updateOpencodeStatus() {
+        guard let label = opencodeStatusLabel else { return }
+        switch store.opencodeStatus {
+        case .never:
+            label.stringValue = settings.opencodeCookieHasValue ? L(.refreshingStatus) : L(.opencodeCookieNotSet)
+            label.textColor = .secondaryLabelColor
+        case .loading:
+            label.stringValue = L(.refreshingStatus)
+            label.textColor = .secondaryLabelColor
+        case let .ok(snapshot):
+            let parts = [snapshot.providerName, snapshot.authMethod.map { "\(L(.authLabel)): \($0)" }]
+                .compactMap { $0 }
+            label.stringValue = "✓ " + parts.joined(separator: " · ")
+            label.textColor = .systemGreen
+        case let .stale(_, message):
+            label.stringValue = "⚠ \(message)"
+            label.textColor = .systemOrange
+        case let .error(message):
+            label.stringValue = "✗ \(message)"
+            label.textColor = .systemRed
+        }
+    }
+
     // MARK: - Actions
 
     @objc private func displayModeChanged(_ sender: NSPopUpButton) {
@@ -401,17 +513,23 @@ private final class PreferencesView: NSView {
     // MARK: - Status updates
 
     private func observeStore() {
-        store.$status
+        store.$arkStatus
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.updateStatusBlock()
                 self?.updateLastFetchLabel()
             }
             .store(in: &cancellables)
-        store.$lastUpdatedAt
+        store.$arkLastUpdatedAt
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.updateLastFetchLabel()
+            }
+            .store(in: &cancellables)
+        store.$opencodeStatus
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.updateOpencodeStatus()
             }
             .store(in: &cancellables)
     }
@@ -419,7 +537,7 @@ private final class PreferencesView: NSView {
     private var cancellables = Set<AnyCancellable>()
 
     private func updateStatusBlock() {
-        switch store.status {
+        switch store.arkStatus {
         case let .ok(snapshot):
             statusLabel?.stringValue = "✓ \(L(.connectedVia)) \(snapshot.providerName)"
             statusLabel?.textColor = .systemGreen
@@ -456,7 +574,7 @@ private final class PreferencesView: NSView {
 
     private func updateLastFetchLabel() {
         guard let label = lastFetchLabel else { return }
-        if let updated = store.lastUpdatedAt {
+        if let updated = store.arkLastUpdatedAt {
             let f = DateFormatter()
             f.locale = Locale(identifier: "en_US_POSIX")
             f.dateFormat = "HH:mm:ss"

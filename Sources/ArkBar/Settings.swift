@@ -70,6 +70,36 @@ final class AppSettings: ObservableObject {
             }
         }
     }
+    /// Currently selected menu-bar tab (Ark vs OpenCode Go).
+    @Published var selectedTab: ProviderTab {
+        didSet { UserDefaults.standard.set(selectedTab.rawValue, forKey: Keys.selectedTab) }
+    }
+    /// OpenCode Go workspace ID. When empty, the provider auto-resolves it from
+    /// the cookie by hitting `opencode.ai/_server`.
+    @Published var opencodeWorkspaceID: String {
+        didSet { UserDefaults.standard.set(opencodeWorkspaceID, forKey: Keys.opencodeWorkspaceID) }
+    }
+    /// OpenCode Go cookie header. Persisted to Keychain (not UserDefaults); the
+    /// in-memory copy drives `UsageStore` refresh on change. Load on init via
+    /// `loadOpenCodeCookieFromKeychain()`; set via `setOpenCodeCookie(_:)`.
+    @Published private(set) var opencodeCookie: String
+
+    /// Replace the persisted OpenCode Go cookie. Writes Keychain + updates the
+    /// in-memory `@Published` so `UsageStore` re-fetches. Pass nil/empty to clear.
+    func setOpenCodeCookie(_ value: String?) {
+        let trimmed = value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty
+        CookieKeychainStore.store(cookie: trimmed, provider: "opencode")
+        opencodeCookie = trimmed ?? ""
+    }
+
+    /// Reload the OpenCode cookie from Keychain (e.g. after an external change).
+    func loadOpenCodeCookieFromKeychain() {
+        opencodeCookie = CookieKeychainStore.load(provider: "opencode") ?? ""
+    }
+
+    var opencodeCookieHasValue: Bool { !opencodeCookie.isEmpty }
 
     private enum Keys {
         static let refreshInterval = "arkbar.refreshInterval"
@@ -77,6 +107,8 @@ final class AppSettings: ObservableObject {
         static let sourceMode = "arkbar.sourceMode"
         static let displayMode = "arkbar.displayMode"
         static let language = "arkbar.language"
+        static let selectedTab = "arkbar.selectedTab"
+        static let opencodeWorkspaceID = "arkbar.opencodeWorkspaceID"
     }
 
     private init() {
@@ -90,5 +122,15 @@ final class AppSettings: ObservableObject {
         self.displayMode = DisplayMode(rawValue: displayRaw) ?? .iconAndPercent
         let langRaw = defaults.string(forKey: Keys.language) ?? Language.system.rawValue
         self.language = Language(rawValue: langRaw) ?? .system
+        let tabRaw = defaults.string(forKey: Keys.selectedTab) ?? ProviderTab.ark.rawValue
+        self.selectedTab = ProviderTab(rawValue: tabRaw) ?? .ark
+        self.opencodeWorkspaceID = defaults.string(forKey: Keys.opencodeWorkspaceID) ?? ""
+        // Cookie lives in Keychain; load once at init. UserDefaults only tracks
+        // whether a cookie has ever been configured (for first-run UI hints).
+        self.opencodeCookie = CookieKeychainStore.load(provider: "opencode") ?? ""
     }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
