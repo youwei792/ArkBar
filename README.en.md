@@ -1,6 +1,6 @@
 # ArkBar
 
-[简体中文](README.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
+[简体中文](README.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
 
 ArkBar is a native macOS menu-bar app for Volcengine Ark Coding Plan and Agent Plan usage. It keeps the quota you have **left** visible without a Dock icon.
 
@@ -113,10 +113,6 @@ Sources/ArkBar/
 Scripts/package_app.sh   local Apple Silicon app packaging
 Tests/ArkBarTests/       decoding and visual regression tests
 ```
-
-## Contributing
-
-Issues and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md), keep credentials out of logs and fixtures, and run `swift test` before opening a pull request.
 
 ## License and attribution
 

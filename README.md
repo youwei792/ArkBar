@@ -1,6 +1,6 @@
 # ArkBar
 
-[English](README.en.md) · [贡献指南](CONTRIBUTING.md) · [安全报告](SECURITY.md) · [更新日志](CHANGELOG.md)
+[English](README.en.md) · [安全报告](SECURITY.md) · [更新日志](CHANGELOG.md)
 
 ArkBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding Plan 与 Agent Plan 的剩余用量；不会显示 Dock 图标。
 
@@ -107,10 +107,6 @@ Sources/ArkBar/          应用源码
 Scripts/package_app.sh   本地 Apple Silicon 打包脚本
 Tests/ArkBarTests/       解码与视觉回归测试
 ```
-
-## 参与贡献
-
-欢迎提交 Issue 和 Pull Request。请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，不要在日志或测试夹具中加入凭据，并在提交前运行 `swift test`。
 
 ## 许可证与致谢
 
