@@ -329,6 +329,20 @@ struct MenuCardVisualTests {
             $0.frame.minX >= 0 && $0.frame.maxX <= view.bounds.maxX
         })
 
+        let header = HeaderCardView(
+            snapshot: ProviderSnapshot(
+                providerName: "arkcli",
+                authMethod: "sso",
+                plans: [plan],
+                updatedAt: now,
+                errorMessage: nil),
+            width: 340)
+        let wordmark = header.subviews
+            .compactMap { $0 as? NSTextField }
+            .first { $0.stringValue == "ArkBar" }
+        #expect(wordmark != nil)
+        #expect(wordmark?.frame.width ?? 0 >= ceil(wordmark?.intrinsicContentSize.width ?? 0) + 4)
+
         // Rendering the ring directly exercises the updated palette and endpoint glow.
         let ring = RingRenderer.makeImage(
             rings: [

@@ -12,6 +12,7 @@ All notable public changes to ArkBar are documented here.
 - Added a persistent, live refresh row with in-place refreshing, success, relative-time, and failure states.
 - Fixed the live refresh row so it changes to “Refreshing…” immediately while the menu is open, then returns to its success or error state without requiring the menu to close.
 - Replaced the unstable rotating refresh glyph with a fixed native loading indicator inside the refresh icon slot.
+- Added a trailing safety inset to the ArkBar header wordmark so its final glyph is never visually clipped.
 - Made Simplified Chinese the default repository README and moved the English version to `README.en.md`.
 
 - Added English and Simplified Chinese public documentation.

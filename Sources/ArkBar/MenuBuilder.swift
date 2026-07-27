@@ -195,9 +195,16 @@ final class HeaderCardView: NSView {
         let title = NSTextField(labelWithString: "ArkBar")
         title.font = .systemFont(ofSize: 14, weight: .bold)
         title.textColor = .labelColor
-        title.sizeToFit()
         let titleSize = title.intrinsicContentSize
-        title.frame = NSRect(x: 14, y: 16, width: titleSize.width, height: titleSize.height)
+        // NSTextField clips glyph overhangs when its frame exactly equals the
+        // intrinsic width. Give the wordmark a small trailing safety inset so
+        // the terminal “r” is fully antialiased instead of looking cut off.
+        let titleTrailingInset: CGFloat = 6
+        title.frame = NSRect(
+            x: 14,
+            y: 15,
+            width: ceil(titleSize.width) + titleTrailingInset,
+            height: ceil(titleSize.height) + 2)
         addSubview(title)
 
         let detail = [snapshot.providerName, snapshot.authMethod.map { "\(L(.auth)): \($0)" }]
