@@ -34,6 +34,22 @@ swift build
 
 该开发脚本仅构建 Apple Silicon（`arm64`）版本，会替换工作目录的 `ArkBar.app` 和 `/Applications/ArkBar.app`，并进行 ad-hoc 签名；它不是公证过的正式发布安装包。
 
+### Intel 与 Universal Binary（维护者参考）
+
+`swift build` 默认针对当前 Mac 的原生架构构建。因此，在满足 macOS 14+ 与 Swift 6.0 要求的 Intel Mac 上，直接执行“从源码运行”中的 `swift build` 会构建 `x86_64` 可执行文件，不需要 Rosetta。
+
+当前 `Scripts/package_app.sh` 明确只生成 `arm64` 的开发用 `.app`，不能用于制作 Intel 或 Universal 安装包。源码没有已知的 `arm64` 专属依赖，但 Intel 路径尚未经过 Intel 真机或 CI 验证；这是一份构建指引，不是已发布的兼容性承诺。
+
+要发布 Universal Binary，请在发布流程中分别产出并验证两个独立切片（`arm64` 与 `x86_64`），再使用 macOS 自带的 `lipo` 合并：
+
+```bash
+lipo -create -output ArkBar <path-to-arm64-ArkBar> <path-to-x86_64-ArkBar>
+lipo -archs ArkBar
+# 预期同时列出：arm64 和 x86_64（顺序无关）
+```
+
+以上命令只生成 Universal **可执行文件**。制作 Universal `.app` 时，还需要将该文件放入 `ArkBar.app/Contents/MacOS/ArkBar`、重新签名，并分别在 Apple Silicon 与 Intel Mac 上测试后再发布。不要在这一步之后运行当前的 `package_app.sh`，因为它会再次用 arm64 单切片覆盖应用内的可执行文件。
+
 ## 认证与数据源
 
 自动模式优先使用显式设置的凭据，随后回退到 `arkcli`；菜单会显示实际成功的数据源。

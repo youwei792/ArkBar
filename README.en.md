@@ -34,6 +34,22 @@ swift build
 
 This development script builds an Apple Silicon (`arm64`) app, replaces the local `ArkBar.app` bundle, and replaces `/Applications/ArkBar.app`. It ad-hoc signs the result; it is not a notarized release installer.
 
+### Intel and Universal Binary builds (maintainer reference)
+
+`swift build` targets the current Mac's native architecture by default. On an Intel Mac that meets the macOS 14+ and Swift 6.0 requirements, the **Build from source** command therefore produces an `x86_64` executable without Rosetta.
+
+The current `Scripts/package_app.sh` intentionally produces an `arm64` development `.app` only; it cannot make an Intel or Universal installer. The source has no known `arm64`-specific dependency, but the Intel path has not yet been verified on Intel hardware or CI. This is a build guide, not a released compatibility guarantee.
+
+To ship a Universal Binary, produce and validate independent `arm64` and `x86_64` slices in the release process, then merge them with the macOS-provided `lipo` tool:
+
+```bash
+lipo -create -output ArkBar <path-to-arm64-ArkBar> <path-to-x86_64-ArkBar>
+lipo -archs ArkBar
+# Expected: both arm64 and x86_64, in either order.
+```
+
+This creates a Universal **executable**, not a Universal `.app`. To publish the latter, place it at `ArkBar.app/Contents/MacOS/ArkBar`, sign the bundle again, and test it separately on Apple Silicon and Intel Macs. Do not run the current `package_app.sh` afterwards: it would replace the app executable with a single arm64 slice.
+
 ## Authentication and data sources
 
 In **Auto** mode, ArkBar prefers explicitly configured credentials, then falls back to `arkcli`. The first successful source is shown in the menu.
