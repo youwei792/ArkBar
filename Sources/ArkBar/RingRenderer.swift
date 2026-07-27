@@ -9,12 +9,22 @@ import AppKit
 /// Layout: outer ring = monthly, middle = weekly, inner = session/5h.
 /// Center shows the remaining percent of the primary (Session / 5-hour) window.
 enum RingRenderer {
+    enum Tone {
+        case session
+        case weekly
+        case monthly
+    }
+
     struct Ring: Identifiable {
         let id: String
         let label: String
         /// All visible progress in ArkBar represents remaining quota.
         let remainingPercent: Double
-        let color: NSColor
+        let tone: Tone
+
+        var color: NSColor {
+            RingRenderer.progressPalette(tone: tone, remainingPercent: remainingPercent).start
+        }
     }
 
     private static let ringWidth: CGFloat = 8
@@ -39,7 +49,7 @@ enum RingRenderer {
             let maxRadius = min(rect.width, rect.height) / 2 - ringWidth / 2 - 4
             let radius = maxRadius - CGFloat(i) * (ringWidth + ringGap)
             drawRing(in: ctx, center: center, radius: radius, width: ringWidth,
-                     remainingPercent: ring.remainingPercent, color: ring.color)
+                     remainingPercent: ring.remainingPercent, tone: ring.tone)
         }
 
         // Center text (unflipped coords: y up). draw(at:) uses the point as the
@@ -47,7 +57,7 @@ enum RingRenderer {
         if let remaining = primaryRemaining {
             let text = "\(Int(remaining.rounded()))%"
             let attrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 20, weight: .semibold),
+                .font: NSFont.systemFont(ofSize: 18, weight: .semibold),
                 .foregroundColor: NSColor.labelColor,
             ]
             let pctSize = text.size(withAttributes: attrs)
@@ -56,9 +66,12 @@ enum RingRenderer {
                       withAttributes: attrs)
 
             // Caption directly below the percentage.
-            let sub = [primaryLabel, L(.left)].compactMap { $0 }.joined(separator: " · ")
+            // The whole card already establishes that values are remaining.
+            // Keeping just the period name avoids a long caption overflowing
+            // the centre of the innermost ring at 100%.
+            let sub = primaryLabel ?? L(.left)
             let subAttrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 9),
+                .font: NSFont.systemFont(ofSize: 8, weight: .medium),
                 .foregroundColor: NSColor.secondaryLabelColor,
             ]
             let subSize = sub.size(withAttributes: subAttrs)
@@ -79,8 +92,8 @@ enum RingRenderer {
     }
 
     private static func drawRing(in ctx: CGContext, center: CGPoint, radius: CGFloat,
-                                 width: CGFloat, remainingPercent: Double, color: NSColor) {
-        let palette = progressPalette(remainingPercent: remainingPercent)
+                                 width: CGFloat, remainingPercent: Double, tone: Tone) {
+        let palette = progressPalette(tone: tone, remainingPercent: remainingPercent)
         // Track: full circle, translucent.
         ctx.setLineWidth(width)
         ctx.setLineCap(.butt)
@@ -134,30 +147,37 @@ enum RingRenderer {
         ctx.fillEllipse(in: CGRect(x: point.x - 2.2, y: point.y - 2.2, width: 4.4, height: 4.4))
     }
 
-    /// Bright cyan conveys plentiful headroom; as quota becomes scarce the hue
-    /// moves through blue into a denser indigo-purple. This is data-driven rather
-    /// than a decoration assigned to a specific period.
-    static func accentColor(remainingPercent: Double) -> NSColor {
-        progressPalette(remainingPercent: remainingPercent).start
+    static func tone(for label: String) -> Tone {
+        switch label.lowercased() {
+        case "session", "5h", "5-hour", "five_hour": .session
+        case "weekly", "week": .weekly
+        default: .monthly
+        }
     }
 
-    private static func progressPalette(remainingPercent: Double) -> (start: NSColor, end: NSColor) {
-        switch remainingPercent {
-        case ..<25:
-            return (
-                NSColor(srgbRed: 0.27, green: 0.19, blue: 0.58, alpha: 1),
-                NSColor(srgbRed: 0.50, green: 0.24, blue: 0.76, alpha: 1)
-            )
-        case ..<60:
-            return (
-                NSColor(srgbRed: 0.05, green: 0.43, blue: 0.88, alpha: 1),
-                NSColor(srgbRed: 0.34, green: 0.25, blue: 0.93, alpha: 1)
-            )
-        default:
-            return (
-                NSColor(srgbRed: 0.04, green: 0.79, blue: 0.68, alpha: 1),
-                NSColor(srgbRed: 0.03, green: 0.56, blue: 0.95, alpha: 1)
-            )
+    /// Periods use distinct hue families, while the same semantic rule applies
+    /// to all of them: less remaining quota lowers luminance and deepens color.
+    private static func progressPalette(tone: Tone, remainingPercent: Double) -> (start: NSColor, end: NSColor) {
+        let remaining = max(0, min(100, remainingPercent)) / 100
+        let depth = 1 - remaining
+        let baseHue: CGFloat
+        switch tone {
+        case .session: baseHue = 0.47   // mint / cyan
+        case .weekly: baseHue = 0.57    // blue
+        case .monthly: baseHue = 0.66   // indigo
         }
+        let saturation = 0.70 + 0.20 * depth
+        let startBrightness = 0.95 - 0.50 * depth
+        let endBrightness = 0.86 - 0.45 * depth
+        return (
+            NSColor(calibratedHue: baseHue,
+                    saturation: saturation,
+                    brightness: startBrightness,
+                    alpha: 1),
+            NSColor(calibratedHue: min(0.75, baseHue + 0.045),
+                    saturation: min(1, saturation + 0.04),
+                    brightness: endBrightness,
+                    alpha: 1)
+        )
     }
 }

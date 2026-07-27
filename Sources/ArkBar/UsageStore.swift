@@ -23,11 +23,11 @@ final class UsageStore: ObservableObject {
 
     @Published private(set) var status: LoadStatus = .never
     @Published private(set) var lastUpdatedAt: Date?
+    @Published private(set) var isRefreshing = false
 
     private let settings: AppSettings
     private var providers: [UsageProvider] = []
     private var timer: Timer?
-    private var inFlight = false
     private var lastSuccessfulSnapshot: ProviderSnapshot?
     private var cancellables = Set<AnyCancellable>()
 
@@ -83,13 +83,13 @@ final class UsageStore: ObservableObject {
     }
 
     func refresh() {
-        guard !inFlight else {
+        guard !isRefreshing else {
             // A menu click, timer tick, and explicit button can arrive while a
             // slow CLI/API request is active. Coalescing them prevents a burst
             // of follow-up requests (and the menu crash that used to cause).
             return
         }
-        inFlight = true
+        isRefreshing = true
         switch status {
         case .ok, .stale:
             // Keep confirmed data on screen while the next sync is in flight.
@@ -115,7 +115,10 @@ final class UsageStore: ObservableObject {
             do {
                 let snapshot = try await provider.fetch(environment: environment)
                 Self.log("✓ \(provider.displayName): \(snapshot.plans.count) plan(s), tightest=\(snapshot.tightestWindow?.usedPercent ?? -1)%")
-                self.lastUpdatedAt = snapshot.updatedAt
+                // This is the local completion moment of the current sync, not
+                // the provider's payload timestamp. It must advance on every
+                // successful Refresh so the menu can prove that the request ran.
+                self.lastUpdatedAt = Date()
                 self.lastSuccessfulSnapshot = snapshot
                 self.status = .ok(snapshot: snapshot)
                 finishRefresh()
@@ -134,7 +137,7 @@ final class UsageStore: ObservableObject {
     }
 
     private func finishRefresh(error: String? = nil) {
-        inFlight = false
+        isRefreshing = false
         if let error {
             if let snapshot = lastSuccessfulSnapshot {
                 status = .stale(snapshot: snapshot, message: error)

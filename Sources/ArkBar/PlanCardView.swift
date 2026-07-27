@@ -232,9 +232,9 @@ final class PlanCardView: NSView {
         let session = find(["session", "5-hour", "5h", "five_hour"])
 
         return [
-            monthly.map { RingRenderer.Ring(id: "monthly", label: L(.monthly), remainingPercent: $0.remainingPercent, color: RingRenderer.accentColor(remainingPercent: $0.remainingPercent)) },
-            weekly.map { RingRenderer.Ring(id: "weekly", label: L(.weekly), remainingPercent: $0.remainingPercent, color: RingRenderer.accentColor(remainingPercent: $0.remainingPercent)) },
-            session.map { RingRenderer.Ring(id: "session", label: L(.session), remainingPercent: $0.remainingPercent, color: RingRenderer.accentColor(remainingPercent: $0.remainingPercent)) },
+            monthly.map { RingRenderer.Ring(id: "monthly", label: L(.monthly), remainingPercent: $0.remainingPercent, tone: .monthly) },
+            weekly.map { RingRenderer.Ring(id: "weekly", label: L(.weekly), remainingPercent: $0.remainingPercent, tone: .weekly) },
+            session.map { RingRenderer.Ring(id: "session", label: L(.session), remainingPercent: $0.remainingPercent, tone: .session) },
         ].compactMap { $0 }
     }
 
@@ -249,7 +249,7 @@ final class PlanCardView: NSView {
                     id: window.label,
                     label: window.displayName,
                     remainingPercent: window.remainingPercent,
-                    color: RingRenderer.accentColor(remainingPercent: window.remainingPercent)))
+                    tone: RingRenderer.tone(for: window.label)))
             }
     }
 }

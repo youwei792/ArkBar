@@ -57,11 +57,12 @@ export VOLCENGINE_SECRET_ACCESS_KEY='...'
 ## Reading the UI
 
 - All prominent percentages mean **remaining** quota, not consumed quota.
-- The menu-bar capsule reflects the tightest quota window across available plans.
+- The menu-bar capsule shows the current Session / 5-hour quota left.
 - The ring centre shows the Session (or 5-hour) quota left, and every ring fills from its own **remaining** value—100% is a full ring.
 - The three ring rows are Session, Weekly, and Monthly remaining quota; each row keeps its own reset countdown.
 - A refresh failure preserves the last confirmed data and marks it stale.
 - By default, data refreshes only on the interval selected in **Settings → Refresh**. Enable **Refresh when opening the menu bar item** to also refresh whenever the status item is opened; overlapping triggers are coalesced into one request.
+- Manual **Refresh** keeps the panel open, shows a live refreshing state, then reports “Updated just now” / a relative update time or a failure reason.
 - The interface follows the system language by default. Change it in **Settings → Language**.
 
 ## Subscription-expiry data

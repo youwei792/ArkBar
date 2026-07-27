@@ -9,6 +9,7 @@ final class StatusItemController {
     private let settings: AppSettings
     private var cancellables = Set<AnyCancellable>()
     private var hoverTrackingArea: NSTrackingArea?
+    private weak var activeRefreshView: RefreshMenuItemView?
 
     init(store: UsageStore, settings: AppSettings = .shared) {
         self.store = store
@@ -34,11 +35,21 @@ final class StatusItemController {
 
         store.$status
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.updateIcon() }
+            .sink { [weak self] _ in
+                self?.updateIcon()
+                self?.updateActiveRefreshView()
+            }
             .store(in: &cancellables)
         store.$lastUpdatedAt
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.updateIcon() }
+            .sink { [weak self] _ in
+                self?.updateIcon()
+                self?.updateActiveRefreshView()
+            }
+            .store(in: &cancellables)
+        store.$isRefreshing
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.updateActiveRefreshView() }
             .store(in: &cancellables)
         settings.$displayMode
             .receive(on: RunLoop.main)
@@ -65,10 +76,10 @@ final class StatusItemController {
             remaining = nil
             stale = true
         case let .stale(snapshot, _):
-            remaining = snapshot.tightestWindow?.remainingPercent
+            remaining = snapshot.sessionWindow?.remainingPercent
             stale = true
         case let .ok(snapshot):
-            if let window = snapshot.tightestWindow {
+            if let window = snapshot.sessionWindow {
                 remaining = window.remainingPercent
                 stale = false
             } else {
@@ -146,11 +157,14 @@ final class StatusItemController {
         let state = MenuBuilder.State(
             status: status,
             lastUpdatedAt: store.lastUpdatedAt,
+            isRefreshing: store.isRefreshing,
             now: Date(),
             onRefresh: { [weak self] in self?.store.refresh() },
             onSettings: { [weak self] in self?.showSettings() },
             onQuit: { NSApp.terminate(nil) })
-        statusItem.menu = MenuBuilder.build(state)
+        let menu = MenuBuilder.build(state)
+        activeRefreshView = menu.items.compactMap { $0.view as? RefreshMenuItemView }.first
+        statusItem.menu = menu
     }
 
     /// Rebuild the menu only if it's currently showing (so a language switch
@@ -158,6 +172,19 @@ final class StatusItemController {
     private func rebuildMenuIfOpen() {
         guard statusItem.menu != nil, statusItem.button?.window?.isVisible == true else { return }
         rebuildMenu()
+    }
+
+    private func updateActiveRefreshView() {
+        let errorMessage: String?
+        switch store.status {
+        case let .error(message), let .stale(_, message): errorMessage = message
+        default: errorMessage = nil
+        }
+        activeRefreshView?.update(
+            isRefreshing: store.isRefreshing,
+            lastUpdatedAt: store.lastUpdatedAt,
+            errorMessage: errorMessage,
+            title: L(.refreshNow))
     }
 
     private var preferencesController: PreferencesWindowController?

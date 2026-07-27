@@ -79,6 +79,16 @@ struct ArkCLIDecodeTests {
         #expect(snapshot.tightestWindow?.remainingPercent ?? 0 == 27)
     }
 
+    @Test("Menu-bar session window is not replaced by the tightest monthly window")
+    func keepsSessionForMenuBar() throws {
+        let data = sampleJSON.data(using: .utf8)!
+        let snapshot = try ArkCLIProvider.decode(stdout: data, date: Date())
+        // The Coding Plan Session is 73% used / 27% remaining. It is the
+        // status-item value even though this snapshot may contain other windows.
+        #expect(snapshot.sessionWindow?.label == "Session")
+        #expect(snapshot.sessionWindow?.remainingPercent == 27)
+    }
+
     @Test("auth_method=none throws not-authenticated")
     func throwsWhenNotAuthenticated() throws {
         let json = #"{"viewer":{"auth_method":"none"},"items":[]}"#
@@ -182,6 +192,22 @@ struct MenuBuilderTests {
         // Past -> "now".
         #expect(MenuBuilder.countdown(from: now, to: now.addingTimeInterval(-10)) == "now")
     }
+
+    @Test("Refresh is a persistent menu row rather than a closing menu action")
+    @MainActor
+    func refreshRowStaysInTheMenu() {
+        let menu = MenuBuilder.build(.init(
+            status: .loading,
+            lastUpdatedAt: Date(),
+            isRefreshing: false,
+            now: Date(),
+            onRefresh: {},
+            onSettings: {},
+            onQuit: {}))
+        let refreshItem = menu.items.first { $0.title == L(.refreshNow) }
+        #expect(refreshItem?.action == nil)
+        #expect(refreshItem?.view is RefreshMenuItemView)
+    }
 }
 
 @Suite("IconRenderer")
@@ -230,12 +256,12 @@ struct IconRendererTests {
     @Test("A 100 percent remaining ring is painted as a full ring")
     func fullRemainingRingIsFilled() throws {
         let full = RingRenderer.makeImage(
-            rings: [.init(id: "session", label: "Session", remainingPercent: 100, color: .systemMint)],
+            rings: [.init(id: "session", label: "Session", remainingPercent: 100, tone: .session)],
             primaryRemaining: 100,
             primaryLabel: "Session",
             size: 100)
         let empty = RingRenderer.makeImage(
-            rings: [.init(id: "session", label: "Session", remainingPercent: 0, color: .systemMint)],
+            rings: [.init(id: "session", label: "Session", remainingPercent: 0, tone: .session)],
             primaryRemaining: 0,
             primaryLabel: "Session",
             size: 100)
@@ -284,9 +310,9 @@ struct MenuCardVisualTests {
         // Rendering the ring directly exercises the updated palette and endpoint glow.
         let ring = RingRenderer.makeImage(
             rings: [
-                .init(id: "monthly", label: "Monthly", remainingPercent: 25, color: .systemIndigo),
-                .init(id: "weekly", label: "Weekly", remainingPercent: 58, color: .systemBlue),
-                .init(id: "session", label: "5-hour", remainingPercent: 87, color: .systemMint),
+                .init(id: "monthly", label: "Monthly", remainingPercent: 25, tone: .monthly),
+                .init(id: "weekly", label: "Weekly", remainingPercent: 58, tone: .weekly),
+                .init(id: "session", label: "5-hour", remainingPercent: 87, tone: .session),
             ], primaryRemaining: 87, primaryLabel: "5-hour", size: 160)
         let tiff = ring.tiffRepresentation!
         let rep = NSBitmapImageRep(data: tiff)!
