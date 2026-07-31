@@ -193,10 +193,24 @@ enum MenuBuilder {
     }
 
     private static func openTerminal(command: String) {
-        let script = "tell application \"Terminal\"\nactivate\ndo script \"\(command)\"\nend tell"
-        if let appleScript = NSAppleScript(source: script) {
-            var error: NSDictionary?
-            appleScript.executeAndReturnError(&error)
+        // Use `osascript` via Process (more reliable than NSAppleScript for
+        // this use case — Terminal.app is not sandboxed and the command is
+        // user-triggered, so no entitlement issue).
+        let script = """
+        tell application "Terminal"
+            activate
+            do script "\(command)"
+        end tell
+        """
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            UsageStore.log("openTerminal failed: \(error.localizedDescription)")
         }
     }
 }

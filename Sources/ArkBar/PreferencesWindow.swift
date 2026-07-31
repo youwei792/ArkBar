@@ -558,8 +558,16 @@ private func runTerminal(_ command: String) {
             do script "\(escaped)"
         end tell
         """
-    var error: NSDictionary?
-    NSAppleScript(source: script)?.executeAndReturnError(&error)
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+    process.arguments = ["-e", script]
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    do {
+        try process.run()
+    } catch {
+        UsageStore.log("runTerminal failed: \(error.localizedDescription)")
+    }
 }
 
 private func openArkConsole() {
