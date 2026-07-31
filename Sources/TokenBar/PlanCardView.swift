@@ -197,7 +197,7 @@ final class PlanCardView: NSView {
         group.animations = [scale, opacity]
         group.duration = 0.26
         group.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        layer.add(group, forKey: "arkbar.gaugeEntrance")
+        layer.add(group, forKey: "tokenbar.gaugeEntrance")
     }
 
     /// Rings in drawing order: outer -> inner = monthly, weekly, session.

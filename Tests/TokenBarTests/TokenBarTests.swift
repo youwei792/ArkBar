@@ -2,7 +2,7 @@ import Testing
 import Foundation
 import AppKit
 import ObjectiveC.runtime
-@testable import ArkBar
+@testable import TokenBar
 
 @Suite("ArkCLIProvider decode")
 struct ArkCLIDecodeTests {
@@ -431,8 +431,8 @@ struct IconRendererTests {
         let tiff = strip.tiffRepresentation!
         let rep = NSBitmapImageRep(data: tiff)!
         let png = rep.representation(using: .png, properties: [:])!
-        try png.write(to: URL(fileURLWithPath: "/tmp/arkbar_icons.png"))
-        #expect(FileManager.default.fileExists(atPath: "/tmp/arkbar_icons.png"))
+        try png.write(to: URL(fileURLWithPath: "/tmp/tokenbar_icons.png"))
+        #expect(FileManager.default.fileExists(atPath: "/tmp/tokenbar_icons.png"))
     }
 
     @Test("A 100 percent remaining ring is painted as a full ring")
@@ -581,7 +581,7 @@ struct MenuCardVisualTests {
             width: 340)
         let wordmark = header.subviews
             .compactMap { $0 as? NSTextField }
-            .first { $0.stringValue == "ArkBar" }
+            .first { $0.stringValue == "TokenBar" }
         #expect(wordmark != nil)
         #expect(wordmark?.frame.width ?? 0 >= ceil(wordmark?.intrinsicContentSize.width ?? 0) + 4)
 
@@ -604,8 +604,8 @@ struct MenuCardVisualTests {
         let tiff = preview.tiffRepresentation!
         let rep = NSBitmapImageRep(data: tiff)!
         let png = rep.representation(using: .png, properties: [:])!
-        try png.write(to: URL(fileURLWithPath: "/tmp/arkbar_ring.png"))
-        #expect(FileManager.default.fileExists(atPath: "/tmp/arkbar_ring.png"))
+        try png.write(to: URL(fileURLWithPath: "/tmp/tokenbar_ring.png"))
+        #expect(FileManager.default.fileExists(atPath: "/tmp/tokenbar_ring.png"))
 
         // Render the real AppKit dashboard hierarchy—not a separately drawn
         // mock—so palette, typography, clipping, and spacing can be inspected
@@ -628,7 +628,7 @@ struct MenuCardVisualTests {
         dashboard.cacheDisplay(in: dashboard.bounds, to: dashboardRep)
         let dashboardPNG = try #require(
             dashboardRep.representation(using: .png, properties: [:]))
-        try dashboardPNG.write(to: URL(fileURLWithPath: "/tmp/arkbar_dashboard.png"))
-        #expect(FileManager.default.fileExists(atPath: "/tmp/arkbar_dashboard.png"))
+        try dashboardPNG.write(to: URL(fileURLWithPath: "/tmp/tokenbar_dashboard.png"))
+        #expect(FileManager.default.fileExists(atPath: "/tmp/tokenbar_dashboard.png"))
     }
 }

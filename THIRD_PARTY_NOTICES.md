@@ -2,7 +2,7 @@
 
 ## SweetCookieKit
 
-ArkBar uses
+TokenBar uses
 [SweetCookieKit](https://github.com/steipete/SweetCookieKit) 0.4.1 to import
 an explicitly authorized OpenCode browser session.
 
@@ -32,7 +32,7 @@ SweetCookieKit is distributed under the MIT License:
 
 ## CodexBar
 
-Parts of ArkBar's provider architecture, menu-bar rendering approach, icon
+Parts of TokenBar's provider architecture, menu-bar rendering approach, icon
 rendering, and Volcengine request-signing implementation were adapted from
 [CodexBar](https://github.com/steipete/CodexBar).
 

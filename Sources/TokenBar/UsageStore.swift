@@ -131,7 +131,7 @@ final class UsageStore: ObservableObject {
     }
 
     /// The only path allowed to interactively read the browser cookie store.
-    /// Routine refreshes only use the cached ArkBar Keychain credential.
+    /// Routine refreshes only use the cached TokenBar Keychain credential.
     func reimportOpenCodeBrowserSession() {
         guard !opencodeIsRefreshing else { return }
         guard let provider = openCodeProvider,
@@ -314,6 +314,6 @@ final class UsageStore: ObservableObject {
             from: Date(),
             timeZone: .current,
             formatOptions: [.withInternetDateTime])
-        FileHandle.standardError.write(Data("[ArkBar \(timestamp)] \(message)\n".utf8))
+        FileHandle.standardError.write(Data("[TokenBar \(timestamp)] \(message)\n".utf8))
     }
 }

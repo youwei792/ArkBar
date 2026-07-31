@@ -93,7 +93,7 @@ private struct PreferencesRootView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("ArkBar")
+                Text("TokenBar")
                     .font(.system(size: 20, weight: .bold))
                 Text(L(.settingsTitle))
                     .font(.caption)

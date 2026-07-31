@@ -95,7 +95,7 @@ enum MenuBuilder {
         }
         menu.addItem(actionItem(L(.settings), action: state.onSettings))
         menu.addItem(.separator())
-        menu.addItem(actionItem(L(.quitArkBar), action: state.onQuit))
+        menu.addItem(actionItem(L(.quitTokenBar), action: state.onQuit))
     }
 
     // MARK: - Card items (AppKit-based)
@@ -217,7 +217,7 @@ enum MenuBuilder {
 
 // MARK: - AppKit card views
 
-/// Header card: ArkBar + provider name + auth method.
+/// Header card: TokenBar + provider name + auth method.
 /// Uses flipped coordinates (origin top-left).
 final class HeaderCardView: NSView {
     override var isFlipped: Bool { true }
@@ -237,7 +237,7 @@ final class HeaderCardView: NSView {
         accent.frame = NSRect(x: 14, y: 50, width: width - 28, height: 2)
         layer?.addSublayer(accent)
 
-        let title = NSTextField(labelWithString: "ArkBar")
+        let title = NSTextField(labelWithString: "TokenBar")
         title.font = .systemFont(ofSize: 14, weight: .bold)
         title.textColor = .labelColor
         let titleSize = title.intrinsicContentSize

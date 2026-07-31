@@ -10,13 +10,13 @@ import Security
 /// preferences but must never contain session credentials.
 enum CookieKeychainStore {
     /// v1 used the default Keychain ACL. Local ad-hoc rebuilds therefore caused
-    /// macOS to ask for the login password every time ArkBar's signature
+    /// macOS to ask for the login password every time TokenBar's signature
     /// changed. v2 is read with an explicit no-UI policy and trusts the stable
     /// app/executable paths when the item is created.
     /// The v1 item is intentionally never queried: even a “noninteractive”
     /// legacy-Keychain read can surface the old Allow/Deny password dialog on
     /// some macOS versions.
-    static let service = "com.arkbar.cache.v2"
+    static let service = "com.tokenbar.cache.v2"
     private static let cacheLock = NSLock()
     private nonisolated(unsafe) static var processCache: [String: String] = [:]
 
@@ -50,7 +50,7 @@ enum CookieKeychainStore {
 
         var add = query
         add[kSecValueData as String] = data
-        add[kSecAttrLabel as String] = "ArkBar OpenCode Cookie"
+        add[kSecAttrLabel as String] = "TokenBar OpenCode Cookie"
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         if let access = cacheAccessControl() {
             add[kSecAttrAccess as String] = access
@@ -162,7 +162,7 @@ enum CookieKeychainStore {
 
         var access: SecAccess?
         let status = secAccessCreate(
-            "ArkBar Cache" as CFString,
+            "TokenBar Cache" as CFString,
             applications as CFArray,
             &access)
         return status == errSecSuccess ? access : nil
@@ -181,8 +181,8 @@ enum CookieKeychainStore {
 
         append(Bundle.main.bundleURL.path)
         append(Bundle.main.executableURL?.path)
-        append("/Applications/ArkBar.app")
-        append("/Applications/ArkBar.app/Contents/MacOS/ArkBar")
+        append("/Applications/TokenBar.app")
+        append("/Applications/TokenBar.app/Contents/MacOS/TokenBar")
         return paths
     }
 

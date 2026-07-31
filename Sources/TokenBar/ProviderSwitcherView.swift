@@ -143,6 +143,6 @@ private final class TabButton: NSButton {
         animation.duration = 0.14
         animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
         layer?.transform = target
-        layer?.add(animation, forKey: "arkbar.tabHover")
+        layer?.add(animation, forKey: "tokenbar.tabHover")
     }
 }

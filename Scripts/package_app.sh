@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Build ArkBar as a signed .app bundle and install it to /Applications.
+# Build TokenBar as a signed .app bundle and install it to /Applications.
 # Usage: ./Scripts/package_app.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-APP_NAME="ArkBar"
-BUNDLE_ID="com.wwwsidequest.arkbar"
+APP_NAME="TokenBar"
+BUNDLE_ID="com.wwwsidequest.tokenbar"
 VERSION="0.1.0"
 BUILD="1"
 

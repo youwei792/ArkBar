@@ -38,7 +38,7 @@ enum LKey: String {
     case openArkConsole = "menu.openArkConsole"
     case openCodeGo = "menu.openCodeGo"
     case settings = "menu.settings"
-    case quitArkBar = "menu.quitArkBar"
+    case quitTokenBar = "menu.quitTokenBar"
     case updated = "menu.updated"
     case updatedJustNow = "menu.updatedJustNow"
     case updatedSecondsAgo = "menu.updatedSecondsAgo"
@@ -200,16 +200,16 @@ final class L10n: ObservableObject {
         didSet {
             // Persist and notify. AppSettings owns writes from the Settings window;
             // this manager only publishes the visual-language invalidation.
-            UserDefaults.standard.set(language.rawValue, forKey: "arkbar.language")
+            UserDefaults.standard.set(language.rawValue, forKey: "tokenbar.language")
             // Notify menu controller to rebuild.
             NotificationCenter.default.post(name: Self.languageDidChange, object: nil)
         }
     }
 
-    nonisolated static let languageDidChange = Notification.Name("arkbar.languageDidChange")
+    nonisolated static let languageDidChange = Notification.Name("tokenbar.languageDidChange")
 
     private init() {
-        let raw = UserDefaults.standard.string(forKey: "arkbar.language") ?? Language.system.rawValue
+        let raw = UserDefaults.standard.string(forKey: "tokenbar.language") ?? Language.system.rawValue
         self.language = Language(rawValue: raw) ?? .system
     }
 
@@ -275,7 +275,7 @@ final class L10n: ObservableObject {
         add(.openArkConsole, "打开方舟控制台", "Open Ark Console")
         add(.openCodeGo, "打开 OpenCode Go", "Open OpenCode Go")
         add(.settings, "设置…", "Settings…")
-        add(.quitArkBar, "退出 ArkBar", "Quit ArkBar")
+        add(.quitTokenBar, "退出 TokenBar", "Quit TokenBar")
         add(.updated, "更新于", "Updated")
         add(.updatedJustNow, "刚刚更新", "Updated just now")
         add(.updatedSecondsAgo, "%d 秒前更新", "Updated %d seconds ago")
@@ -312,7 +312,7 @@ final class L10n: ObservableObject {
         add(.expiresOn, "套餐到期 %@", "Plan expires %@")
 
         // Settings window
-        add(.settingsTitle, "ArkBar 设置", "ArkBar Settings")
+        add(.settingsTitle, "TokenBar 设置", "TokenBar Settings")
         add(.sectionMenuBar, "菜单栏", "Menu bar")
         add(.sectionRefresh, "刷新", "Refresh")
         add(.sectionDataSource, "数据源", "Data source")
@@ -363,7 +363,7 @@ final class L10n: ObservableObject {
         add(.openCodeCookieSource, "Cookie 来源", "Cookie source")
         add(.openCodeCookieAutomatic, "自动读取浏览器", "Automatic from browser")
         add(.openCodeCookieManual, "手动 Cookie", "Manual Cookie")
-        add(.openCodeAutomaticHint, "普通刷新只使用 ArkBar 已缓存的会话，不会弹出密码框。首次使用或登录失效后，请点“重新读取浏览器登录”；只有这个操作可能请求一次钥匙串授权。", "Routine refreshes only use ArkBar's cached session and never show a password prompt. On first use or after sign-in expires, click “Re-import Browser Sign-in”; only that action may request Keychain access once.")
+        add(.openCodeAutomaticHint, "普通刷新只使用 TokenBar 已缓存的会话，不会弹出密码框。首次使用或登录失效后，请点“重新读取浏览器登录”；只有这个操作可能请求一次钥匙串授权。", "Routine refreshes only use TokenBar's cached session and never show a password prompt. On first use or after sign-in expires, click “Re-import Browser Sign-in”; only that action may request Keychain access once.")
         add(.openCodeManualHint, "仅在自动读取失败时使用。Cookie 会保存在本机钥匙串，不会写入偏好设置或日志。", "Use only when automatic import fails. The Cookie is stored in Keychain, never preferences or logs.")
         add(.openCodeAuthoritativeHint, "圆环只使用 OpenCode Go 网页返回的套餐用量；不会用本地消费记录估算余额。", "Rings use only subscription usage returned by OpenCode Go; local spending history is never used as quota.")
         add(.reimportBrowserSession, "重新读取浏览器登录", "Re-import Browser Session")
@@ -373,9 +373,9 @@ final class L10n: ObservableObject {
         add(.browserSession, "浏览器会话", "Browser session")
         add(.manualCookie, "手动 Cookie", "Manual Cookie")
         add(.openCodeBrowserAccessTitle, "允许读取浏览器登录", "Allow Browser Sign-in Access")
-        add(.openCodeBrowserAccessMessage, "ArkBar 将请求 macOS 钥匙串中的“%@”，用于解密 opencode.ai 登录 Cookie。ArkBar 只保留认证 Cookie，不读取浏览历史。", "ArkBar will request “%@” from macOS Keychain to decrypt the opencode.ai sign-in Cookie. ArkBar keeps only the authentication Cookie and does not read browsing history.")
+        add(.openCodeBrowserAccessMessage, "TokenBar 将请求 macOS 钥匙串中的“%@”，用于解密 opencode.ai 登录 Cookie。TokenBar 只保留认证 Cookie，不读取浏览历史。", "TokenBar will request “%@” from macOS Keychain to decrypt the opencode.ai sign-in Cookie. TokenBar keeps only the authentication Cookie and does not read browsing history.")
         add(.continueAction, "继续", "Continue")
-        add(.settingsAppVersion, "ArkBar 版本", "ArkBar version")
+        add(.settingsAppVersion, "TokenBar 版本", "TokenBar version")
         add(.settingsCurrentSource, "当前来源", "Current source")
         add(.settingsPreviousData, "正在显示上次成功数据", "Showing the last successful data")
         add(.settingsNoUsage, "暂无可显示的套餐用量", "No subscription usage to display")
@@ -403,7 +403,7 @@ final class L10n: ObservableObject {
         add(.errorOpenCodeCookieMissing, "未配置有效的 OpenCode Go 手动 Cookie。", "No valid manual OpenCode Go Cookie is configured.")
         add(.errorOpenCodeCookieInvalid, "OpenCode Go 登录已失效。请重新登录浏览器，或更新手动 Cookie。", "The OpenCode Go sign-in expired. Sign in again in the browser or update the manual Cookie.")
         add(.errorOpenCodeBrowserSessionMissing, "没有在浏览器中找到 opencode.ai 登录会话。请先在浏览器登录，或改用手动 Cookie。", "No opencode.ai browser session was found. Sign in in a browser or use a manual Cookie.")
-        add(.errorOpenCodeBrowserAuthorizationRequired, "ArkBar 尚未缓存浏览器登录，或原会话已失效。请在 OpenCode Go 设置中点“重新读取浏览器登录”；后台刷新不会主动弹出密码框。", "ArkBar has no cached browser sign-in, or the previous session expired. Click “Re-import Browser Sign-in” in OpenCode Go settings; background refreshes will not show a password prompt.")
+        add(.errorOpenCodeBrowserAuthorizationRequired, "TokenBar 尚未缓存浏览器登录，或原会话已失效。请在 OpenCode Go 设置中点“重新读取浏览器登录”；后台刷新不会主动弹出密码框。", "TokenBar has no cached browser sign-in, or the previous session expired. Click “Re-import Browser Sign-in” in OpenCode Go settings; background refreshes will not show a password prompt.")
         add(.errorProbeModels, "所有探测模型均不可用", "All probe models failed")
         add(.apiKeyNoHeaders, "API Key 有效，但响应未返回请求限额头。", "API key is valid, but no request-limit headers were returned.")
         add(.apiKeyNoWindow, "API Key 有效，但未返回用量窗口。", "API key is valid, but no usage window was returned.")

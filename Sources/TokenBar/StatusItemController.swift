@@ -222,7 +222,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         animation.duration = 0.16
         animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
         layer.transform = target
-        layer.add(animation, forKey: "arkbar.statusHover")
+        layer.add(animation, forKey: "tokenbar.statusHover")
     }
 
     /// Rebuild the dropdown menu from the current store state.

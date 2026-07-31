@@ -18,7 +18,7 @@ enum RingRenderer {
     struct Ring: Identifiable {
         let id: String
         let label: String
-        /// All visible progress in ArkBar represents remaining quota.
+        /// All visible progress in TokenBar represents remaining quota.
         let remainingPercent: Double
         let tone: Tone
         var color: NSColor {

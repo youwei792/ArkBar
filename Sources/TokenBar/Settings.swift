@@ -111,14 +111,14 @@ final class AppSettings: ObservableObject {
     var opencodeCookieHasValue: Bool { !opencodeCookie.isEmpty }
 
     private enum Keys {
-        static let refreshInterval = "arkbar.refreshInterval"
-        static let refreshWhenMenuOpens = "arkbar.refreshWhenMenuOpens"
-        static let sourceMode = "arkbar.sourceMode"
-        static let displayMode = "arkbar.displayMode"
-        static let language = "arkbar.language"
-        static let selectedTab = "arkbar.selectedTab"
-        static let opencodeWorkspaceID = "arkbar.opencodeWorkspaceID"
-        static let opencodeCookieSource = "arkbar.opencodeCookieSource"
+        static let refreshInterval = "tokenbar.refreshInterval"
+        static let refreshWhenMenuOpens = "tokenbar.refreshWhenMenuOpens"
+        static let sourceMode = "tokenbar.sourceMode"
+        static let displayMode = "tokenbar.displayMode"
+        static let language = "tokenbar.language"
+        static let selectedTab = "tokenbar.selectedTab"
+        static let opencodeWorkspaceID = "tokenbar.opencodeWorkspaceID"
+        static let opencodeCookieSource = "tokenbar.opencodeCookieSource"
     }
 
     private init() {

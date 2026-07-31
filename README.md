@@ -1,8 +1,8 @@
-# ArkBar
+# TokenBar
 
 [English](README.en.md) · [安全报告](SECURITY.md) · [更新日志](CHANGELOG.md)
 
-ArkBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding/Agent Plan 与 OpenCode Go 的剩余用量；不会显示 Dock 图标。
+TokenBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding/Agent Plan 与 OpenCode Go 的剩余用量；不会显示 Dock 图标。
 
 ## 特性
 
@@ -21,10 +21,10 @@ ArkBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding/A
 要求：macOS 14+、Swift 6.0，以及任一受支持的数据源。
 
 ```bash
-git clone https://github.com/youwei792/ArkBar.git
-cd ArkBar
+git clone https://github.com/youwei792/TokenBar.git
+cd TokenBar
 swift build
-.build/debug/ArkBar
+.build/debug/TokenBar
 ```
 
 ### 打包本地应用
@@ -33,7 +33,7 @@ swift build
 ./Scripts/package_app.sh
 ```
 
-该开发脚本仅构建 Apple Silicon（`arm64`）版本，会替换工作目录的 `ArkBar.app` 和 `/Applications/ArkBar.app`，并进行 ad-hoc 签名；它不是公证过的正式发布安装包。
+该开发脚本仅构建 Apple Silicon（`arm64`）版本，会替换工作目录的 `TokenBar.app` 和 `/Applications/TokenBar.app`，并进行 ad-hoc 签名；它不是公证过的正式发布安装包。
 
 ### Intel 与 Universal Binary（维护者参考）
 
@@ -44,12 +44,12 @@ swift build
 要发布 Universal Binary，请在发布流程中分别产出并验证两个独立切片（`arm64` 与 `x86_64`），再使用 macOS 自带的 `lipo` 合并：
 
 ```bash
-lipo -create -output ArkBar <path-to-arm64-ArkBar> <path-to-x86_64-ArkBar>
-lipo -archs ArkBar
+lipo -create -output TokenBar <path-to-arm64-TokenBar> <path-to-x86_64-TokenBar>
+lipo -archs TokenBar
 # 预期同时列出：arm64 和 x86_64（顺序无关）
 ```
 
-以上命令只生成 Universal **可执行文件**。制作 Universal `.app` 时，还需要将该文件放入 `ArkBar.app/Contents/MacOS/ArkBar`、重新签名，并分别在 Apple Silicon 与 Intel Mac 上测试后再发布。不要在这一步之后运行当前的 `package_app.sh`，因为它会再次用 arm64 单切片覆盖应用内的可执行文件。
+以上命令只生成 Universal **可执行文件**。制作 Universal `.app` 时，还需要将该文件放入 `TokenBar.app/Contents/MacOS/TokenBar`、重新签名，并分别在 Apple Silicon 与 Intel Mac 上测试后再发布。不要在这一步之后运行当前的 `package_app.sh`，因为它会再次用 arm64 单切片覆盖应用内的可执行文件。
 
 ## 认证与数据源
 
@@ -69,7 +69,7 @@ Ark CLI 的最新安装方式请以官方 [Ark CLI 文档](https://github.com/vo
 ```bash
 export VOLCENGINE_ACCESS_KEY_ID='...'
 export VOLCENGINE_SECRET_ACCESS_KEY='...'
-.build/debug/ArkBar
+.build/debug/TokenBar
 ```
 
 ## 如何理解界面
@@ -85,15 +85,15 @@ export VOLCENGINE_SECRET_ACCESS_KEY='...'
 
 ## 套餐到期日
 
-配额重置时间不等于套餐到期日。只有数据源提供经过验证的订单终止时间时，ArkBar 才显示到期徽标。当前 `arkcli usage plan` 没有提供该字段，因此应用会隐藏它，不会用重置时间或本地缓存猜测。
+配额重置时间不等于套餐到期日。只有数据源提供经过验证的订单终止时间时，TokenBar 才显示到期徽标。当前 `arkcli usage plan` 没有提供该字段，因此应用会隐藏它，不会用重置时间或本地缓存猜测。
 
 ## 隐私
 
 - OpenCode 自动接入只会在用户点击“重新读取浏览器登录”后读取 `opencode.ai` 的认证 Cookie；不读取浏览历史，也不会扫描任意文件。
-- ArkBar 只保留 `auth` / `__Host-auth` 认证项，并存入本机 macOS Keychain；常规启动、定时刷新和手动刷新只使用这份缓存，不会反复读取浏览器。
+- TokenBar 只保留 `auth` / `__Host-auth` 认证项，并存入本机 macOS Keychain；常规启动、定时刷新和手动刷新只使用这份缓存，不会反复读取浏览器。
 - 手动粘贴的 OpenCode Cookie 同样只保存在本机 Keychain，不会写入 UserDefaults、源码或日志。
-- `arkcli` 自己管理 SSO 会话；ArkBar 只运行 `arkcli usage plan --format json` 并解析输出。
-- AK/SK 与 API Key 仅从启动环境读取，ArkBar 不会把它们写入磁盘。
+- `arkcli` 自己管理 SSO 会话；TokenBar 只运行 `arkcli usage plan --format json` 并解析输出。
+- AK/SK 与 API Key 仅从启动环境读取，TokenBar 不会把它们写入磁盘。
 - 网络请求仅发送到所选数据源需要的火山方舟接口或 `opencode.ai`。
 
 ## 开发与测试
@@ -107,11 +107,11 @@ swift test
 ## 目录结构
 
 ```text
-Sources/ArkBar/          应用源码
+Sources/TokenBar/          应用源码
 Scripts/package_app.sh   本地 Apple Silicon 打包脚本
-Tests/ArkBarTests/       解码与视觉回归测试
+Tests/TokenBarTests/       解码与视觉回归测试
 ```
 
 ## 许可证与致谢
 
-ArkBar 使用 [MIT License](LICENSE)。CodexBar 与 SweetCookieKit 的相关许可详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+TokenBar 使用 [MIT License](LICENSE)。CodexBar 与 SweetCookieKit 的相关许可详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

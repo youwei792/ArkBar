@@ -1,8 +1,8 @@
-# ArkBar
+# TokenBar
 
 [简体中文](README.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
 
-ArkBar is a native macOS menu-bar app for Volcengine Ark Coding/Agent Plan and OpenCode Go usage. It keeps the quota you have **left** visible without a Dock icon.
+TokenBar is a native macOS menu-bar app for Volcengine Ark Coding/Agent Plan and OpenCode Go usage. It keeps the quota you have **left** visible without a Dock icon.
 
 ## Highlights
 
@@ -21,10 +21,10 @@ ArkBar is a native macOS menu-bar app for Volcengine Ark Coding/Agent Plan and O
 Requirements: macOS 14+, Swift 6.0, and one supported authentication source.
 
 ```bash
-git clone https://github.com/youwei792/ArkBar.git
-cd ArkBar
+git clone https://github.com/youwei792/TokenBar.git
+cd TokenBar
 swift build
-.build/debug/ArkBar
+.build/debug/TokenBar
 ```
 
 ### Package a local app
@@ -33,7 +33,7 @@ swift build
 ./Scripts/package_app.sh
 ```
 
-This development script builds an Apple Silicon (`arm64`) app, replaces the local `ArkBar.app` bundle, and replaces `/Applications/ArkBar.app`. It ad-hoc signs the result; it is not a notarized release installer.
+This development script builds an Apple Silicon (`arm64`) app, replaces the local `TokenBar.app` bundle, and replaces `/Applications/TokenBar.app`. It ad-hoc signs the result; it is not a notarized release installer.
 
 ### Intel and Universal Binary builds (maintainer reference)
 
@@ -44,32 +44,32 @@ The current `Scripts/package_app.sh` intentionally produces an `arm64` developme
 To ship a Universal Binary, produce and validate independent `arm64` and `x86_64` slices in the release process, then merge them with the macOS-provided `lipo` tool:
 
 ```bash
-lipo -create -output ArkBar <path-to-arm64-ArkBar> <path-to-x86_64-ArkBar>
-lipo -archs ArkBar
+lipo -create -output TokenBar <path-to-arm64-TokenBar> <path-to-x86_64-TokenBar>
+lipo -archs TokenBar
 # Expected: both arm64 and x86_64, in either order.
 ```
 
-This creates a Universal **executable**, not a Universal `.app`. To publish the latter, place it at `ArkBar.app/Contents/MacOS/ArkBar`, sign the bundle again, and test it separately on Apple Silicon and Intel Macs. Do not run the current `package_app.sh` afterwards: it would replace the app executable with a single arm64 slice.
+This creates a Universal **executable**, not a Universal `.app`. To publish the latter, place it at `TokenBar.app/Contents/MacOS/TokenBar`, sign the bundle again, and test it separately on Apple Silicon and Intel Macs. Do not run the current `package_app.sh` afterwards: it would replace the app executable with a single arm64 slice.
 
 ## Authentication and data sources
 
-In **Auto** mode, ArkBar prefers explicitly configured credentials, then falls back to `arkcli`. The first successful source is shown in the menu.
+In **Auto** mode, TokenBar prefers explicitly configured credentials, then falls back to `arkcli`. The first successful source is shown in the menu.
 
 | Source | Configuration | Coverage and limits |
 | --- | --- | --- |
 | `arkcli` SSO (recommended) | `npm install -g @volcengine/ark-cli` then `arkcli auth login volc-sso` | Personal and team Coding/Agent Plan usage exposed by `arkcli usage plan`. |
 | Volcengine AK/SK | `VOLCENGINE_ACCESS_KEY_ID` and `VOLCENGINE_SECRET_ACCESS_KEY` | Coding Plan usage only, via signed `GetCodingPlanUsage`. |
 | Ark API key | `ARK_API_KEY`; optionally `ARK_MODEL_ID` | One request-rate-limit window only. The probe sends a minimal API request, so it can consume request quota. |
-| OpenCode Go | Explicitly choose **Re-import Browser Session** in **Settings → OpenCode Go**, or select a manual Cookie | Subscription usage returned by `opencode.ai`; ArkBar never substitutes a local spending estimate. |
+| OpenCode Go | Explicitly choose **Re-import Browser Session** in **Settings → OpenCode Go**, or select a manual Cookie | Subscription usage returned by `opencode.ai`; TokenBar never substitutes a local spending estimate. |
 
 See the official [Ark CLI installation guide](https://github.com/volcengine/ark-cli) for the current CLI setup.
 
-Never commit credentials. Set them in your shell environment before launching ArkBar:
+Never commit credentials. Set them in your shell environment before launching TokenBar:
 
 ```bash
 export VOLCENGINE_ACCESS_KEY_ID='...'
 export VOLCENGINE_SECRET_ACCESS_KEY='...'
-.build/debug/ArkBar
+.build/debug/TokenBar
 ```
 
 ## Reading the UI
@@ -85,15 +85,15 @@ export VOLCENGINE_SECRET_ACCESS_KEY='...'
 
 ## Subscription-expiry data
 
-Quota reset time is not subscription expiry. ArkBar displays a plan-expiry badge only when a provider exposes a verified order end date. The currently supported `arkcli usage plan` response does not provide that value, so ArkBar intentionally hides the badge instead of guessing from a reset time or local profile cache.
+Quota reset time is not subscription expiry. TokenBar displays a plan-expiry badge only when a provider exposes a verified order end date. The currently supported `arkcli usage plan` response does not provide that value, so TokenBar intentionally hides the badge instead of guessing from a reset time or local profile cache.
 
 ## Privacy
 
 - OpenCode browser import reads the `opencode.ai` authentication cookie only after **Re-import Browser Session** is clicked. It does not read browsing history or scan arbitrary files.
-- ArkBar keeps only the `auth` / `__Host-auth` cookie and stores it in the local macOS Keychain. Startup, scheduled refresh, and ordinary manual refresh use that cache instead of repeatedly reading the browser.
+- TokenBar keeps only the `auth` / `__Host-auth` cookie and stores it in the local macOS Keychain. Startup, scheduled refresh, and ordinary manual refresh use that cache instead of repeatedly reading the browser.
 - A manually pasted OpenCode Cookie is also stored only in the local Keychain, never UserDefaults, source files, or logs.
-- `arkcli` keeps ownership of its SSO session; ArkBar only runs `arkcli usage plan --format json` and parses its output.
-- AK/SK and API keys are read from the launch environment and are never written to disk by ArkBar.
+- `arkcli` keeps ownership of its SSO session; TokenBar only runs `arkcli usage plan --format json` and parses its output.
+- AK/SK and API keys are read from the launch environment and are never written to disk by TokenBar.
 - Network requests go only to the required Volcengine Ark endpoints or `opencode.ai`.
 
 ## Development
@@ -107,7 +107,7 @@ The test suite covers Ark CLI, OpenAPI, and OpenCode Go decoding, time formattin
 ## Project structure
 
 ```text
-Sources/ArkBar/
+Sources/TokenBar/
   ArkCLIFetcher.swift    arkcli SSO usage provider
   VolcAPIProvider.swift  AK/SK signed Coding Plan provider
   ArkAPIKeyProvider.swift API-key rate-limit probe provider
@@ -117,9 +117,9 @@ Sources/ArkBar/
   PlanCardView.swift     menu-card layout and remaining-quota ring
   Localization.swift     Simplified Chinese and English catalog
 Scripts/package_app.sh   local Apple Silicon app packaging
-Tests/ArkBarTests/       decoding and visual regression tests
+Tests/TokenBarTests/       decoding and visual regression tests
 ```
 
 ## License and attribution
 
-ArkBar is released under the [MIT License](LICENSE). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the CodexBar and SweetCookieKit notices.
+TokenBar is released under the [MIT License](LICENSE). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the CodexBar and SweetCookieKit notices.

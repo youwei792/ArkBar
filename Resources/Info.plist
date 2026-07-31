@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>ArkBar</string>
+    <string>TokenBar</string>
     <key>CFBundleDisplayName</key>
-    <string>ArkBar</string>
+    <string>TokenBar</string>
     <key>CFBundleIdentifier</key>
-    <string>com.wwwsidequest.arkbar</string>
+    <string>com.wwwsidequest.tokenbar</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>CFBundleShortVersionString</key>
     <string>0.1.0</string>
     <key>CFBundleExecutable</key>
-    <string>ArkBar</string>
+    <string>TokenBar</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleIconFile</key>

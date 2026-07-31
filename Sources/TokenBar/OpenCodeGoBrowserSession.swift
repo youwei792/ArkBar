@@ -3,7 +3,7 @@ import Foundation
 import SweetCookieKit
 
 /// Imports only OpenCode's authentication cookie from an existing browser
-/// session. The extracted credential is cached in ArkBar's Keychain so routine
+/// session. The extracted credential is cached in TokenBar's Keychain so routine
 /// five-minute refreshes do not repeatedly decrypt the browser cookie store.
 enum OpenCodeGoBrowserSession {
     struct Session: Sendable, Equatable {
@@ -26,12 +26,12 @@ enum OpenCodeGoBrowserSession {
     }
 
     private static let cachedCredentialAccount = "opencode-browser"
-    private static let sourceLabelKey = "arkbar.opencodeBrowserSourceLabel"
-    private static let browserKey = "arkbar.opencodeBrowser"
+    private static let sourceLabelKey = "tokenbar.opencodeBrowserSourceLabel"
+    private static let browserKey = "tokenbar.opencodeBrowser"
     private static let client = BrowserCookieClient()
     private static let query = BrowserCookieQuery(domains: ["opencode.ai", "app.opencode.ai"])
 
-    /// Prefer the browser most ArkBar users already use for the dashboard, then
+    /// Prefer the browser most TokenBar users already use for the dashboard, then
     /// try the remaining SweetCookieKit catalog without duplicates.
     private static let preferredBrowsers: [Browser] = {
         let preferred: [Browser] = [.chrome, .arc, .safari, .edge, .brave, .firefox]
@@ -110,7 +110,7 @@ enum OpenCodeGoBrowserSession {
         return available.first
     }
 
-    /// Performs the only interactive browser-cookie read in ArkBar.
+    /// Performs the only interactive browser-cookie read in TokenBar.
     ///
     /// This must only be called from the explicit “re-import browser session”
     /// settings action. Startup, scheduled refreshes, menu-open refreshes, and
