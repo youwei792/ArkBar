@@ -393,13 +393,78 @@ struct MenuBuilderTests {
 }
 
 @Suite("IconRenderer")
+@MainActor
 struct IconRendererTests {
     @Test("Produces a template image at 18x18pt")
     func makesTemplateImage() {
-        let icon = IconRenderer.makeIcon(remainingPercent: 50, stale: false)
+        let icon = IconRenderer.makeBarIcon(remainingPercent: 50, stale: false)
         #expect(icon.size.width == 18)
         #expect(icon.size.height == 18)
         #expect(icon.isTemplate == true)
+    }
+
+    @Test("Logo-only and logo+bar icons stay template images")
+    func logoIconsAreTemplate() {
+        let logo = IconRenderer.makeLogoIcon(tab: .deepseek)
+        #expect(logo.isTemplate == true)
+        let combo = IconRenderer.makeLogoAndBarIcon(tab: .deepseek, remainingPercent: 73, stale: false)
+        #expect(combo.isTemplate == true)
+        #expect(combo.size.width == 30)
+    }
+
+    @Test("Writes menu-bar style strip for visual inspection")
+    func writesMenuBarStylesPNG() throws {
+        // One row per DisplayMode so a human can eyeball the combos.
+        let modes: [(AppSettings.DisplayMode, String)] = [
+            (.iconOnly, "bar"),
+            (.iconAndPercent, "bar+%"),
+            (.percentOnly, "%"),
+            (.logoOnly, "logo"),
+            (.logoAndPercent, "logo+%"),
+            (.logoAndBar, "logo+bar"),
+        ]
+        let cell = 96
+        let strip = NSImage(size: NSSize(width: cell * modes.count, height: cell), flipped: false) { rect in
+            NSColor(calibratedWhite: 0.25, alpha: 1).setFill()
+            rect.fill()
+            for (i, mode) in modes.enumerated() {
+                let sub = NSImage(size: NSSize(width: cell, height: cell), flipped: false) { r in
+                    NSColor.clear.setFill()
+                    r.fill()
+                    let icon: NSImage? = switch mode.0 {
+                    case .iconOnly, .iconAndPercent: IconRenderer.makeBarIcon(remainingPercent: 73, stale: false)
+                    case .percentOnly: nil
+                    case .logoOnly: IconRenderer.makeLogoIcon(tab: .deepseek)
+                    case .logoAndPercent: IconRenderer.makeLogoIcon(tab: .deepseek)
+                    case .logoAndBar: IconRenderer.makeLogoAndBarIcon(tab: .deepseek, remainingPercent: 73, stale: false)
+                    }
+                    // Tint template black for visibility on the light strip.
+                    let tinted = NSImage(size: icon?.size ?? .zero, flipped: false) { tr in
+                        NSColor.black.setFill(); tr.fill()
+                        icon?.draw(in: tr, from: .zero, operation: .destinationIn, fraction: 1)
+                        return true
+                    }
+                    if let icon {
+                        tinted.draw(in: r.insetBy(dx: 12, dy: 24), from: .zero, operation: .sourceOver, fraction: 1)
+                    }
+                    let title = mode.1
+                    let attrs: [NSAttributedString.Key: Any] = [
+                        .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium),
+                        .foregroundColor: NSColor.black,
+                    ]
+                    let size = title.size(withAttributes: attrs)
+                    title.draw(at: NSPoint(x: r.midX - size.width / 2, y: 6), withAttributes: attrs)
+                    return true
+                }
+                sub.draw(in: NSRect(x: i * cell, y: 0, width: cell, height: cell))
+            }
+            return true
+        }
+        let tiff = try #require(strip.tiffRepresentation)
+        let rep = try #require(NSBitmapImageRep(data: tiff))
+        let png = try #require(rep.representation(using: .png, properties: [:]))
+        try png.write(to: URL(fileURLWithPath: "/tmp/tokenbar_menu_styles.png"))
+        #expect(FileManager.default.fileExists(atPath: "/tmp/tokenbar_menu_styles.png"))
     }
 
     @Test("Writes a tinted PNG to /tmp for visual inspection")
@@ -610,7 +675,7 @@ struct MenuCardVisualTests {
         // Render the real AppKit dashboard hierarchy—not a separately drawn
         // mock—so palette, typography, clipping, and spacing can be inspected
         // together after each visual change.
-        let switcher = ProviderSwitcherView(selected: .ark, width: 340, onSelect: { _ in })
+        let switcher = ProviderSwitcherView(tabs: ProviderTab.allCases, selected: .ark, width: 340, onSelect: { _ in })
         let card = PlanCardView(plan: plan, now: now, width: 340)
         let totalHeight = switcher.bounds.height + header.bounds.height + card.bounds.height
         let dashboard = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: totalHeight))
@@ -630,5 +695,431 @@ struct MenuCardVisualTests {
             dashboardRep.representation(using: .png, properties: [:]))
         try dashboardPNG.write(to: URL(fileURLWithPath: "/tmp/tokenbar_dashboard.png"))
         #expect(FileManager.default.fileExists(atPath: "/tmp/tokenbar_dashboard.png"))
+    }
+}
+
+@Suite("DeepSeekProvider balance decode")
+struct DeepSeekBalanceDecodeTests {
+    private static let utcCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }()
+
+    @Test("Parses API-key balance with string amounts, preferring funded USD")
+    func parsesApiBalance() throws {
+        let json = #"""
+        {"is_available": true, "balance_infos": [
+          {"currency": "USD", "total_balance": "0.00", "granted_balance": "0.00", "topped_up_balance": "0.00"},
+          {"currency": "CNY", "total_balance": "45.30", "granted_balance": "5.00", "topped_up_balance": "40.30"}
+        ]}
+        """#
+        let balance = try DeepSeekProvider.decodeBalance(data: json.data(using: .utf8)!)
+        #expect(balance.isAvailable == true)
+        #expect(balance.currency == "CNY")
+        #expect(balance.totalBalance == 45.30)
+        #expect(balance.toppedUpBalance == 40.30)
+        #expect(balance.grantedBalance == 5.00)
+    }
+
+    @Test("Prefers USD when it has a funded balance")
+    func prefersFundedUSD() throws {
+        let json = #"""
+        {"is_available": true, "balance_infos": [
+          {"currency": "USD", "total_balance": "12.34", "granted_balance": "0.00", "topped_up_balance": "12.34"},
+          {"currency": "CNY", "total_balance": "1.00", "granted_balance": "0.00", "topped_up_balance": "1.00"}
+        ]}
+        """#
+        let balance = try DeepSeekProvider.decodeBalance(data: json.data(using: .utf8)!)
+        #expect(balance.currency == "USD")
+        #expect(balance.totalBalance == 12.34)
+    }
+
+    @Test("Empty balance_infos yields a zero balance")
+    func emptyBalanceInfos() throws {
+        let json = #"{"is_available": true, "balance_infos": []}"#
+        let balance = try DeepSeekProvider.decodeBalance(data: json.data(using: .utf8)!)
+        #expect(balance.totalBalance == 0)
+        #expect(balance.isAvailable == false)
+    }
+
+    @Test("is_available=false is preserved")
+    func unavailableFlag() throws {
+        let json = #"""
+        {"is_available": false, "balance_infos": [
+          {"currency": "USD", "total_balance": "5.00", "granted_balance": "0.00", "topped_up_balance": "5.00"}
+        ]}
+        """#
+        let balance = try DeepSeekProvider.decodeBalance(data: json.data(using: .utf8)!)
+        #expect(balance.isAvailable == false)
+        #expect(balance.totalBalance == 5.00)
+    }
+
+    @Test("Platform wallets accept numeric or string balances")
+    func platformWallets() throws {
+        let json = #"""
+        {"code": 0, "data": {"biz_code": 0, "biz_data": {
+          "normal_wallets": [{"balance": 40.3, "currency": "CNY"}],
+          "bonus_wallets": [{"balance": "5.00", "currency": "CNY"}]
+        }}}
+        """#
+        let balance = try DeepSeekProvider.decodePlatformBalance(data: json.data(using: .utf8)!)
+        #expect(balance.currency == "CNY")
+        #expect(balance.totalBalance == 45.30)
+        #expect(balance.toppedUpBalance == 40.30)
+        #expect(balance.grantedBalance == 5.00)
+    }
+
+    @Test("Platform auth error codes throw invalid-token")
+    func platformAuthError() {
+        let json = #"{"code": 40002, "data": {"biz_code": 0, "biz_data": {}}}"#
+        do {
+            _ = try DeepSeekProvider.decodePlatformBalance(data: json.data(using: .utf8)!)
+            Issue.record("expected deepSeekInvalidPlatformToken")
+        } catch let error as UsageError {
+            if case .deepSeekInvalidPlatformToken = error {
+                // expected
+            } else {
+                Issue.record("unexpected error: \(error)")
+            }
+        } catch {
+            Issue.record("unexpected error type: \(error)")
+        }
+    }
+
+    @Test("Aggregates today and month tokens, cost, and requests")
+    func aggregatesUsage() throws {
+        // UTC calendar so the fixed `now` maps to a deterministic day string.
+        let now = Date(timeIntervalSince1970: 1_785_672_000) // 2026-08-02 12:00 UTC
+        let amount = #"""
+        {"code": 0, "data": {"biz_code": 0, "biz_data": {
+          "total": [
+            {"model": "deepseek-chat", "usage": [
+              {"type": "PROMPT_CACHE_HIT_TOKEN", "amount": "300"},
+              {"type": "PROMPT_CACHE_MISS_TOKEN", "amount": "1200"},
+              {"type": "RESPONSE_TOKEN", "amount": "600"},
+              {"type": "REQUEST", "amount": "5"}
+            ]}
+          ],
+          "days": [
+            {"date": "2026-08-01", "data": [
+              {"model": "deepseek-chat", "usage": [
+                {"type": "PROMPT_CACHE_HIT_TOKEN", "amount": "100"},
+                {"type": "PROMPT_CACHE_MISS_TOKEN", "amount": "900"},
+                {"type": "RESPONSE_TOKEN", "amount": "500"},
+                {"type": "REQUEST", "amount": "3"}
+              ]}
+            ]},
+            {"date": "2026-08-02", "data": [
+              {"model": "deepseek-chat", "usage": [
+                {"type": "PROMPT_CACHE_HIT_TOKEN", "amount": "200"},
+                {"type": "PROMPT_CACHE_MISS_TOKEN", "amount": "300"},
+                {"type": "RESPONSE_TOKEN", "amount": "100"},
+                {"type": "REQUEST", "amount": "2"}
+              ]}
+            ]}
+          ]
+        }}}
+        """#
+        let cost = #"""
+        {"code": 0, "data": {"biz_code": 0, "biz_data": [{
+          "currency": "CNY",
+          "days": [
+            {"date": "2026-08-01", "data": [
+              {"model": "deepseek-chat", "usage": [
+                {"type": "PROMPT_CACHE_HIT_TOKEN", "amount": "0.01"},
+                {"type": "PROMPT_CACHE_MISS_TOKEN", "amount": "0.05"},
+                {"type": "RESPONSE_TOKEN", "amount": "0.02"},
+                {"type": "REQUEST", "amount": "0.00"}
+              ]}
+            ]},
+            {"date": "2026-08-02", "data": [
+              {"model": "deepseek-chat", "usage": [
+                {"type": "PROMPT_CACHE_HIT_TOKEN", "amount": "0.02"},
+                {"type": "PROMPT_CACHE_MISS_TOKEN", "amount": "0.01"},
+                {"type": "RESPONSE_TOKEN", "amount": "0.03"},
+                {"type": "REQUEST", "amount": "0.00"}
+              ]}
+            ]}
+          ]
+        }]}}
+        """#
+        let stats = try DeepSeekProvider.decodeUsageSummary(
+            amountData: amount.data(using: .utf8)!,
+            costData: cost.data(using: .utf8)!,
+            now: now,
+            calendar: Self.utcCalendar)
+
+        // Today = the 2026-08-02 day only.
+        #expect(stats.todayTokens == 600)
+        #expect(stats.requestCount == 2)
+        #expect(abs((stats.todayCost ?? 0) - 0.06) < 0.0001)
+        // Month = both days.
+        #expect(stats.currentMonthTokens == 2100)
+        #expect(stats.currentMonthRequestCount == 5)
+        #expect(abs((stats.currentMonthCost ?? 0) - 0.14) < 0.0001)
+        #expect(stats.topModel == "deepseek-chat")
+        // Category split comes from the "total" array (current month).
+        #expect(stats.promptCacheHitTokens == 300)
+        #expect(stats.promptCacheMissTokens == 1200)
+        #expect(stats.responseTokens == 600)
+    }
+
+    @Test("Ring used percent = month cost / (month cost + balance)")
+    func ringUsedPercent() {
+        // ¥45.30 balance, ¥10.00 spent this month -> 18.08% used.
+        #expect(abs(DeepSeekProvider.ringUsedPercent(balance: 45.30, monthCost: 10.00) - (10.0 / 55.3 * 100)) < 0.001)
+        // No usage data: ring stays empty (all remaining).
+        #expect(DeepSeekProvider.ringUsedPercent(balance: 45.30, monthCost: nil) == 0)
+        // Zero balance: fully used.
+        #expect(DeepSeekProvider.ringUsedPercent(balance: 0, monthCost: 5.00) == 100)
+        // Recharge raises balance -> used share shrinks.
+        let before = DeepSeekProvider.ringUsedPercent(balance: 45.30, monthCost: 10.00)
+        let after = DeepSeekProvider.ringUsedPercent(balance: 145.30, monthCost: 10.00)
+        #expect(after < before)
+    }
+}
+
+@Suite("DeepSeek credentials")
+struct DeepSeekCredentialsTests {
+    @Test("Reads API key and platform token aliases")
+    func readsEnvironment() {
+        #expect(DeepSeekCredentialResolver.apiKey(environment: ["DEEPSEEK_API_KEY": "sk-abc"]) == "sk-abc")
+        #expect(DeepSeekCredentialResolver.apiKey(environment: ["DEEPSEEK_KEY": "sk-abc"]) == "sk-abc")
+        #expect(DeepSeekCredentialResolver.platformToken(environment: ["DEEPSEEK_PLATFORM_TOKEN": "tok"]) == "tok")
+        #expect(DeepSeekCredentialResolver.platformToken(environment: ["DEEPSEEK_USER_TOKEN": "tok"]) == "tok")
+        #expect(DeepSeekCredentialResolver.apiKey(environment: [:]) == nil)
+        #expect(DeepSeekCredentialResolver.apiKey(environment: ["DEEPSEEK_API_KEY": "\"sk-abc\""]) == "sk-abc")
+    }
+}
+
+private struct MockTransport: HTTPTransport {
+    var statusCodes: [String: Int] = [:]
+    var handler: (@Sendable (URLRequest) -> Int)? = nil
+
+    func response(for request: URLRequest) async throws -> HTTPResponse {
+        let status = handler?(request) ?? statusCodes[request.url?.path ?? ""] ?? 200
+        return HTTPResponse(
+            data: Data(),
+            statusCode: status,
+            response: HTTPURLResponse(
+                url: request.url!,
+                statusCode: status,
+                httpVersion: nil,
+                headerFields: nil)!)
+    }
+}
+
+@Suite("DeepSeek browser session")
+struct DeepSeekBrowserSessionTests {
+    @Test("Extracts plain, quoted, and JSON-nested user tokens")
+    func extractsUserToken() {
+        // Plain string.
+        #expect(DeepSeekBrowserSession.extractUserToken(from: "abcdefghijklmnopqrstuvwxyz123456") != nil)
+        // JSON string.
+        #expect(DeepSeekBrowserSession.extractUserToken(from: "\"abcdefghijklmnopqrstuvwxyz123456\"") != nil)
+        // JSON object with a value key (CodexBar token shape).
+        let nested = #"{"value":"abcdefghijklmnopqrstuvwxyz123456"}"#
+        #expect(DeepSeekBrowserSession.extractUserToken(from: nested) == "abcdefghijklmnopqrstuvwxyz123456")
+        // Object with accessToken key.
+        let access = #"{"accessToken":"abcdefghijklmnopqrstuvwxyz123456"}"#
+        #expect(DeepSeekBrowserSession.extractUserToken(from: access) == "abcdefghijklmnopqrstuvwxyz123456")
+    }
+
+    @Test("Rejects implausible values")
+    func rejectsImplausible() {
+        #expect(DeepSeekBrowserSession.extractUserToken(from: "short") == nil)
+        #expect(DeepSeekBrowserSession.extractUserToken(from: "has whitespace inside token") == nil)
+        #expect(DeepSeekBrowserSession.extractUserToken(from: "") == nil)
+        #expect(DeepSeekBrowserSession.extractUserToken(from: #"{"value":123}"#) == nil)
+    }
+
+    @Test("Token validates only against HTTP 200")
+    func validatesToken() async {
+        let ok = MockTransport(handler: { _ in 200 })
+        #expect(await DeepSeekBrowserSession.isValidToken("abcdefghijklmnopqrstuvwxyz123456", transport: ok) == true)
+        let forbidden = MockTransport(handler: { _ in 403 })
+        #expect(await DeepSeekBrowserSession.isValidToken("abcdefghijklmnopqrstuvwxyz123456", transport: forbidden) == false)
+    }
+
+    @Test("Resolve picks the first valid candidate")
+    func resolvePicksValid() async {
+        let candidates = [
+            DeepSeekBrowserSession.TokenInfo(
+                id: "chrome:Profile 1", token: "bad-token-value-aaaaaaaaaaaaaaa", sourceLabel: "Chrome — Profile 1"),
+            DeepSeekBrowserSession.TokenInfo(
+                id: "chrome:Default", token: "good-token-value-aaaaaaaaaaaaaaa", sourceLabel: "Chrome — Default"),
+        ]
+        // First candidate rejected, second accepted.
+        let transport = MockTransport(handler: { request in
+            let token = request.value(forHTTPHeaderField: "Authorization") ?? ""
+            return token.contains("good") ? 200 : 401
+        })
+        let session = await DeepSeekBrowserSession.resolve(candidates: candidates, transport: transport)
+        #expect(session?.token.contains("good") == true)
+        #expect(session?.sourceLabel == "Chrome — Default")
+    }
+
+    @Test("Resolve returns nil when every candidate is invalid")
+    func resolveAllInvalid() async {
+        let candidates = [
+            DeepSeekBrowserSession.TokenInfo(
+                id: "chrome:Default", token: "bad-token-value-aaaaaaaaaaaaaaa", sourceLabel: "Chrome — Default"),
+        ]
+        let transport = MockTransport(handler: { _ in 401 })
+        let session = await DeepSeekBrowserSession.resolve(candidates: candidates, transport: transport)
+        #expect(session == nil)
+    }
+}
+
+@Suite("DeepSeek card formatting")
+struct DeepSeekCardFormattingTests {
+    @Test("Tokens render compactly")
+    func compactTokens() {
+        #expect(DeepSeekCardView.compactTokens(456) == "456")
+        #expect(DeepSeekCardView.compactTokens(12_345) == "12.3K")
+        #expect(DeepSeekCardView.compactTokens(1_200_000) == "1.2M")
+    }
+
+    @Test("Money renders with the currency symbol")
+    func money() {
+        #expect(DeepSeekCardView.money(45.3, symbol: "¥") == "¥45.30")
+        #expect(DeepSeekCardView.money(12.34, symbol: "$") == "$12.34")
+        #expect(DeepSeekCardView.currencySymbol("CNY") == "¥")
+        #expect(DeepSeekCardView.currencySymbol("USD") == "$")
+    }
+
+    @Test("Usage detail combines tokens and requests")
+    func usageDetail() {
+        let detail = DeepSeekCardView.usageDetail(tokens: 12_345, requests: 43)
+        #expect(detail.contains("12.3K"))
+        #expect(detail.contains("43"))
+    }
+}
+
+@Suite("Provider visibility")
+@MainActor
+struct ProviderVisibilityTests {
+    @Test("Hidden providers drop out of the switcher list")
+    func visibleTabsFilters() {
+        let settings = AppSettings.shared
+        let original = (settings.showArk, settings.showOpenCode, settings.showDeepSeek)
+        defer {
+            settings.showArk = original.0
+            settings.showOpenCode = original.1
+            settings.showDeepSeek = original.2
+        }
+        settings.showArk = false
+        settings.showOpenCode = true
+        settings.showDeepSeek = true
+        #expect(settings.visibleTabs == [.opencode, .deepseek])
+        #expect(settings.isVisible(.ark) == false)
+        settings.showOpenCode = false
+        #expect(settings.visibleTabs == [.deepseek])
+    }
+
+    @Test("Hiding the selected tab moves the selection to the first visible tab")
+    func hidingSelectedTabSwitches() {
+        let settings = AppSettings.shared
+        let originalTab = settings.selectedTab
+        let original = (settings.showArk, settings.showOpenCode, settings.showDeepSeek)
+        defer {
+            settings.selectedTab = originalTab
+            settings.showArk = original.0
+            settings.showOpenCode = original.1
+            settings.showDeepSeek = original.2
+        }
+        settings.setVisible(.deepseek, true)
+        settings.selectedTab = .deepseek
+        settings.setVisible(.deepseek, false)
+        #expect(settings.selectedTab != .deepseek)
+        #expect(settings.visibleTabs.contains(settings.selectedTab))
+    }
+}
+
+@Suite("Provider logos")
+@MainActor
+struct ProviderLogoTests {
+    @Test("All three provider logos load from the resource bundle")
+    func logosLoad() {
+        for tab in ProviderTab.allCases {
+            #expect(ProviderLogo.image(for: tab) != nil, "logo missing for \(tab)")
+        }
+    }
+
+    @Test("DeepSeek card renders the balance ring and three legend rows")
+    func deepSeekCardRenders() throws {
+        let summary = DeepSeekSummary(
+            currency: "CNY",
+            totalBalance: 45.30,
+            grantedBalance: 5.00,
+            toppedUpBalance: 40.30,
+            todayTokens: 12_345,
+            currentMonthTokens: 1_200_000,
+            todayCost: 1.23,
+            currentMonthCost: 10.00,
+            requestCount: 43,
+            currentMonthRequestCount: 1_203,
+            topModel: "deepseek-chat",
+            promptCacheHitTokens: 1_200,
+            promptCacheMissTokens: 8_100,
+            responseTokens: 3_000,
+            usageAvailable: true)
+        let plan = PlanSnapshot(
+            id: "deepseek",
+            product: .deepseek,
+            edition: nil,
+            tier: nil,
+            seatID: nil,
+            subscribed: true,
+            windows: [UsageWindow(label: "balance", usedPercent: 18.08, used: nil, total: nil, resetsAt: nil)],
+            expiryDate: nil,
+            errorMessage: nil,
+            deepseek: summary)
+        let view = DeepSeekCardView(plan: plan, now: Date(), width: 340)
+        view.updateTrackingAreas()
+        #expect(view.subviews.allSatisfy {
+            $0.frame.minX >= 0 && $0.frame.maxX <= view.bounds.maxX
+        })
+        let labels = view.subviews.compactMap { $0 as? NSTextField }.map(\.stringValue)
+        #expect(labels.contains(L(.windowBalance)))
+        #expect(labels.contains(L(.deepseekToday)))
+        #expect(labels.contains(L(.deepseekMonthly)))
+        #expect(labels.contains("¥45.30"))
+        #expect(labels.contains("¥1.23"))
+        #expect(labels.contains("¥10.00"))
+        // The balance window drives the status-item icon.
+        #expect(plan.windows.first?.sortRank == 0)
+
+        // Render the real card on a dark menu-material approximation for visual
+        // inspection (same pattern as MenuCardVisualTests).
+        let card = DeepSeekCardView(plan: plan, now: Date(), width: 340)
+        let header = HeaderCardView(
+            snapshot: ProviderSnapshot(
+                providerName: "DeepSeek",
+                authMethod: "apikey · platform",
+                plans: [plan],
+                updatedAt: Date(),
+                errorMessage: nil),
+            width: 340)
+        let switcher = ProviderSwitcherView(tabs: ProviderTab.allCases, selected: .deepseek, width: 340, onSelect: { _ in })
+        let totalHeight = switcher.bounds.height + header.bounds.height + card.bounds.height
+        let dashboard = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: totalHeight))
+        dashboard.wantsLayer = true
+        dashboard.layer?.backgroundColor = NSColor(calibratedWhite: 0.30, alpha: 1).cgColor
+        card.frame.origin = .zero
+        header.frame.origin = NSPoint(x: 0, y: card.bounds.height)
+        switcher.frame.origin = NSPoint(x: 0, y: card.bounds.height + header.bounds.height)
+        dashboard.addSubview(card)
+        dashboard.addSubview(header)
+        dashboard.addSubview(switcher)
+        dashboard.layoutSubtreeIfNeeded()
+
+        let dashboardRep = try #require(dashboard.bitmapImageRepForCachingDisplay(in: dashboard.bounds))
+        dashboard.cacheDisplay(in: dashboard.bounds, to: dashboardRep)
+        let dashboardPNG = try #require(
+            dashboardRep.representation(using: .png, properties: [:]))
+        try dashboardPNG.write(to: URL(fileURLWithPath: "/tmp/tokenbar_deepseek_dashboard.png"))
+        #expect(FileManager.default.fileExists(atPath: "/tmp/tokenbar_deepseek_dashboard.png"))
     }
 }

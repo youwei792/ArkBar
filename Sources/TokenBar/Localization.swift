@@ -104,6 +104,9 @@ enum LKey: String {
     case noProvider = "settings.noProvider"
     case tabArk = "tab.ark"
     case tabOpenCode = "tab.opencode"
+    case tabDeepSeek = "tab.deepseek"
+    case showProvider = "settings.showProvider"
+    case sectionDisplay = "settings.sectionDisplay"
     case opencodeCookie = "settings.opencodeCookie"
     case opencodeCookiePlaceholder = "settings.opencodeCookiePlaceholder"
     case opencodeWorkspaceID = "settings.opencodeWorkspaceID"
@@ -114,6 +117,7 @@ enum LKey: String {
     case settingsGeneral = "settings.general"
     case settingsArk = "settings.ark"
     case settingsOpenCode = "settings.openCode"
+    case settingsDeepSeek = "settings.deepseek"
     case settingsDiagnostics = "settings.diagnostics"
     case sectionAppearance = "settings.sectionAppearance"
     case sectionBehavior = "settings.sectionBehavior"
@@ -123,6 +127,8 @@ enum LKey: String {
     case status = "settings.status"
     case refreshArk = "settings.refreshArk"
     case refreshOpenCode = "settings.refreshOpenCode"
+    case refreshDeepSeek = "settings.refreshDeepSeek"
+    case openDeepSeekPlatform = "menu.openDeepSeekPlatform"
     case openCodeCookieSource = "settings.openCodeCookieSource"
     case openCodeCookieAutomatic = "settings.openCodeCookieAutomatic"
     case openCodeCookieManual = "settings.openCodeCookieManual"
@@ -149,11 +155,26 @@ enum LKey: String {
     case productCodingPlanTeam = "product.codingPlanTeam"
     case productAgentPlanTeam = "product.agentPlanTeam"
     case productOpenCodeGo = "product.openCodeGo"
+    case productDeepSeek = "product.deepseek"
     case windowSession = "window.session"
     case window5Hour = "window.5hour"
     case windowWeekly = "window.weekly"
     case windowMonthly = "window.monthly"
     case windowRequests = "window.requests"
+    case windowBalance = "window.balance"
+    case deepseekToday = "deepseek.today"
+    case deepseekMonthly = "deepseek.monthly"
+    case deepseekPaidGranted = "deepseek.paidGranted"
+    case deepseekUsageDetail = "deepseek.usageDetail"
+    case deepseekUsageUnavailable = "deepseek.usageUnavailable"
+    case deepseekTopModel = "deepseek.topModel"
+    case deepseekCategoryDetail = "deepseek.categoryDetail"
+    case deepseekCredentialsHint = "deepseek.credentialsHint"
+    case deepseekPlatformHint = "deepseek.platformHint"
+    case deepseekAPIKeyLabel = "deepseek.apiKeyLabel"
+    case deepseekPlatformTokenLabel = "deepseek.platformTokenLabel"
+    case saveCredential = "deepseek.saveCredential"
+    case deepseekBrowserSession = "deepseek.browserSession"
     case errorArkcliNotFound = "error.arkcliNotFound"
     case errorArkcliNotAuthenticated = "error.arkcliNotAuthenticated"
     case errorArkcliTimedOut = "error.arkcliTimedOut"
@@ -167,6 +188,8 @@ enum LKey: String {
     case errorOpenCodeCookieInvalid = "error.openCodeCookieInvalid"
     case errorOpenCodeBrowserSessionMissing = "error.openCodeBrowserSessionMissing"
     case errorOpenCodeBrowserAuthorizationRequired = "error.openCodeBrowserAuthorizationRequired"
+    case errorDeepSeekMissingCredentials = "error.deepSeekMissingCredentials"
+    case errorDeepSeekInvalidPlatformToken = "error.deepSeekInvalidPlatformToken"
     case errorProbeModels = "error.probeModels"
     case apiKeyNoHeaders = "apiKey.noHeaders"
     case apiKeyNoWindow = "apiKey.noWindow"
@@ -175,6 +198,9 @@ enum LKey: String {
     case displayIconOnly = "display.iconOnly"
     case displayIconAndPercent = "display.iconAndPercent"
     case displayPercentOnly = "display.percentOnly"
+    case displayLogoOnly = "display.logoOnly"
+    case displayLogoAndPercent = "display.logoAndPercent"
+    case displayLogoAndBar = "display.logoAndBar"
 
     // Refresh interval display names
     case interval1m = "interval.1m"
@@ -233,6 +259,7 @@ final class L10n: ObservableObject {
         case .codingPlanTeam: t(.productCodingPlanTeam)
         case .agentPlanTeam: t(.productAgentPlanTeam)
         case .openCodeGo: t(.productOpenCodeGo)
+        case .deepseek: t(.productDeepSeek)
         }
     }
 
@@ -243,6 +270,7 @@ final class L10n: ObservableObject {
         case "weekly", "week": t(.windowWeekly)
         case "monthly", "month": t(.windowMonthly)
         case "requests": t(.windowRequests)
+        case "balance": t(.windowBalance)
         default: label
         }
     }
@@ -341,6 +369,9 @@ final class L10n: ObservableObject {
         add(.noProvider, "没有可用的数据源。请设置 AK/SK、ARK_API_KEY，或登录 arkcli。", "No data source is available. Set AK/SK or ARK_API_KEY, or sign in to arkcli.")
         add(.tabArk, "Ark", "Ark")
         add(.tabOpenCode, "OpenCode", "OpenCode")
+        add(.tabDeepSeek, "DeepSeek", "DeepSeek")
+        add(.showProvider, "在菜单栏显示", "Show in menu bar")
+        add(.sectionDisplay, "显示", "Display")
         add(.opencodeCookie, "会话 Cookie", "Session Cookie")
         add(.opencodeCookiePlaceholder, "粘贴 opencode.ai 的 Cookie 头", "Paste the Cookie header from opencode.ai")
         add(.opencodeWorkspaceID, "Workspace ID", "Workspace ID")
@@ -351,6 +382,7 @@ final class L10n: ObservableObject {
         add(.settingsGeneral, "通用", "General")
         add(.settingsArk, "Ark 套餐", "Ark Plans")
         add(.settingsOpenCode, "OpenCode Go", "OpenCode Go")
+        add(.settingsDeepSeek, "DeepSeek", "DeepSeek")
         add(.settingsDiagnostics, "诊断", "Diagnostics")
         add(.sectionAppearance, "外观", "Appearance")
         add(.sectionBehavior, "行为", "Behavior")
@@ -360,6 +392,8 @@ final class L10n: ObservableObject {
         add(.status, "状态", "Status")
         add(.refreshArk, "刷新 Ark 用量", "Refresh Ark Usage")
         add(.refreshOpenCode, "刷新 OpenCode Go", "Refresh OpenCode Go")
+        add(.refreshDeepSeek, "刷新 DeepSeek", "Refresh DeepSeek")
+        add(.openDeepSeekPlatform, "打开 DeepSeek 平台", "Open DeepSeek Platform")
         add(.openCodeCookieSource, "Cookie 来源", "Cookie source")
         add(.openCodeCookieAutomatic, "自动读取浏览器", "Automatic from browser")
         add(.openCodeCookieManual, "手动 Cookie", "Manual Cookie")
@@ -386,11 +420,26 @@ final class L10n: ObservableObject {
         add(.productCodingPlanTeam, "团队 Coding 套餐", "Coding Plan (Team)")
         add(.productAgentPlanTeam, "团队 Agent 套餐", "Agent Plan (Team)")
         add(.productOpenCodeGo, "OpenCode Go", "OpenCode Go")
+        add(.productDeepSeek, "DeepSeek", "DeepSeek")
         add(.windowSession, "会话", "Session")
         add(.window5Hour, "5 小时", "5-hour")
         add(.windowWeekly, "每周", "Weekly")
         add(.windowMonthly, "每月", "Monthly")
         add(.windowRequests, "请求数", "Requests")
+        add(.windowBalance, "余额", "Balance")
+        add(.deepseekToday, "今日", "Today")
+        add(.deepseekMonthly, "每月", "This month")
+        add(.deepseekPaidGranted, "充值 %@ · 赠送 %@", "Paid %@ · Granted %@")
+        add(.deepseekUsageDetail, "%@ tokens · %@ 次请求", "%@ tokens · %@ requests")
+        add(.deepseekUsageUnavailable, "配置 DEEPSEEK_PLATFORM_TOKEN 后显示用量", "Set DEEPSEEK_PLATFORM_TOKEN to see usage")
+        add(.deepseekTopModel, "常用模型：%@", "Top model: %@")
+        add(.deepseekCategoryDetail, "缓存命中 %@ · 未命中 %@ · 输出 %@", "Cache hit %@ · miss %@ · output %@")
+        add(.deepseekCredentialsHint, "凭据按以下优先级读取：本页填写的值（保存在钥匙串）> 环境变量（DEEPSEEK_API_KEY / DEEPSEEK_PLATFORM_TOKEN）> Chrome 浏览器登录。只要 Chrome 登录过 platform.deepseek.com，就无需填写任何 Key。", "Credentials are read in this order: values entered here (stored in Keychain) > environment variables (DEEPSEEK_API_KEY / DEEPSEEK_PLATFORM_TOKEN) > Chrome sign-in. If Chrome is signed in to platform.deepseek.com, no key is needed at all.")
+        add(.deepseekPlatformHint, "余额来自 platform.deepseek.com；充值后圆环会在下次刷新时自动更新。", "Balance comes from platform.deepseek.com; recharging updates the ring on the next refresh.")
+        add(.deepseekAPIKeyLabel, "API Key（可选）", "API Key (optional)")
+        add(.deepseekPlatformTokenLabel, "Platform Token（可选）", "Platform Token (optional)")
+        add(.saveCredential, "保存", "Save")
+        add(.deepseekBrowserSession, "浏览器会话：%@", "Browser session: %@")
         add(.errorArkcliNotFound, "未找到 arkcli。请安装后执行 `arkcli auth login volc-sso`。", "arkcli was not found. Install it, then run `arkcli auth login volc-sso`.")
         add(.errorArkcliNotAuthenticated, "arkcli 尚未登录。请执行 `arkcli auth login volc-sso` 后刷新。", "arkcli is not signed in. Run `arkcli auth login volc-sso`, then refresh.")
         add(.errorArkcliTimedOut, "arkcli 查询超时。请检查登录状态后重试。", "arkcli usage timed out. Check authentication and try again.")
@@ -404,14 +453,19 @@ final class L10n: ObservableObject {
         add(.errorOpenCodeCookieInvalid, "OpenCode Go 登录已失效。请重新登录浏览器，或更新手动 Cookie。", "The OpenCode Go sign-in expired. Sign in again in the browser or update the manual Cookie.")
         add(.errorOpenCodeBrowserSessionMissing, "没有在浏览器中找到 opencode.ai 登录会话。请先在浏览器登录，或改用手动 Cookie。", "No opencode.ai browser session was found. Sign in in a browser or use a manual Cookie.")
         add(.errorOpenCodeBrowserAuthorizationRequired, "TokenBar 尚未缓存浏览器登录，或原会话已失效。请在 OpenCode Go 设置中点“重新读取浏览器登录”；后台刷新不会主动弹出密码框。", "TokenBar has no cached browser sign-in, or the previous session expired. Click “Re-import Browser Sign-in” in OpenCode Go settings; background refreshes will not show a password prompt.")
+        add(.errorDeepSeekMissingCredentials, "未找到 DeepSeek 凭据。可在 DeepSeek 设置中填写，或先在 Chrome 登录 platform.deepseek.com 后刷新。", "No DeepSeek credentials were found. Enter them in the DeepSeek settings, or sign in to platform.deepseek.com in Chrome and refresh.")
+        add(.errorDeepSeekInvalidPlatformToken, "DeepSeek 平台会话无效或已过期。请更新 DEEPSEEK_PLATFORM_TOKEN。", "The DeepSeek Platform session is invalid or expired. Update DEEPSEEK_PLATFORM_TOKEN.")
         add(.errorProbeModels, "所有探测模型均不可用", "All probe models failed")
         add(.apiKeyNoHeaders, "API Key 有效，但响应未返回请求限额头。", "API key is valid, but no request-limit headers were returned.")
         add(.apiKeyNoWindow, "API Key 有效，但未返回用量窗口。", "API key is valid, but no usage window was returned.")
 
         // Display mode display names
-        add(.displayIconOnly, "仅图标", "Icon only")
-        add(.displayIconAndPercent, "图标 + 百分比", "Icon + percent")
+        add(.displayIconOnly, "进度条", "Meter bar")
+        add(.displayIconAndPercent, "进度条 + 百分比", "Meter bar + percent")
         add(.displayPercentOnly, "仅百分比", "Percent only")
+        add(.displayLogoOnly, "仅 Logo", "Logo only")
+        add(.displayLogoAndPercent, "Logo + 百分比", "Logo + percent")
+        add(.displayLogoAndBar, "Logo + 进度条", "Logo + meter bar")
 
         // Refresh interval display names
         add(.interval1m, "1 分钟", "1 minute")

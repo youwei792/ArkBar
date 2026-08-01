@@ -4,6 +4,12 @@ All notable public changes to TokenBar are documented here.
 
 ## Unreleased
 
+- Added a DeepSeek tab with balance, today/monthly cost, token counts, request counts, and a cache hit/miss/output breakdown, mirroring CodexBar's DeepSeek monitoring.
+- Added a single balance ring for DeepSeek (this month's spend vs spend + balance) that recalculates automatically after a top-up.
+- Added DeepSeek credential entry in Settings (API Key / Platform Token, stored in Keychain) and silent auto-resolution of the signed-in DeepSeek Platform session from Chrome local storage when no key is configured.
+- Added per-provider show/hide toggles in each provider's settings pane; hidden providers leave the switcher and stop background refresh.
+- Added CodexBar-style menu-bar display modes: meter bar, bar + percent, percent only, logo only, logo + percent, and logo + bar, with provider brand icons (doubao/opencode/deepseek) shipped as resources.
+- Provider brand logos now also appear in the settings sidebar and menu switcher buttons.
 - Added an OpenCode Go tab backed by authoritative subscription-page data, with explicit browser-session import or a manual Keychain-stored Cookie.
 - Isolated Ark and OpenCode refresh, error, stale-data, and last-updated state so one provider cannot overwrite the other.
 - Prevented background and ordinary refreshes from repeatedly reading browser cookie stores or triggering recurring Keychain password prompts.

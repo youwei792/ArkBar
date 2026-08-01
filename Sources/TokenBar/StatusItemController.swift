@@ -82,6 +82,26 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 self?.updateActiveRefreshView(isRefreshing: isRefreshing)
             }
             .store(in: &cancellables)
+        store.$deepseekStatus
+            .sink { [weak self] status in
+                guard let self, self.settings.selectedTab == .deepseek else { return }
+                self.updateIcon(for: status)
+                self.updateActiveRefreshView(status: status)
+                self.scheduleMenuRebuildIfOpen()
+            }
+            .store(in: &cancellables)
+        store.$deepseekLastUpdatedAt
+            .sink { [weak self] lastUpdatedAt in
+                guard self?.settings.selectedTab == .deepseek else { return }
+                self?.updateActiveRefreshView(lastUpdatedAt: lastUpdatedAt)
+            }
+            .store(in: &cancellables)
+        store.$deepseekIsRefreshing
+            .sink { [weak self] isRefreshing in
+                guard self?.settings.selectedTab == .deepseek else { return }
+                self?.updateActiveRefreshView(isRefreshing: isRefreshing)
+            }
+            .store(in: &cancellables)
         settings.$selectedTab
             .sink { [weak self] tab in
                 guard let self else { return }
@@ -113,6 +133,18 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.scheduleMenuRebuildIfOpen() }
             .store(in: &cancellables)
+        // Toggling a provider's visibility changes the switcher's buttons and
+        // possibly the selected card; refresh both while the menu is open.
+        Publishers.MergeMany(
+            settings.$showArk.map { _ in },
+            settings.$showOpenCode.map { _ in },
+            settings.$showDeepSeek.map { _ in })
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.updateIcon()
+                self?.scheduleMenuRebuildIfOpen()
+            }
+            .store(in: &cancellables)
 
         updateIcon()
         rebuildMenu()
@@ -124,8 +156,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     static func statusItemLength(for displayMode: AppSettings.DisplayMode) -> CGFloat {
         switch displayMode {
-        case .iconOnly: 28
-        case .iconAndPercent: 68
+        case .iconOnly, .logoOnly: 28
+        case .iconAndPercent, .logoAndPercent, .logoAndBar: 68
         case .percentOnly: 46
         }
     }
@@ -157,13 +189,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             }
         }
         guard let button = statusItem.button else { return }
+        let tab = settings.selectedTab
 
         switch settings.displayMode {
         case .iconOnly:
-            button.image = IconRenderer.makeIcon(remainingPercent: remaining, stale: stale)
+            button.image = IconRenderer.makeBarIcon(remainingPercent: remaining, stale: stale)
             button.title = ""
         case .iconAndPercent:
-            button.image = IconRenderer.makeIcon(remainingPercent: remaining, stale: stale)
+            button.image = IconRenderer.makeBarIcon(remainingPercent: remaining, stale: stale)
             if let remaining, !stale {
                 button.title = "\(Int(remaining.rounded()))%"
             } else {
@@ -176,6 +209,20 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             } else {
                 button.title = "–"
             }
+        case .logoOnly:
+            button.image = IconRenderer.makeLogoIcon(tab: tab)
+            button.title = ""
+        case .logoAndPercent:
+            button.image = IconRenderer.makeLogoIcon(tab: tab)
+            if let remaining, !stale {
+                button.title = "\(Int(remaining.rounded()))%"
+            } else {
+                button.title = "–"
+            }
+        case .logoAndBar:
+            button.image = IconRenderer.makeLogoAndBarIcon(
+                tab: tab, remainingPercent: remaining, stale: stale)
+            button.title = ""
         }
     }
 
@@ -239,6 +286,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let state = MenuBuilder.State(
             status: status,
             selectedTab: selectedTab,
+            visibleTabs: settings.visibleTabs,
             onSelectTab: { [weak self] tab in self?.settings.selectedTab = tab },
             lastUpdatedAt: store.lastUpdatedAt(for: selectedTab),
             isRefreshing: store.isRefreshing(for: selectedTab),

@@ -38,20 +38,30 @@ final class AppSettings: ObservableObject {
         case manual
     }
 
-    /// Menu-bar display layout. Mirrors CodexBar's MenuBarLayout options.
+    /// Menu-bar display layout. Mirrors CodexBar's menu-bar style options:
+    /// a meter capsule, the provider logo, the remaining percent, or combos.
     enum DisplayMode: String, CaseIterable {
-        /// Just the capsule progress icon.
+        /// Just the meter capsule, e.g. `▮▮▮░░░░░░░`.
         case iconOnly
-        /// Capsule icon followed by the remaining percent, e.g. `▮▮ 73%`.
+        /// Meter capsule followed by the remaining percent, e.g. `▮▮ 73%`.
         case iconAndPercent
         /// Just the remaining percent text, e.g. `73%`.
         case percentOnly
+        /// Just the provider logo.
+        case logoOnly
+        /// Provider logo followed by the remaining percent, e.g. `🐋 73%`.
+        case logoAndPercent
+        /// Provider logo followed by the meter capsule.
+        case logoAndBar
 
         var displayName: String {
             switch self {
             case .iconOnly: L(.displayIconOnly)
             case .iconAndPercent: L(.displayIconAndPercent)
             case .percentOnly: L(.displayPercentOnly)
+            case .logoOnly: L(.displayLogoOnly)
+            case .logoAndPercent: L(.displayLogoAndPercent)
+            case .logoAndBar: L(.displayLogoAndBar)
             }
         }
     }
@@ -83,6 +93,43 @@ final class AppSettings: ObservableObject {
     @Published var selectedTab: ProviderTab {
         didSet { UserDefaults.standard.set(selectedTab.rawValue, forKey: Keys.selectedTab) }
     }
+    /// Whether each provider appears in the menu switcher (and refreshes in the
+    /// background). Mirrors CodexBar's per-provider "Enabled" toggle.
+    @Published var showArk: Bool {
+        didSet { UserDefaults.standard.set(showArk, forKey: Keys.showArk) }
+    }
+    @Published var showOpenCode: Bool {
+        didSet { UserDefaults.standard.set(showOpenCode, forKey: Keys.showOpenCode) }
+    }
+    @Published var showDeepSeek: Bool {
+        didSet { UserDefaults.standard.set(showDeepSeek, forKey: Keys.showDeepSeek) }
+    }
+    /// Providers the switcher offers, in canonical order, minus hidden ones.
+    var visibleTabs: [ProviderTab] {
+        ProviderTab.allCases.filter(isVisible)
+    }
+
+    func isVisible(_ tab: ProviderTab) -> Bool {
+        switch tab {
+        case .ark: showArk
+        case .opencode: showOpenCode
+        case .deepseek: showDeepSeek
+        }
+    }
+
+    /// Hides/shows a provider in the switcher. Hiding the currently selected
+    /// tab moves the selection to the first visible one so the menu always has
+    /// a valid card to show.
+    func setVisible(_ tab: ProviderTab, _ visible: Bool) {
+        switch tab {
+        case .ark: showArk = visible
+        case .opencode: showOpenCode = visible
+        case .deepseek: showDeepSeek = visible
+        }
+        if !visible, selectedTab == tab, let first = visibleTabs.first {
+            selectedTab = first
+        }
+    }
     /// Optional OpenCode workspace override. When empty, the provider resolves
     /// the current workspace from the signed-in session.
     @Published var opencodeWorkspaceID: String {
@@ -93,6 +140,34 @@ final class AppSettings: ObservableObject {
     }
     /// In-memory mirror of the Keychain value. It is never written to defaults.
     @Published private(set) var opencodeCookie: String
+
+    /// In-memory mirrors of the DeepSeek Keychain values. Like the OpenCode
+    /// cookie they are never written to UserDefaults; empty means "use the
+    /// browser session or environment variable instead".
+    @Published private(set) var deepseekApiKey: String
+    @Published private(set) var deepseekPlatformToken: String
+
+    var deepseekApiKeyHasValue: Bool { !deepseekApiKey.isEmpty }
+    var deepseekPlatformTokenHasValue: Bool { !deepseekPlatformToken.isEmpty }
+
+    func setDeepSeekAPIKey(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: key, provider: "deepseek-apikey")
+        deepseekApiKey = persisted ? (key ?? "") : (CookieKeychainStore.load(provider: "deepseek-apikey") ?? "")
+    }
+
+    func setDeepSeekPlatformToken(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let token = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: token, provider: "deepseek-platform")
+        deepseekPlatformToken = persisted ? (token ?? "") : (CookieKeychainStore.load(provider: "deepseek-platform") ?? "")
+    }
+
+    func loadDeepSeekFromKeychain() {
+        deepseekApiKey = CookieKeychainStore.load(provider: "deepseek-apikey") ?? ""
+        deepseekPlatformToken = CookieKeychainStore.load(provider: "deepseek-platform") ?? ""
+    }
 
     func setOpenCodeCookie(_ value: String?) {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -117,6 +192,9 @@ final class AppSettings: ObservableObject {
         static let displayMode = "tokenbar.displayMode"
         static let language = "tokenbar.language"
         static let selectedTab = "tokenbar.selectedTab"
+        static let showArk = "tokenbar.showArk"
+        static let showOpenCode = "tokenbar.showOpenCode"
+        static let showDeepSeek = "tokenbar.showDeepSeek"
         static let opencodeWorkspaceID = "tokenbar.opencodeWorkspaceID"
         static let opencodeCookieSource = "tokenbar.opencodeCookieSource"
     }
@@ -134,10 +212,15 @@ final class AppSettings: ObservableObject {
         self.language = Language(rawValue: langRaw) ?? .system
         let tabRaw = defaults.string(forKey: Keys.selectedTab) ?? ProviderTab.ark.rawValue
         self.selectedTab = ProviderTab(rawValue: tabRaw) ?? .ark
+        self.showArk = defaults.object(forKey: Keys.showArk) as? Bool ?? true
+        self.showOpenCode = defaults.object(forKey: Keys.showOpenCode) as? Bool ?? true
+        self.showDeepSeek = defaults.object(forKey: Keys.showDeepSeek) as? Bool ?? true
         self.opencodeWorkspaceID = defaults.string(forKey: Keys.opencodeWorkspaceID) ?? ""
         let cookieSourceRaw = defaults.string(forKey: Keys.opencodeCookieSource)
             ?? OpenCodeCookieSource.automatic.rawValue
         self.opencodeCookieSource = OpenCodeCookieSource(rawValue: cookieSourceRaw) ?? .automatic
         self.opencodeCookie = CookieKeychainStore.load(provider: "opencode") ?? ""
+        self.deepseekApiKey = CookieKeychainStore.load(provider: "deepseek-apikey") ?? ""
+        self.deepseekPlatformToken = CookieKeychainStore.load(provider: "deepseek-platform") ?? ""
     }
 }

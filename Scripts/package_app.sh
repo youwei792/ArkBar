@@ -43,6 +43,16 @@ cp "$ROOT/Resources/Info.plist" "$CONTENTS/Info.plist"
 # Icon.
 cp "$ROOT/Resources/AppIcon.icns" "$RESOURCES/AppIcon.icns"
 
+# SwiftPM resource bundle (provider logos). swift build places it under .build/
+# with the package's module name; copy it into the app so Bundle.module stays
+# resolvable from the installed bundle.
+RESOURCE_BUNDLE=$(find "$BUILD_DIR" -name "TokenBar_TokenBar.bundle" -maxdepth 4 2>/dev/null | head -1)
+if [[ -n "$RESOURCE_BUNDLE" ]]; then
+    cp -R "$RESOURCE_BUNDLE" "$RESOURCES/"
+else
+    echo "WARN: TokenBar_TokenBar.bundle not found; provider logos will be missing." >&2
+fi
+
 # License notices travel with the installed binary as well as the source.
 cp "$ROOT/LICENSE" "$RESOURCES/LICENSE.txt"
 cp "$ROOT/THIRD_PARTY_NOTICES.md" "$RESOURCES/THIRD_PARTY_NOTICES.md"

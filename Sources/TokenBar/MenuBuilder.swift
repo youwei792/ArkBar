@@ -17,6 +17,9 @@ enum MenuBuilder {
 
         let status: Status
         let selectedTab: ProviderTab
+        /// Providers shown in the switcher (hidden ones are filtered upstream).
+        /// Defaults to all tabs so tests and callers can omit it.
+        var visibleTabs: [ProviderTab] = ProviderTab.allCases
         let onSelectTab: (ProviderTab) -> Void
         let lastUpdatedAt: Date?
         let isRefreshing: Bool
@@ -92,6 +95,10 @@ enum MenuBuilder {
             menu.addItem(actionItem(L(.openCodeGo), action: {
                 NSWorkspace.shared.open(URL(string: "https://opencode.ai")!)
             }))
+        case .deepseek:
+            menu.addItem(actionItem(L(.openDeepSeekPlatform), action: {
+                NSWorkspace.shared.open(URL(string: "https://platform.deepseek.com")!)
+            }))
         }
         menu.addItem(actionItem(L(.settings), action: state.onSettings))
         menu.addItem(.separator())
@@ -105,7 +112,11 @@ enum MenuBuilder {
     @MainActor
     private static func switcherItem(state: State) -> NSMenuItem {
         let item = NSMenuItem()
-        item.view = ProviderSwitcherView(selected: state.selectedTab, width: cardWidth, onSelect: state.onSelectTab)
+        item.view = ProviderSwitcherView(
+            tabs: state.visibleTabs,
+            selected: state.selectedTab,
+            width: cardWidth,
+            onSelect: state.onSelectTab)
         // Unlike passive card rows, this custom view contains real NSButtons.
         // A disabled NSMenuItem prevents the buttons from receiving menu-tracking
         // events on some macOS versions.
@@ -125,8 +136,13 @@ enum MenuBuilder {
     @MainActor
     private static func planItem(plan: PlanSnapshot, now: Date) -> NSMenuItem {
         let item = NSMenuItem()
-        let view = PlanCardView(plan: plan, now: now, width: cardWidth)
-        item.view = view
+        // DeepSeek plans use the single-ring balance card; everything else uses
+        // the three-ring plan card.
+        if plan.deepseek != nil {
+            item.view = DeepSeekCardView(plan: plan, now: now, width: cardWidth)
+        } else {
+            item.view = PlanCardView(plan: plan, now: now, width: cardWidth)
+        }
         item.isEnabled = false
         return item
     }

@@ -24,10 +24,13 @@ final class UsageStore: ObservableObject {
 
     @Published private(set) var arkStatus: LoadStatus = .never
     @Published private(set) var opencodeStatus: LoadStatus = .never
+    @Published private(set) var deepseekStatus: LoadStatus = .never
     @Published private(set) var arkLastUpdatedAt: Date?
     @Published private(set) var opencodeLastUpdatedAt: Date?
+    @Published private(set) var deepseekLastUpdatedAt: Date?
     @Published private(set) var arkIsRefreshing = false
     @Published private(set) var opencodeIsRefreshing = false
+    @Published private(set) var deepseekIsRefreshing = false
 
     /// Compatibility conveniences for views that only need the selected tab.
     var status: LoadStatus { currentStatus }
@@ -40,9 +43,11 @@ final class UsageStore: ObservableObject {
     private let settings: AppSettings
     private var arkProviders: [UsageProvider] = []
     private var openCodeProvider: OpenCodeGoProvider?
+    private var deepSeekProvider: DeepSeekProvider?
     private var timer: Timer?
     private var lastSuccessfulArkSnapshot: ProviderSnapshot?
     private var lastSuccessfulOpenCodeSnapshot: ProviderSnapshot?
+    private var lastSuccessfulDeepSeekSnapshot: ProviderSnapshot?
     private var cancellables = Set<AnyCancellable>()
 
     init(settings: AppSettings = .shared) {
@@ -73,6 +78,13 @@ final class UsageStore: ObservableObject {
             .debounce(for: .milliseconds(350), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.refresh(tab: .opencode) }
             .store(in: &cancellables)
+        // Saving a DeepSeek key in settings refreshes immediately.
+        Publishers.MergeMany(
+            settings.$deepseekApiKey.map { _ in },
+            settings.$deepseekPlatformToken.map { _ in })
+            .dropFirst()
+            .sink { [weak self] _ in self?.refresh(tab: .deepseek) }
+            .store(in: &cancellables)
         settings.$selectedTab
             .dropFirst()
             .sink { [weak self] tab in
@@ -80,6 +92,24 @@ final class UsageStore: ObservableObject {
                 self.refresh(tab: tab)
             }
             .store(in: &cancellables)
+        // Re-enabling a hidden provider fetches it immediately; hiding one stops
+        // its background refreshes (refreshAllConfigured filters visible tabs).
+        for tab in ProviderTab.allCases {
+            let publisher: AnyPublisher<Bool, Never>
+            switch tab {
+            case .ark: publisher = settings.$showArk.eraseToAnyPublisher()
+            case .opencode: publisher = settings.$showOpenCode.eraseToAnyPublisher()
+            case .deepseek: publisher = settings.$showDeepSeek.eraseToAnyPublisher()
+            }
+            publisher
+                .dropFirst()
+                .removeDuplicates()
+                .sink { [weak self] visible in
+                    guard let self, visible, self.status(for: tab) == .never else { return }
+                    self.refresh(tab: tab)
+                }
+                .store(in: &cancellables)
+        }
     }
 
     /// Rebuild the Ark provider priority. OpenCode is a distinct provider, not
@@ -109,6 +139,7 @@ final class UsageStore: ObservableObject {
         }
         arkProviders = providers
         openCodeProvider = OpenCodeGoProvider(settings: settings)
+        deepSeekProvider = DeepSeekProvider(settings: settings)
     }
 
     func start() {
@@ -127,6 +158,7 @@ final class UsageStore: ObservableObject {
         switch tab {
         case .ark: refreshArk()
         case .opencode: refreshOpenCode()
+        case .deepseek: refreshDeepSeek()
         }
     }
 
@@ -168,8 +200,9 @@ final class UsageStore: ObservableObject {
     }
 
     private func refreshAllConfigured() {
-        refreshArk()
-        refreshOpenCode()
+        for tab in settings.visibleTabs {
+            refresh(tab: tab)
+        }
     }
 
     private func refreshArk() {
@@ -306,10 +339,62 @@ final class UsageStore: ObservableObject {
         }
     }
 
+    private func refreshDeepSeek() {
+        guard !deepseekIsRefreshing else { return }
+        guard let provider = deepSeekProvider,
+              provider.isAvailable(environment: ProcessInfo.processInfo.environment)
+        else {
+            if lastSuccessfulDeepSeekSnapshot == nil {
+                deepseekStatus = .error(message: L(.errorDeepSeekMissingCredentials))
+            }
+            return
+        }
+        deepseekIsRefreshing = true
+        switch deepseekStatus {
+        case .ok, .stale:
+            break // retain usable data while the request is in flight
+        case .never, .loading, .error:
+            deepseekStatus = .loading
+        }
+        let environment = ProcessInfo.processInfo.environment
+        Task { [weak self] in
+            await self?.runDeepSeekProvider(provider, environment: environment)
+        }
+    }
+
+    private func runDeepSeekProvider(_ provider: DeepSeekProvider, environment: [String: String]) async {
+        do {
+            let snapshot = try await provider.fetch(environment: environment)
+            Self.log("✓ \(provider.displayName): balance + usage")
+            deepseekLastUpdatedAt = Date()
+            lastSuccessfulDeepSeekSnapshot = snapshot
+            deepseekStatus = .ok(snapshot: snapshot)
+            finishDeepSeekRefresh()
+        } catch let error as UsageError {
+            Self.log("✗ \(provider.displayName): \(error.errorDescription ?? "Unknown error")")
+            finishDeepSeekRefresh(error: error.errorDescription ?? "Unknown error")
+        } catch {
+            Self.log("✗ \(provider.displayName): \(error.localizedDescription)")
+            finishDeepSeekRefresh(error: error.localizedDescription)
+        }
+    }
+
+    private func finishDeepSeekRefresh(error: String? = nil) {
+        deepseekIsRefreshing = false
+        if let error {
+            if let snapshot = lastSuccessfulDeepSeekSnapshot {
+                deepseekStatus = .stale(snapshot: snapshot, message: error)
+            } else {
+                deepseekStatus = .error(message: error)
+            }
+        }
+    }
+
     func status(for tab: ProviderTab) -> LoadStatus {
         switch tab {
         case .ark: return arkStatus
         case .opencode: return opencodeStatus
+        case .deepseek: return deepseekStatus
         }
     }
 
@@ -317,6 +402,7 @@ final class UsageStore: ObservableObject {
         switch tab {
         case .ark: return arkLastUpdatedAt
         case .opencode: return opencodeLastUpdatedAt
+        case .deepseek: return deepseekLastUpdatedAt
         }
     }
 
@@ -324,6 +410,7 @@ final class UsageStore: ObservableObject {
         switch tab {
         case .ark: return arkIsRefreshing
         case .opencode: return opencodeIsRefreshing
+        case .deepseek: return deepseekIsRefreshing
         }
     }
 

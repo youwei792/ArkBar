@@ -9,28 +9,33 @@ final class ProviderSwitcherView: NSView {
     private let onSelect: (ProviderTab) -> Void
     private var buttons: [ProviderTab: NSButton] = [:]
 
-    init(selected: ProviderTab, width: CGFloat, onSelect: @escaping (ProviderTab) -> Void) {
+    init(tabs: [ProviderTab], selected: ProviderTab, width: CGFloat,
+         onSelect: @escaping (ProviderTab) -> Void) {
         self.onSelect = onSelect
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 42))
         wantsLayer = true
-        build(selected: selected)
+        build(tabs: tabs, selected: selected)
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
-    private func build(selected: ProviderTab) {
+    private func build(tabs: [ProviderTab], selected: ProviderTab) {
         let inset: CGFloat = 14
         let gap: CGFloat = 6
         let buttonHeight: CGFloat = 25
-        let buttonWidth = (bounds.width - inset * 2 - gap) / 2
-        for (index, tab) in ProviderTab.allCases.enumerated() {
+        let count = max(1, tabs.count)
+        let buttonWidth = (bounds.width - inset * 2 - gap * CGFloat(count - 1)) / CGFloat(count)
+        for (index, tab) in tabs.enumerated() {
             let button = TabButton(frame: NSRect(
                 x: inset + CGFloat(index) * (buttonWidth + gap),
                 y: (bounds.height - buttonHeight) / 2,
                 width: buttonWidth,
                 height: buttonHeight))
-            button.title = tab.displayName
             button.tab = tab
+            if let logo = ProviderLogo.image(for: tab) {
+                button.image = logo
+            }
+            button.title = tab.displayName
             button.state = tab == selected ? .on : .off
             button.target = self
             button.action = #selector(handleTap(_:))
@@ -70,6 +75,9 @@ private final class TabButton: NSButton {
         selectedGradient.cornerRadius = 8
         layer?.insertSublayer(selectedGradient, at: 0)
         font = .systemFont(ofSize: 11, weight: .medium)
+        // Icon + text: the template logo tint follows the attributed title.
+        imagePosition = .imageLeading
+        imageHugsTitle = true
         updateAppearance()
     }
 
@@ -129,6 +137,12 @@ private final class TabButton: NSButton {
                 .font: NSFont.systemFont(ofSize: 11, weight: selected ? .semibold : .medium),
                 .foregroundColor: selected ? NSColor.white : NSColor.labelColor,
             ])
+        // Template images honour the attributed title's foreground colour when
+        // set as the button's image.
+        if let image {
+            image.isTemplate = true
+            contentTintColor = selected ? .white : .labelColor
+        }
 
         let target = isHovered && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
             ? CATransform3DMakeScale(1.018, 1.018, 1)

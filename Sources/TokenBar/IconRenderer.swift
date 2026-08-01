@@ -1,11 +1,13 @@
 import AppKit
 
-/// Renders the menu-bar icon: a 18×18pt template capsule that fills left-to-right
-/// according to the remaining percent of the tightest usage window.
+/// Renders the menu-bar icon: an 18×18pt template meter capsule that fills
+/// left-to-right according to the remaining percent, optionally combined with
+/// the provider logo (mirroring CodexBar's "bars" / "icon & percent" styles).
 ///
 /// Approach ported from CodexBar's `IconRenderer` / `drawBar`: 2× pixel grid (36×36px),
 /// template image so the system tints it for light/dark mode, capsule track + inset stroke
 /// + clipped fill. Kept intentionally simpler (no face/notches/animation).
+@MainActor
 enum IconRenderer {
     private static let outputSize = NSSize(width: 18, height: 18)
     private static let scale: CGFloat = 2
@@ -14,30 +16,72 @@ enum IconRenderer {
     /// - Parameters:
     ///   - remainingPercent: 0–100. `nil` means "no data" (drawn dim/empty).
     ///   - stale: draw dimmed to signal error/stale state.
-    static func makeIcon(remainingPercent: Double?, stale: Bool) -> NSImage {
+    static func makeBarIcon(remainingPercent: Double?, stale: Bool) -> NSImage {
         let image = NSImage(size: outputSize, flipped: false) { rect in
-            Self.draw(remainingPercent: remainingPercent, stale: stale, in: rect)
+            Self.drawBar(remainingPercent: remainingPercent, stale: stale, in: rect)
             return true
         }
         image.isTemplate = true
         return image
     }
 
-    private static func draw(remainingPercent: Double?, stale: Bool, in rect: CGRect) {
+    /// Just the provider logo, centered in the 18×18 canvas.
+    static func makeLogoIcon(tab: ProviderTab) -> NSImage {
+        let image = NSImage(size: outputSize, flipped: false) { rect in
+            if let logo = ProviderLogo.image(for: tab) {
+                let side: CGFloat = 16
+                logo.draw(
+                    in: NSRect(x: rect.midX - side / 2, y: rect.midY - side / 2,
+                               width: side, height: side),
+                    from: .zero,
+                    operation: .sourceOver,
+                    fraction: 1)
+            }
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
+    /// Logo on the left plus a compact meter capsule on the right, in one
+    /// template image so the whole glyph adopts the menu-bar foreground tint.
+    static func makeLogoAndBarIcon(tab: ProviderTab, remainingPercent: Double?, stale: Bool) -> NSImage {
+        let size = NSSize(width: 30, height: 18)
+        let image = NSImage(size: size, flipped: false) { rect in
+            if let logo = ProviderLogo.image(for: tab) {
+                logo.draw(
+                    in: NSRect(x: 0.5, y: 2.5, width: 13, height: 13),
+                    from: .zero,
+                    operation: .sourceOver,
+                    fraction: 1)
+            }
+            Self.drawBar(remainingPercent: remainingPercent, stale: stale, in: NSRect(x: 15, y: 0, width: 15, height: 18))
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
+    /// Legacy name kept for callers that only need the capsule.
+    static func makeIcon(remainingPercent: Double?, stale: Bool) -> NSImage {
+        makeBarIcon(remainingPercent: remainingPercent, stale: stale)
+    }
+
+    private static func drawBar(remainingPercent: Double?, stale: Bool, in rect: CGRect) {
         let baseFill = NSColor.labelColor
         let trackFillAlpha: CGFloat = stale ? 0.16 : 0.26
         let trackStrokeAlpha: CGFloat = stale ? 0.26 : 0.42
         let fillAlpha: CGFloat = stale ? 0.5 : 1.0
 
-        // Capsule geometry: 30px wide × 12px tall, centred in the 36×36 canvas.
+        // Capsule geometry: 15pt wide × 6pt tall, centred in the 18×18 canvas.
         let barWidthPx = 30
         let barHeightPx = 12
         let barXPx = (canvasPx - barWidthPx) / 2
         let barYPx = (canvasPx - barHeightPx) / 2
 
         let barRect = CGRect(
-            x: CGFloat(barXPx) / scale,
-            y: CGFloat(barYPx) / scale,
+            x: rect.minX + CGFloat(barXPx) / scale,
+            y: rect.minY + CGFloat(barYPx) / scale,
             width: CGFloat(barWidthPx) / scale,
             height: CGFloat(barHeightPx) / scale)
         let radius = barRect.height / 2

@@ -45,6 +45,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
     case general
     case ark
     case openCode
+    case deepseek
     case diagnostics
 
     var id: Self { self }
@@ -54,6 +55,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .general: L(.settingsGeneral)
         case .ark: L(.settingsArk)
         case .openCode: L(.settingsOpenCode)
+        case .deepseek: L(.settingsDeepSeek)
         case .diagnostics: L(.settingsDiagnostics)
         }
     }
@@ -63,7 +65,19 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .general: "gearshape"
         case .ark: "chart.donut"
         case .openCode: "terminal"
+        case .deepseek: "fish"
         case .diagnostics: "stethoscope"
+        }
+    }
+
+    /// Provider panes show their brand logo in the sidebar instead of an SF
+    /// Symbol, matching the switcher buttons in the menu bar.
+    var providerTab: ProviderTab? {
+        switch self {
+        case .ark: .ark
+        case .openCode: .opencode
+        case .deepseek: .deepseek
+        case .general, .diagnostics: nil
         }
     }
 }
@@ -105,8 +119,20 @@ private struct PreferencesRootView: View {
 
             List(selection: $selection) {
                 ForEach(PreferencesPane.allCases) { pane in
-                    Label(pane.title, systemImage: pane.symbol)
+                    if let tab = pane.providerTab, let logo = ProviderLogo.image(for: tab) {
+                        Label {
+                            Text(pane.title)
+                        } icon: {
+                            Image(nsImage: logo)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 14, height: 14)
+                        }
                         .tag(Optional(pane))
+                    } else {
+                        Label(pane.title, systemImage: pane.symbol)
+                            .tag(Optional(pane))
+                    }
                 }
             }
             .listStyle(.sidebar)
@@ -129,6 +155,8 @@ private struct PreferencesRootView: View {
             ArkPreferencesPane(settings: settings, store: store)
         case .openCode:
             OpenCodePreferencesPane(settings: settings, store: store)
+        case .deepseek:
+            DeepSeekPreferencesPane(settings: settings, store: store)
         case .diagnostics:
             DiagnosticsPreferencesPane()
         }
@@ -203,6 +231,11 @@ private struct GeneralPreferencesPane: View {
                         } label: {
                             Label(L(.refreshOpenCode), systemImage: "arrow.clockwise")
                         }
+                        Button {
+                            store.refresh(tab: .deepseek)
+                        } label: {
+                            Label(L(.refreshDeepSeek), systemImage: "arrow.clockwise")
+                        }
                     }
                 }
             }
@@ -218,6 +251,13 @@ private struct ArkPreferencesPane: View {
     var body: some View {
         PreferencesPaneContainer(title: L(.settingsArk)) {
             Form {
+                Section(L(.sectionDisplay)) {
+                    Toggle(L(.showProvider), isOn: Binding(
+                        get: { settings.showArk },
+                        set: { settings.setVisible(.ark, $0) }))
+                        .toggleStyle(.switch)
+                }
+
                 Section(L(.sectionConnection)) {
                     Picker(L(.source), selection: $settings.sourceMode) {
                         ForEach(AppSettings.SourceMode.allCases, id: \.self) { mode in
@@ -279,6 +319,13 @@ private struct OpenCodePreferencesPane: View {
     var body: some View {
         PreferencesPaneContainer(title: L(.settingsOpenCode)) {
             Form {
+                Section(L(.sectionDisplay)) {
+                    Toggle(L(.showProvider), isOn: Binding(
+                        get: { settings.showOpenCode },
+                        set: { settings.setVisible(.opencode, $0) }))
+                        .toggleStyle(.switch)
+                }
+
                 Section(L(.sectionConnection)) {
                     Picker(L(.openCodeCookieSource), selection: $settings.opencodeCookieSource) {
                         Text(L(.openCodeCookieAutomatic))
@@ -353,6 +400,91 @@ private struct OpenCodePreferencesPane: View {
 
     private func saveManualCookie() {
         settings.setOpenCodeCookie(manualCookie)
+    }
+}
+
+private struct DeepSeekPreferencesPane: View {
+    @ObservedObject var settings: AppSettings
+    @ObservedObject var store: UsageStore
+    @State private var apiKeyField: String
+    @State private var platformTokenField: String
+
+    init(settings: AppSettings, store: UsageStore) {
+        self.settings = settings
+        self.store = store
+        _apiKeyField = State(initialValue: settings.deepseekApiKey)
+        _platformTokenField = State(initialValue: settings.deepseekPlatformToken)
+    }
+
+    var body: some View {
+        PreferencesPaneContainer(title: L(.settingsDeepSeek)) {
+            Form {
+                Section(L(.sectionDisplay)) {
+                    Toggle(L(.showProvider), isOn: Binding(
+                        get: { settings.showDeepSeek },
+                        set: { settings.setVisible(.deepseek, $0) }))
+                        .toggleStyle(.switch)
+                }
+
+                Section(L(.sectionConnection)) {
+                    SecureField(L(.deepseekAPIKeyLabel), text: $apiKeyField)
+                        .onSubmit(saveAPIKey)
+                    Button(L(.saveCredential), action: saveAPIKey)
+
+                    SecureField(L(.deepseekPlatformTokenLabel), text: $platformTokenField)
+                        .onSubmit(savePlatformToken)
+                    Button(L(.saveCredential), action: savePlatformToken)
+
+                    if let source = DeepSeekBrowserSession.cachedSourceLabel() {
+                        Label(String(format: L(.deepseekBrowserSession), source), systemImage: "globe")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+
+                    ProviderStatusRows(
+                        status: store.deepseekStatus,
+                        isRefreshing: store.deepseekIsRefreshing,
+                        lastUpdatedAt: store.deepseekLastUpdatedAt)
+
+                    Label(L(.deepseekCredentialsHint), systemImage: "key")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+
+                    Label(L(.deepseekPlatformHint), systemImage: "chart.bar.doc.horizontal")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Section(L(.sectionActions)) {
+                    Button {
+                        store.refresh(tab: .deepseek)
+                    } label: {
+                        Label(
+                            store.deepseekIsRefreshing ? L(.refreshing) : L(.refreshDeepSeek),
+                            systemImage: "arrow.clockwise")
+                    }
+                    Button {
+                        NSWorkspace.shared.open(URL(string: "https://platform.deepseek.com")!)
+                    } label: {
+                        Label(L(.openDeepSeekPlatform), systemImage: "safari")
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        }
+    }
+
+    private func saveAPIKey() {
+        settings.setDeepSeekAPIKey(apiKeyField)
+    }
+
+    private func savePlatformToken() {
+        settings.setDeepSeekPlatformToken(platformTokenField)
     }
 }
 

@@ -15,7 +15,10 @@ let package = Package(
             dependencies: [
                 .product(name: "SweetCookieKit", package: "SweetCookieKit"),
             ],
-            path: "Sources/TokenBar"),
+            path: "Sources/TokenBar",
+            resources: [
+                .process("Resources"),
+            ]),
         .testTarget(
             name: "TokenBarTests",
             dependencies: ["TokenBar"],
