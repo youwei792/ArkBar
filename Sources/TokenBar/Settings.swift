@@ -90,8 +90,19 @@ final class AppSettings: ObservableObject {
     }
     /// The provider currently shown by the menu-bar popover. Provider state is
     /// separate in `UsageStore`; this only persists the presentation choice.
-    @Published var selectedTab: ProviderTab {
-        didSet { UserDefaults.standard.set(selectedTab.rawValue, forKey: Keys.selectedTab) }
+    @Published var selectedMenu: MenuSelection {
+        didSet {
+            // Persist the provider portion; summary is the default on restart.
+            if case let .provider(tab) = selectedMenu {
+                UserDefaults.standard.set(tab.rawValue, forKey: Keys.selectedTab)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Keys.selectedTab)
+            }
+        }
+    }
+    /// Whether the overview tab appears in the switcher.
+    @Published var showSummary: Bool {
+        didSet { UserDefaults.standard.set(showSummary, forKey: Keys.showSummary) }
     }
     /// Whether each provider appears in the menu switcher (and refreshes in the
     /// background). Mirrors CodexBar's per-provider "Enabled" toggle.
@@ -108,6 +119,7 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(showNebula, forKey: Keys.showNebula) }
     }
     /// Providers the switcher offers, in canonical order, minus hidden ones.
+    /// When `showSummary` is true, the summary button is always the first item.
     var visibleTabs: [ProviderTab] {
         ProviderTab.allCases.filter(isVisible)
     }
@@ -122,8 +134,7 @@ final class AppSettings: ObservableObject {
     }
 
     /// Hides/shows a provider in the switcher. Hiding the currently selected
-    /// tab moves the selection to the first visible one so the menu always has
-    /// a valid card to show.
+    /// tab moves the selection to summary or the first visible one.
     func setVisible(_ tab: ProviderTab, _ visible: Bool) {
         switch tab {
         case .ark: showArk = visible
@@ -131,8 +142,12 @@ final class AppSettings: ObservableObject {
         case .deepseek: showDeepSeek = visible
         case .nebula: showNebula = visible
         }
-        if !visible, selectedTab == tab, let first = visibleTabs.first {
-            selectedTab = first
+        if !visible, case .provider(tab) = selectedMenu {
+            if showSummary {
+                selectedMenu = .summary
+            } else if let first = visibleTabs.first {
+                selectedMenu = .provider(first)
+            }
         }
     }
     /// Optional OpenCode workspace override. When empty, the provider resolves
@@ -216,6 +231,7 @@ final class AppSettings: ObservableObject {
         static let displayMode = "tokenbar.displayMode"
         static let language = "tokenbar.language"
         static let selectedTab = "tokenbar.selectedTab"
+        static let showSummary = "tokenbar.showSummary"
         static let showArk = "tokenbar.showArk"
         static let showOpenCode = "tokenbar.showOpenCode"
         static let showDeepSeek = "tokenbar.showDeepSeek"
@@ -237,7 +253,12 @@ final class AppSettings: ObservableObject {
         let langRaw = defaults.string(forKey: Keys.language) ?? Language.system.rawValue
         self.language = Language(rawValue: langRaw) ?? .system
         let tabRaw = defaults.string(forKey: Keys.selectedTab) ?? ProviderTab.ark.rawValue
-        self.selectedTab = ProviderTab(rawValue: tabRaw) ?? .ark
+        if let tab = ProviderTab(rawValue: tabRaw) {
+            self.selectedMenu = .provider(tab)
+        } else {
+            self.selectedMenu = .summary
+        }
+        self.showSummary = defaults.object(forKey: Keys.showSummary) as? Bool ?? true
         self.showArk = defaults.object(forKey: Keys.showArk) as? Bool ?? true
         self.showOpenCode = defaults.object(forKey: Keys.showOpenCode) as? Bool ?? true
         self.showDeepSeek = defaults.object(forKey: Keys.showDeepSeek) as? Bool ?? true

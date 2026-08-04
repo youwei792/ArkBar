@@ -15,10 +15,11 @@ TokenBar is a native macOS menu-bar app for Volcengine Ark Coding/Agent Plan, Op
 - APINebula (new-api relay) monitoring: a balance ring (cumulative spend ÷ spend + balance), today/monthly cost, token counts, request counts, and a cache-read/uncached/output split aggregated from the console usage log.
 - APINebula balance and usage logs are console APIs: credentials come from the browser sign-in session (imported explicitly in Settings and cached in Keychain), with an optional API key fallback.
 - Instant Ark/OpenCode Go/DeepSeek/APINebula switching with isolated refresh and error state.
+- An **Overview** tab lists every visible provider's remaining percent with a teal→blue capsule meter; click a row to open that provider's full card. Toggle it in **Settings → General**.
 - Each provider can be independently shown/hidden from its own settings pane; hidden providers leave the switcher and stop refreshing.
-- Menu-bar styles: meter bar, bar + percent, percent only, logo only, logo + percent, and logo + bar.
+- Menu-bar styles: meter bar, bar + percent, percent only, logo only, logo + percent, and logo + bar. Logo glyphs are 16pt and percent text uses the system font size, matching CodexBar's menu-bar scale.
 - System, Simplified Chinese, and English interfaces.
-- No telemetry. OpenCode/APINebula browser import runs only after an explicit user action and stores only the filtered authentication cookie in the local Keychain.
+- No telemetry. OpenCode/APINebula browser import runs only after an explicit user action. Sessions and API keys are stored in the local Keychain and mirrored to a file cache in the app-support directory, so ordinary restarts never prompt for the Keychain password.
 
 ## Quick start
 
@@ -83,7 +84,8 @@ export VOLCENGINE_SECRET_ACCESS_KEY='...'
 ## Reading the UI
 
 - All prominent percentages mean **remaining** quota, not consumed quota.
-- The menu-bar item shows the selected tab's current Session / 5-hour quota left; the style (meter bar, percent, provider logo, or a combination) is chosen in **Settings → Appearance → Display mode**.
+- The menu-bar item shows the selected tab's current Session / 5-hour quota left; in **Overview** mode it shows the tightest (lowest remaining) provider. The style (meter bar, percent, provider logo, or a combination) is chosen in **Settings → Appearance → Display mode**.
+- The switcher's leading **Overview** tab is optional; with 4+ tabs the switcher collapses to icons (full names in tooltips).
 - The ring centre shows the Session (or 5-hour) quota left, and every ring fills from its own **remaining** value—100% is a full ring.
 - The three ring rows are Session, Weekly, and Monthly remaining quota; each row keeps its own reset countdown.
 - The DeepSeek tab uses a single balance ring: used share = this month's cost ÷ (cost + balance). Topping up raises the balance, so the ring recalculates on the next refresh. Below the ring, the cache hit/miss/output breakdown and the top model are shown.
@@ -100,12 +102,12 @@ Quota reset time is not subscription expiry. TokenBar displays a plan-expiry bad
 ## Privacy
 
 - OpenCode browser import reads the `opencode.ai` authentication cookie only after **Re-import Browser Session** is clicked. It does not read browsing history or scan arbitrary files.
-- TokenBar keeps only the `auth` / `__Host-auth` cookie and stores it in the local macOS Keychain. Startup, scheduled refresh, and ordinary manual refresh use that cache instead of repeatedly reading the browser.
-- A manually pasted OpenCode Cookie is also stored only in the local Keychain, never UserDefaults, source files, or logs.
+- TokenBar keeps only the `auth` / `__Host-auth` cookie and stores it in the local macOS Keychain, mirrored to `~/Library/Application Support/TokenBar/credentials.json` (mode 0600). Startup, scheduled refresh, and ordinary manual refresh read the file cache first and never re-prompt the Keychain.
+- A manually pasted OpenCode Cookie is also stored only in the local Keychain + file cache, never UserDefaults, source files, or logs.
 - DeepSeek automatic access, when no Keychain/environment credential is set, silently reads the `userToken` of `platform.deepseek.com` from Chrome's local storage (plaintext browser entries) and uses it only to call DeepSeek platform endpoints. TokenBar never writes it to disk; the browser source label is shown in Settings.
-- APINebula browser access reads the `apinebula.ai` console session cookie (and the account id from localStorage) only after **Re-import Browser Sign-in** is clicked, and uses them only for the balance/log endpoints. Keychain items use a wildcard ACL, so reinstalls never trigger the Keychain authorization dialog.
+- APINebula browser access reads the `apinebula.ai` console session cookie (and the account id from localStorage) only after **Re-import Browser Sign-in** is clicked, and uses them only for the balance/log endpoints, writing to the Keychain + file cache.
 - Browser-session import (OpenCode/APINebula) is an explicit settings action; background and startup refreshes never read browser cookie stores or prompt for Keychain passwords.
-- API Keys / Platform Tokens entered in the DeepSeek settings pane are stored only in the local Keychain, never UserDefaults, source files, or logs.
+- API Keys / Platform Tokens entered in the DeepSeek settings pane are stored only in the local Keychain + file cache, never UserDefaults, source files, or logs.
 - `arkcli` keeps ownership of its SSO session; TokenBar only runs `arkcli usage plan --format json` and parses its output.
 - AK/SK and Ark API keys are read from the launch environment and are never written to disk by TokenBar.
 - Network requests go only to the required Volcengine Ark endpoints, `opencode.ai`, or `platform.deepseek.com`.
@@ -134,6 +136,10 @@ Sources/TokenBar/
   NebulaBrowserSession.swift explicit console cookie + user-id importer
   NebulaCardView.swift single balance-ring menu card
   ProviderLogo.swift     provider brand icons (doubao/opencode/deepseek/apinebula)
+  CookieKeychainStore.swift Keychain + file-cache credential store
+  CredentialFileCache.swift on-disk credential mirror (mode 0600)
+  MenuBuilder.swift      menu construction incl. SummaryRowView overview rows
+  ProviderSwitcherView.swift switcher with optional Overview tab
   UsageStore.swift       source selection and refresh lifecycle
   PlanCardView.swift     menu-card layout and remaining-quota ring
   Localization.swift     Simplified Chinese and English catalog

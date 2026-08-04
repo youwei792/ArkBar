@@ -16,17 +16,20 @@ enum MenuBuilder {
         }
 
         let status: Status
-        let selectedTab: ProviderTab
+        let selectedMenu: MenuSelection
         /// Providers shown in the switcher (hidden ones are filtered upstream).
-        /// Defaults to all tabs so tests and callers can omit it.
         var visibleTabs: [ProviderTab] = ProviderTab.allCases
         let onSelectTab: (ProviderTab) -> Void
+        let onSelectSummary: (() -> Void)?
         let lastUpdatedAt: Date?
         let isRefreshing: Bool
         let now: Date
         let onRefresh: () -> Void
         let onSettings: () -> Void
         let onQuit: () -> Void
+
+        /// All provider statuses for the summary view.
+        var allStatuses: [ProviderTab: UsageStore.LoadStatus] = [:]
 
         var refreshErrorMessage: String? {
             switch status {
@@ -50,11 +53,71 @@ enum MenuBuilder {
     @MainActor
     static func populate(_ menu: NSMenu, with state: State) {
         menu.removeAllItems()
-        // NSMenu reserves horizontal insets around custom item views. Keep the
-        // menu slightly wider than the card so AppKit never clips its right edge.
         menu.minimumWidth = 360
         menu.addItem(switcherItem(state: state))
 
+        switch state.selectedMenu {
+        case .summary:
+            populateSummary(menu, state: state)
+        case .provider:
+            populateProvider(menu, state: state)
+        }
+
+        menu.addItem(.separator())
+        menu.addItem(refreshItem(state: state))
+        if case let .provider(tab) = state.selectedMenu {
+            switch tab {
+            case .ark:
+                menu.addItem(actionItem(L(.openArkcliLogin), action: {
+                    Self.openTerminal(command: "arkcli auth login volc-sso")
+                }))
+                menu.addItem(actionItem(L(.openArkConsole), action: {
+                    NSWorkspace.shared.open(URL(string: "https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&advancedActiveKey=subscribe")!)
+                }))
+            case .opencode:
+                menu.addItem(actionItem(L(.openCodeGo), action: {
+                    NSWorkspace.shared.open(URL(string: "https://opencode.ai")!)
+                }))
+            case .deepseek:
+                menu.addItem(actionItem(L(.openDeepSeekPlatform), action: {
+                    NSWorkspace.shared.open(URL(string: "https://platform.deepseek.com")!)
+                }))
+            case .nebula:
+                menu.addItem(actionItem(L(.openNebulaConsole), action: {
+                    NSWorkspace.shared.open(URL(string: "https://apinebula.ai/console")!)
+                }))
+            }
+        }
+        menu.addItem(actionItem(L(.settings), action: state.onSettings))
+        menu.addItem(.separator())
+        menu.addItem(actionItem(L(.quitTokenBar), action: state.onQuit))
+    }
+
+    // MARK: - Summary branch
+
+    @MainActor
+    private static func populateSummary(_ menu: NSMenu, state: State) {
+        var hasContent = false
+        for tab in state.visibleTabs {
+            let loadStatus = state.allStatuses[tab] ?? .never
+            let row = SummaryRowView(tab: tab, loadStatus: loadStatus, width: cardWidth) {
+                state.onSelectTab(tab)
+            }
+            let item = NSMenuItem()
+            item.view = row
+            item.isEnabled = false
+            menu.addItem(item)
+            hasContent = true
+        }
+        if !hasContent {
+            menu.addItem(loadingItem(text: L(.noProvider)))
+        }
+    }
+
+    // MARK: - Provider branch (existing logic)
+
+    @MainActor
+    private static func populateProvider(_ menu: NSMenu, state: State) {
         switch state.status {
         case .never:
             menu.addItem(loadingItem(text: L(.loadingUsage)))
@@ -69,44 +132,14 @@ enum MenuBuilder {
                 menu.addItem(planItem(plan: plan, now: state.now))
             }
         case let .ok(snapshot):
-            // Header card.
             menu.addItem(headerItem(snapshot: snapshot))
             if let message = snapshot.errorMessage, !message.isEmpty {
                 menu.addItem(errorItem(message: message, isWarning: true))
             }
-            // One rich card per plan.
             for plan in snapshot.plans {
                 menu.addItem(planItem(plan: plan, now: state.now))
             }
         }
-
-        menu.addItem(.separator())
-
-        menu.addItem(refreshItem(state: state))
-        switch state.selectedTab {
-        case .ark:
-            menu.addItem(actionItem(L(.openArkcliLogin), action: {
-                Self.openTerminal(command: "arkcli auth login volc-sso")
-            }))
-            menu.addItem(actionItem(L(.openArkConsole), action: {
-                NSWorkspace.shared.open(URL(string: "https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&advancedActiveKey=subscribe")!)
-            }))
-        case .opencode:
-            menu.addItem(actionItem(L(.openCodeGo), action: {
-                NSWorkspace.shared.open(URL(string: "https://opencode.ai")!)
-            }))
-        case .deepseek:
-            menu.addItem(actionItem(L(.openDeepSeekPlatform), action: {
-                NSWorkspace.shared.open(URL(string: "https://platform.deepseek.com")!)
-            }))
-        case .nebula:
-            menu.addItem(actionItem(L(.openNebulaConsole), action: {
-                NSWorkspace.shared.open(URL(string: "https://apinebula.ai/console")!)
-            }))
-        }
-        menu.addItem(actionItem(L(.settings), action: state.onSettings))
-        menu.addItem(.separator())
-        menu.addItem(actionItem(L(.quitTokenBar), action: state.onQuit))
     }
 
     // MARK: - Card items (AppKit-based)
@@ -116,14 +149,21 @@ enum MenuBuilder {
     @MainActor
     private static func switcherItem(state: State) -> NSMenuItem {
         let item = NSMenuItem()
+        // Prefer the user's setting, but only show overview when 2+ providers
+        // are visible (otherwise the tab is redundant).
+        let showSummary = AppSettings.shared.showSummary && state.visibleTabs.count > 1
         item.view = ProviderSwitcherView(
             tabs: state.visibleTabs,
-            selected: state.selectedTab,
+            selected: state.selectedMenu,
+            showSummary: showSummary,
             width: cardWidth,
-            onSelect: state.onSelectTab)
-        // Unlike passive card rows, this custom view contains real NSButtons.
-        // A disabled NSMenuItem prevents the buttons from receiving menu-tracking
-        // events on some macOS versions.
+            onSelect: { selection in
+                if case let .provider(tab) = selection {
+                    state.onSelectTab(tab)
+                } else {
+                    state.onSelectSummary?()
+                }
+            })
         item.isEnabled = true
         return item
     }
@@ -140,8 +180,6 @@ enum MenuBuilder {
     @MainActor
     private static func planItem(plan: PlanSnapshot, now: Date) -> NSMenuItem {
         let item = NSMenuItem()
-        // DeepSeek/Nebula plans use the single-ring balance card; everything
-        // else uses the three-ring plan card.
         if plan.deepseek != nil {
             item.view = DeepSeekCardView(plan: plan, now: now, width: cardWidth)
         } else if plan.nebula != nil {
@@ -207,17 +245,12 @@ enum MenuBuilder {
             errorMessage: state.refreshErrorMessage,
             action: state.onRefresh,
             width: cardWidth)
-        // The embedded gesture recognizer handles the click. Leaving the item
-        // without an NSMenu action means AppKit keeps tracking the menu open.
         item.action = nil
         item.target = nil
         return item
     }
 
     private static func openTerminal(command: String) {
-        // Use `osascript` via Process (more reliable than NSAppleScript for
-        // this use case — Terminal.app is not sandboxed and the command is
-        // user-triggered, so no entitlement issue).
         let script = """
         tell application "Terminal"
             activate
@@ -237,10 +270,181 @@ enum MenuBuilder {
     }
 }
 
-// MARK: - AppKit card views
+// MARK: - SummaryRowView (compact per-provider row)
+
+/// A compact row for the summary overview: logo + name + remaining percent +
+/// the same capsule meter used by the status-item icon. Tapping navigates to
+/// that provider's full card.
+@MainActor
+final class SummaryRowView: NSView {
+    override var isFlipped: Bool { true }
+
+    private let onTap: () -> Void
+    private let remainingPercent: Double?
+    private let isStale: Bool
+    private let hoverView = NSVisualEffectView()
+
+    init(tab: ProviderTab, loadStatus: UsageStore.LoadStatus, width: CGFloat, onTap: @escaping () -> Void) {
+        self.onTap = onTap
+        let info = Self.statusInfo(for: loadStatus)
+        self.remainingPercent = info.remaining
+        self.isStale = info.stale
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 44))
+        wantsLayer = true
+        build(tab: tab, statusText: info.text, statusColor: info.color, width: width)
+        let recognizer = NSClickGestureRecognizer(target: self, action: #selector(handleClick(_:)))
+        recognizer.buttonMask = 0x1
+        addGestureRecognizer(recognizer)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func build(tab: ProviderTab, statusText: String, statusColor: NSColor, width: CGFloat) {
+        let horizontalPadding: CGFloat = 14
+        let rowHeight: CGFloat = 44
+        let contentY = (rowHeight - 16) / 2
+
+        hoverView.material = .selection
+        hoverView.blendingMode = .withinWindow
+        hoverView.state = .active
+        hoverView.isEmphasized = true
+        hoverView.wantsLayer = true
+        hoverView.layer?.cornerRadius = 8
+        hoverView.isHidden = true
+        hoverView.frame = bounds.insetBy(dx: 6, dy: 2)
+        addSubview(hoverView)
+
+        // Fixed columns so every row lines up:
+        // [logo 16] [name ~92] [percent 44 right-aligned] …… [meter 64]
+        let logoSide: CGFloat = 16
+        let nameColWidth: CGFloat = 92
+        let percentColWidth: CGFloat = 44
+        let meterWidth: CGFloat = 64
+        let meterHeight: CGFloat = 8
+        let gap: CGFloat = 8
+
+        let logoX = horizontalPadding
+        let nameX = logoX + logoSide + gap
+        let percentX = nameX + nameColWidth + gap
+        let meterX = width - horizontalPadding - meterWidth
+
+        if let logo = ProviderLogo.image(for: tab) {
+            // Keep brand color in the menu (template only for the status item).
+            let logoView = NSImageView(frame: NSRect(
+                x: logoX, y: contentY, width: logoSide, height: logoSide))
+            let colored = logo.copy() as? NSImage ?? logo
+            colored.size = NSSize(width: logoSide, height: logoSide)
+            colored.isTemplate = false
+            logoView.image = colored
+            logoView.imageScaling = .scaleProportionallyDown
+            addSubview(logoView)
+        }
+
+        let nameField = NSTextField(labelWithString: tab.displayName)
+        nameField.font = .systemFont(ofSize: 12, weight: .medium)
+        nameField.textColor = .labelColor
+        nameField.lineBreakMode = .byTruncatingTail
+        nameField.toolTip = tab.displayName
+        nameField.frame = NSRect(x: nameX, y: contentY, width: nameColWidth, height: 16)
+        addSubview(nameField)
+
+        let detailField = NSTextField(labelWithString: statusText)
+        detailField.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        detailField.textColor = statusColor
+        detailField.alignment = .right
+        detailField.lineBreakMode = .byClipping
+        detailField.frame = NSRect(x: percentX, y: contentY, width: percentColWidth, height: 16)
+        addSubview(detailField)
+
+        if remainingPercent != nil {
+            let meter = SummaryMeterView(frame: NSRect(
+                x: meterX,
+                y: (rowHeight - meterHeight) / 2,
+                width: meterWidth,
+                height: meterHeight))
+            meter.remainingPercent = remainingPercent
+            meter.isStale = isStale
+            addSubview(meter)
+        }
+
+        let sep = NSBox(frame: NSRect(
+            x: horizontalPadding, y: 0, width: width - horizontalPadding * 2, height: 0.5))
+        sep.boxType = .separator
+        addSubview(sep)
+    }
+
+    private static func statusInfo(for loadStatus: UsageStore.LoadStatus)
+        -> (text: String, color: NSColor, remaining: Double?, stale: Bool)
+    {
+        switch loadStatus {
+        case .never, .loading:
+            return (L(.loadingUsage), .secondaryLabelColor, nil, true)
+        case let .error(message):
+            let short = message.count > 18 ? String(message.prefix(16)) + "…" : message
+            return (short, .systemRed, nil, true)
+        case let .stale(snapshot, _):
+            if let pct = snapshot.sessionWindow?.remainingPercent {
+                return ("\(Int(pct.rounded()))%", .labelColor, pct, true)
+            }
+            return (L(.staleData), .systemOrange, nil, true)
+        case let .ok(snapshot):
+            if let pct = snapshot.sessionWindow?.remainingPercent {
+                return ("\(Int(pct.rounded()))%", .labelColor, pct, false)
+            }
+            return ("–", .secondaryLabelColor, nil, false)
+        }
+    }
+
+    @objc private func handleClick(_ recognizer: NSClickGestureRecognizer) {
+        guard recognizer.state == .ended else { return }
+        onTap()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hoverView.isHidden = false
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hoverView.isHidden = true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self, userInfo: nil)
+        addTrackingArea(area)
+    }
+
+    override func layout() {
+        super.layout()
+        hoverView.frame = bounds.insetBy(dx: 6, dy: 2)
+    }
+}
+
+/// Draws the accent-gradient capsule meter used by summary rows.
+@MainActor
+private final class SummaryMeterView: NSView {
+    var remainingPercent: Double?
+    var isStale = false
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        IconRenderer.drawCapsuleBar(
+            remainingPercent: remainingPercent,
+            stale: isStale,
+            in: bounds,
+            style: .accentGradient)
+    }
+}
+
+// MARK: - AppKit card views (unchanged)
 
 /// Header card: TokenBar + provider name + auth method.
-/// Uses flipped coordinates (origin top-left).
 final class HeaderCardView: NSView {
     override var isFlipped: Bool { true }
 
@@ -263,9 +467,6 @@ final class HeaderCardView: NSView {
         title.font = .systemFont(ofSize: 14, weight: .bold)
         title.textColor = .labelColor
         let titleSize = title.intrinsicContentSize
-        // NSTextField clips glyph overhangs when its frame exactly equals the
-        // intrinsic width. Give the wordmark a small trailing safety inset so
-        // the terminal “r” is fully antialiased instead of looking cut off.
         let titleTrailingInset: CGFloat = 6
         title.frame = NSRect(
             x: 14,
@@ -372,9 +573,7 @@ final class MenuActionTarget: NSObject {
     @objc func invoke() { action() }
 }
 
-/// A persistent refresh row modelled after native menu-bar utilities: it stays
-/// inside the tracked menu, surfaces refreshing/success/failure state, and
-/// handles its own click rather than selecting a closing NSMenuItem.
+/// A persistent refresh row modelled after native menu-bar utilities.
 @MainActor
 final class RefreshMenuItemView: NSView {
     private let hoverView = NSVisualEffectView()
@@ -418,8 +617,7 @@ final class RefreshMenuItemView: NSView {
         let area = NSTrackingArea(
             rect: bounds,
             options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
-            owner: self,
-            userInfo: nil)
+            owner: self, userInfo: nil)
         addTrackingArea(area)
         trackingArea = area
     }
@@ -495,9 +693,6 @@ final class RefreshMenuItemView: NSView {
         iconView.imageScaling = .scaleProportionallyDown
         addSubview(iconView)
 
-        // A native indeterminate indicator keeps its own animation geometry
-        // inside this fixed frame. Rotating an NSImageView layer in a tracked
-        // status menu can make the glyph orbit outside its icon slot.
         activityIndicator.style = .spinning
         activityIndicator.controlSize = .small
         activityIndicator.isIndeterminate = true
@@ -519,8 +714,6 @@ final class RefreshMenuItemView: NSView {
     }
 
     private func beginRefresh() {
-        // Give the click instant feedback before the async provider request
-        // starts. The controller then owns the success/error transition.
         update(
             isRefreshing: true,
             lastUpdatedAt: displayedLastUpdatedAt,

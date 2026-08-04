@@ -268,8 +268,9 @@ struct MenuBuilderTests {
     func refreshRowStaysInTheMenu() {
         let menu = MenuBuilder.build(.init(
             status: .loading,
-            selectedTab: .ark,
+            selectedMenu: .provider(.ark),
             onSelectTab: { _ in },
+            onSelectSummary: nil,
             lastUpdatedAt: Date(),
             isRefreshing: false,
             now: Date(),
@@ -289,8 +290,9 @@ struct MenuBuilderTests {
         let menu = NSMenu()
         MenuBuilder.populate(menu, with: .init(
             status: .loading,
-            selectedTab: .ark,
+            selectedMenu: .provider(.ark),
             onSelectTab: { _ in },
+            onSelectSummary: nil,
             lastUpdatedAt: nil,
             isRefreshing: false,
             now: Date(),
@@ -303,8 +305,9 @@ struct MenuBuilderTests {
         let identity = ObjectIdentifier(menu)
         MenuBuilder.populate(menu, with: .init(
             status: .error(message: "OpenCode test error"),
-            selectedTab: .opencode,
+            selectedMenu: .provider(.opencode),
             onSelectTab: { _ in },
+            onSelectSummary: nil,
             lastUpdatedAt: nil,
             isRefreshing: false,
             now: Date(),
@@ -331,10 +334,13 @@ struct MenuBuilderTests {
     @MainActor
     func providerSwitcherClickUpdatesContentImmediately() {
         var menu: NSMenu!
+        // Keep the switcher at 2 providers so labels stay visible (4+ tabs go icon-only).
         let openCodeState = MenuBuilder.State(
             status: .error(message: "OpenCode test error"),
-            selectedTab: .opencode,
+            selectedMenu: .provider(.opencode),
+            visibleTabs: [.ark, .opencode],
             onSelectTab: { _ in },
+            onSelectSummary: nil,
             lastUpdatedAt: nil,
             isRefreshing: false,
             now: Date(),
@@ -343,12 +349,14 @@ struct MenuBuilderTests {
             onQuit: {})
         menu = MenuBuilder.build(.init(
             status: .loading,
-            selectedTab: .ark,
+            selectedMenu: .provider(.ark),
+            visibleTabs: [.ark, .opencode],
             onSelectTab: { tab in
                 if tab == .opencode {
                     MenuBuilder.populate(menu, with: openCodeState)
                 }
             },
+            onSelectSummary: nil,
             lastUpdatedAt: nil,
             isRefreshing: false,
             now: Date(),
@@ -359,17 +367,21 @@ struct MenuBuilderTests {
         let switcher = menu.items.compactMap { $0.view as? ProviderSwitcherView }.first
         let openCodeButton = switcher?.subviews
             .compactMap { $0 as? NSButton }
-            .first { $0.title == ProviderTab.opencode.displayName }
+            .first {
+                $0.title == ProviderTab.opencode.displayName
+                    || $0.toolTip == ProviderTab.opencode.displayName
+            }
         openCodeButton?.performClick(nil)
 
         #expect(!menu.items.contains { $0.title == L(.openArkcliLogin) })
         #expect(menu.items.contains { $0.title == L(.openCodeGo) })
         let refreshedSwitcher = menu.items.compactMap { $0.view as? ProviderSwitcherView }.first
-        let selectedTitle = refreshedSwitcher?.subviews
+        let selectedButton = refreshedSwitcher?.subviews
             .compactMap { $0 as? NSButton }
-            .first { $0.state == .on }?
-            .title
-        #expect(selectedTitle == ProviderTab.opencode.displayName)
+            .first { $0.state == .on }
+        #expect(
+            selectedButton?.title == ProviderTab.opencode.displayName
+                || selectedButton?.toolTip == ProviderTab.opencode.displayName)
     }
 
     @Test("Refresh row switches to the in-flight state before its action returns")
@@ -412,7 +424,7 @@ struct IconRendererTests {
         #expect(logo.isTemplate == true)
         let combo = IconRenderer.makeLogoAndBarIcon(tab: .deepseek, remainingPercent: 73, stale: false)
         #expect(combo.isTemplate == true)
-        #expect(combo.size.width == 28)
+        #expect(combo.size.width == 30)
     }
 
     @Test("Writes menu-bar style strip for visual inspection")
@@ -678,7 +690,7 @@ struct MenuCardVisualTests {
         // Render the real AppKit dashboard hierarchy—not a separately drawn
         // mock—so palette, typography, clipping, and spacing can be inspected
         // together after each visual change.
-        let switcher = ProviderSwitcherView(tabs: ProviderTab.allCases, selected: .ark, width: 340, onSelect: { _ in })
+        let switcher = ProviderSwitcherView(tabs: ProviderTab.allCases, selected: .provider(.ark), showSummary: false, width: 340, onSelect: { _ in })
         let card = PlanCardView(plan: plan, now: now, width: 340)
         let totalHeight = switcher.bounds.height + header.bounds.height + card.bounds.height
         let dashboard = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: totalHeight))
@@ -1026,20 +1038,23 @@ struct ProviderVisibilityTests {
     @Test("Hiding the selected tab moves the selection to the first visible tab")
     func hidingSelectedTabSwitches() {
         let settings = AppSettings.shared
-        let originalTab = settings.selectedTab
+        let originalTab = settings.selectedMenu
         let original = (settings.showArk, settings.showOpenCode, settings.showDeepSeek, settings.showNebula)
         defer {
-            settings.selectedTab = originalTab
+            settings.selectedMenu = originalTab
             settings.showArk = original.0
             settings.showOpenCode = original.1
             settings.showDeepSeek = original.2
             settings.showNebula = original.3
         }
         settings.setVisible(.deepseek, true)
-        settings.selectedTab = .deepseek
+        settings.selectedMenu = .provider(.deepseek)
         settings.setVisible(.deepseek, false)
-        #expect(settings.selectedTab != .deepseek)
-        #expect(settings.visibleTabs.contains(settings.selectedTab))
+        #expect(settings.selectedMenu != .provider(.deepseek))
+        // The selection should move to summary (since showSummary defaults true).
+        #expect(settings.selectedMenu == .summary || {
+            if case let .provider(tab) = settings.selectedMenu { settings.visibleTabs.contains(tab) } else { false }
+        }())
     }
 }
 
@@ -1108,7 +1123,7 @@ struct ProviderLogoTests {
                 updatedAt: Date(),
                 errorMessage: nil),
             width: 340)
-        let switcher = ProviderSwitcherView(tabs: ProviderTab.allCases, selected: .deepseek, width: 340, onSelect: { _ in })
+        let switcher = ProviderSwitcherView(tabs: ProviderTab.allCases, selected: .provider(.deepseek), showSummary: false, width: 340, onSelect: { _ in })
         let totalHeight = switcher.bounds.height + header.bounds.height + card.bounds.height
         let dashboard = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: totalHeight))
         dashboard.wantsLayer = true
@@ -1312,7 +1327,7 @@ struct NebulaCardTests {
                 updatedAt: Date(),
                 errorMessage: nil),
             width: 340)
-        let switcher = ProviderSwitcherView(tabs: ProviderTab.allCases, selected: .nebula, width: 340, onSelect: { _ in })
+        let switcher = ProviderSwitcherView(tabs: ProviderTab.allCases, selected: .provider(.nebula), showSummary: false, width: 340, onSelect: { _ in })
         let totalHeight = switcher.bounds.height + header.bounds.height + card.bounds.height
         let dashboard = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: totalHeight))
         dashboard.wantsLayer = true

@@ -13,7 +13,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private weak var activeRefreshView: RefreshMenuItemView?
     private var isMenuOpen = false
     private var pendingMenuRebuild = false
-    private var pendingSelectedTab: ProviderTab?
+    private var pendingSelectedMenu: MenuSelection?
 
     init(store: UsageStore, settings: AppSettings = .shared) {
         self.store = store
@@ -39,106 +39,63 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         applyStatusItemLength()
 
-        // UsageStore is main-actor isolated. Do not hop through RunLoop.main:
-        // an NSMenu tracks events in a different run-loop mode, so a default-mode
-        // hop leaves the persistent refresh row stale until the menu closes.
+        // Subscribe to all provider status changes so the icon and menu stay
+        // fresh regardless of which tab or summary mode is selected.
         store.$arkStatus
-            .sink { [weak self] status in
-                guard let self, self.settings.selectedTab == .ark else { return }
-                self.updateIcon(for: status)
-                self.updateActiveRefreshView(status: status)
-                self.scheduleMenuRebuildIfOpen()
-            }
+            .sink { [weak self] _ in self?.updateIconAndMenu() }
             .store(in: &cancellables)
         store.$opencodeStatus
-            .sink { [weak self] status in
-                guard let self, self.settings.selectedTab == .opencode else { return }
-                self.updateIcon(for: status)
-                self.updateActiveRefreshView(status: status)
-                self.scheduleMenuRebuildIfOpen()
-            }
-            .store(in: &cancellables)
-        store.$arkLastUpdatedAt
-            .sink { [weak self] lastUpdatedAt in
-                guard self?.settings.selectedTab == .ark else { return }
-                self?.updateActiveRefreshView(lastUpdatedAt: lastUpdatedAt)
-            }
-            .store(in: &cancellables)
-        store.$opencodeLastUpdatedAt
-            .sink { [weak self] lastUpdatedAt in
-                guard self?.settings.selectedTab == .opencode else { return }
-                self?.updateActiveRefreshView(lastUpdatedAt: lastUpdatedAt)
-            }
-            .store(in: &cancellables)
-        store.$arkIsRefreshing
-            .sink { [weak self] isRefreshing in
-                guard self?.settings.selectedTab == .ark else { return }
-                self?.updateActiveRefreshView(isRefreshing: isRefreshing)
-            }
-            .store(in: &cancellables)
-        store.$opencodeIsRefreshing
-            .sink { [weak self] isRefreshing in
-                guard self?.settings.selectedTab == .opencode else { return }
-                self?.updateActiveRefreshView(isRefreshing: isRefreshing)
-            }
+            .sink { [weak self] _ in self?.updateIconAndMenu() }
             .store(in: &cancellables)
         store.$deepseekStatus
-            .sink { [weak self] status in
-                guard let self, self.settings.selectedTab == .deepseek else { return }
-                self.updateIcon(for: status)
-                self.updateActiveRefreshView(status: status)
-                self.scheduleMenuRebuildIfOpen()
-            }
-            .store(in: &cancellables)
-        store.$deepseekLastUpdatedAt
-            .sink { [weak self] lastUpdatedAt in
-                guard self?.settings.selectedTab == .deepseek else { return }
-                self?.updateActiveRefreshView(lastUpdatedAt: lastUpdatedAt)
-            }
-            .store(in: &cancellables)
-        store.$deepseekIsRefreshing
-            .sink { [weak self] isRefreshing in
-                guard self?.settings.selectedTab == .deepseek else { return }
-                self?.updateActiveRefreshView(isRefreshing: isRefreshing)
-            }
+            .sink { [weak self] _ in self?.updateIconAndMenu() }
             .store(in: &cancellables)
         store.$nebulaStatus
-            .sink { [weak self] status in
-                guard let self, self.settings.selectedTab == .nebula else { return }
-                self.updateIcon(for: status)
-                self.updateActiveRefreshView(status: status)
-                self.scheduleMenuRebuildIfOpen()
-            }
+            .sink { [weak self] _ in self?.updateIconAndMenu() }
+            .store(in: &cancellables)
+        // Refresh view updates.
+        store.$arkLastUpdatedAt
+            .sink { [weak self] _ in self?.updateActiveRefreshView() }
+            .store(in: &cancellables)
+        store.$opencodeLastUpdatedAt
+            .sink { [weak self] _ in self?.updateActiveRefreshView() }
+            .store(in: &cancellables)
+        store.$deepseekLastUpdatedAt
+            .sink { [weak self] _ in self?.updateActiveRefreshView() }
             .store(in: &cancellables)
         store.$nebulaLastUpdatedAt
-            .sink { [weak self] lastUpdatedAt in
-                guard self?.settings.selectedTab == .nebula else { return }
-                self?.updateActiveRefreshView(lastUpdatedAt: lastUpdatedAt)
-            }
+            .sink { [weak self] _ in self?.updateActiveRefreshView() }
+            .store(in: &cancellables)
+        store.$arkIsRefreshing
+            .sink { [weak self] _ in self?.updateActiveRefreshView() }
+            .store(in: &cancellables)
+        store.$opencodeIsRefreshing
+            .sink { [weak self] _ in self?.updateActiveRefreshView() }
+            .store(in: &cancellables)
+        store.$deepseekIsRefreshing
+            .sink { [weak self] _ in self?.updateActiveRefreshView() }
             .store(in: &cancellables)
         store.$nebulaIsRefreshing
-            .sink { [weak self] isRefreshing in
-                guard self?.settings.selectedTab == .nebula else { return }
-                self?.updateActiveRefreshView(isRefreshing: isRefreshing)
-            }
+            .sink { [weak self] _ in self?.updateActiveRefreshView() }
             .store(in: &cancellables)
-        settings.$selectedTab
-            .sink { [weak self] tab in
+        // Selection change.
+        settings.$selectedMenu
+            .sink { [weak self] menu in
                 guard let self else { return }
-                let status = self.store.status(for: tab)
-                // `@Published` sends before the setting is committed, so
-                // `settings.selectedTab` still holds the previous tab here.
-                // Pass the emitted tab explicitly or the status-item logo would
-                // show the old provider while the percent already switched.
-                self.updateIcon(for: status, tab: tab)
-                self.updateActiveRefreshView(
-                    isRefreshing: self.store.isRefreshing(for: tab),
-                    lastUpdatedAt: self.store.lastUpdatedAt(for: tab),
-                    status: status)
-                // `@Published` sends before the setting is committed. Preserve
-                // the emitted tab explicitly, then mutate the already-open menu
-                // on the next turn after the switcher's mouse-up transaction.
-                self.scheduleMenuRebuildIfOpen(selectedTab: tab)
+                // In summary mode, use the tightest provider's data for the icon.
+                // In provider mode, use the explicit tab.
+                if case let .provider(tab) = menu {
+                    let status = self.store.status(for: tab)
+                    self.updateIcon(for: status, tab: tab)
+                    self.updateActiveRefreshView(
+                        isRefreshing: self.store.isRefreshing(for: tab),
+                        lastUpdatedAt: self.store.lastUpdatedAt(for: tab),
+                        status: status)
+                } else {
+                    self.updateIcon()
+                    self.updateActiveRefreshView()
+                }
+                self.scheduleMenuRebuildIfOpen(selectedMenu: menu)
             }
             .store(in: &cancellables)
         settings.$displayMode
@@ -148,14 +105,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 self?.updateIcon()
             }
             .store(in: &cancellables)
-        // Language changes invalidate nothing in the icon, but if the menu is open
-        // we rebuild it so localized labels flip live.
         NotificationCenter.default.publisher(for: L10n.languageDidChange)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.scheduleMenuRebuildIfOpen() }
             .store(in: &cancellables)
-        // Toggling a provider's visibility changes the switcher's buttons and
-        // possibly the selected card; refresh both while the menu is open.
         Publishers.MergeMany(
             settings.$showArk.map { _ in },
             settings.$showOpenCode.map { _ in },
@@ -170,9 +123,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         updateIcon()
         rebuildMenu()
-        // Keep one menu attached for the lifetime of the status item. Attaching
-        // it only from the click handler makes AppKit consume the first click
-        // merely to install the menu, which is why the old build needed two.
         statusItem.menu = persistentMenu
     }
 
@@ -189,10 +139,32 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         statusItem.length = Self.statusItemLength(for: settings.displayMode)
     }
 
+    /// Picks the best provider tab for the status-item icon: the explicit tab in
+    /// provider mode, or the tightest (lowest remaining percent) in summary mode.
+    private func iconTab(for loadStatus: UsageStore.LoadStatus?) -> ProviderTab {
+        if case let .provider(tab) = settings.selectedMenu {
+            return tab
+        }
+        // Summary mode: pick the provider with the lowest remaining percent.
+        let candidates = settings.visibleTabs
+            .map { ($0, store.status(for: $0)) }
+            .filter { $0.1.snapshot?.sessionWindow != nil }
+        if let best = candidates.min(by: { a, b in
+            let pa = a.1.snapshot?.sessionWindow?.remainingPercent ?? 100
+            let pb = b.1.snapshot?.sessionWindow?.remainingPercent ?? 100
+            return pa < pb
+        }) {
+            return best.0
+        }
+        // Fallback: first visible provider, or .ark
+        return settings.visibleTabs.first ?? .ark
+    }
+
     private func updateIcon(for loadStatus: UsageStore.LoadStatus? = nil, tab explicitTab: ProviderTab? = nil) {
         let remaining: Double?
         let stale: Bool
-        switch loadStatus ?? store.currentStatus {
+        let effectiveStatus = loadStatus ?? store.currentStatus
+        switch effectiveStatus {
         case .never, .loading:
             remaining = nil
             stale = true
@@ -212,8 +184,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             }
         }
         guard let button = statusItem.button else { return }
-        // Prefer the explicit tab: settings.selectedTab may lag behind @Published.
-        let tab = explicitTab ?? settings.selectedTab
+        let tab = explicitTab ?? iconTab(for: effectiveStatus)
 
         switch settings.displayMode {
         case .iconOnly:
@@ -250,13 +221,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
-    /// Compact monospaced percent text, matching CodexBar's tight status-item
-    /// typography rather than the larger default control font.
     private func setPercentTitle(_ text: String, on button: NSStatusBarButton) {
         button.attributedTitle = NSAttributedString(
             string: text,
             attributes: [
-                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
+                .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .medium),
                 .foregroundColor: NSColor.labelColor,
             ])
     }
@@ -265,10 +234,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         guard menu === persistentMenu else { return }
         isMenuOpen = true
         if settings.refreshWhenMenuOpens {
-            store.refresh(tab: settings.selectedTab)
+            store.refresh()
         }
-        // Countdown strings and provider content are fresh before the very
-        // first frame of the popover is presented.
         rebuildMenu()
     }
 
@@ -276,13 +243,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         guard menu === persistentMenu else { return }
         isMenuOpen = false
         pendingMenuRebuild = false
-        pendingSelectedTab = nil
+        pendingSelectedMenu = nil
         updateIcon()
     }
 
-    // NSTrackingArea sends the Objective-C selectors `mouseEntered:` and
-    // `mouseExited:`. StatusItemController is an NSObject rather than an
-    // NSResponder, so Swift's default `mouseEnteredWithEvent:` bridge crashes.
     @objc(mouseEntered:) func mouseEntered(_ event: NSEvent) {
         animateStatusButton(hovered: true)
     }
@@ -307,39 +271,48 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         layer.add(animation, forKey: "tokenbar.statusHover")
     }
 
-    /// Rebuild the dropdown menu from the current store state.
-    private func rebuildMenu(selectedTab explicitTab: ProviderTab? = nil) {
-        let selectedTab = explicitTab ?? settings.selectedTab
+    private func rebuildMenu(selectedMenu explicitMenu: MenuSelection? = nil) {
+        let menu = explicitMenu ?? settings.selectedMenu
+        let selectedTab: ProviderTab
         let status: MenuBuilder.State.Status
-        switch store.status(for: selectedTab) {
-        case .never: status = .never
-        case .loading: status = .loading
-        case let .error(message): status = .error(message: message)
-        case let .stale(snapshot, message): status = .stale(snapshot: snapshot, message: message)
-        case let .ok(snapshot): status = .ok(snapshot: snapshot)
+        switch menu {
+        case .summary:
+            // Use the tightest provider for the refresh row state.
+            selectedTab = settings.visibleTabs.first ?? .ark
+            status = .ok(snapshot: ProviderSnapshot(
+                providerName: "", authMethod: nil, plans: [],
+                updatedAt: Date(), errorMessage: nil))
+        case let .provider(tab):
+            selectedTab = tab
+            switch store.status(for: tab) {
+            case .never: status = .never
+            case .loading: status = .loading
+            case let .error(message): status = .error(message: message)
+            case let .stale(snapshot, message): status = .stale(snapshot: snapshot, message: message)
+            case let .ok(snapshot): status = .ok(snapshot: snapshot)
+            }
         }
         let state = MenuBuilder.State(
             status: status,
-            selectedTab: selectedTab,
+            selectedMenu: menu,
             visibleTabs: settings.visibleTabs,
-            onSelectTab: { [weak self] tab in self?.settings.selectedTab = tab },
+            onSelectTab: { [weak self] tab in self?.settings.selectedMenu = .provider(tab) },
+            onSelectSummary: { [weak self] in self?.settings.selectedMenu = .summary },
             lastUpdatedAt: store.lastUpdatedAt(for: selectedTab),
             isRefreshing: store.isRefreshing(for: selectedTab),
             now: Date(),
-            onRefresh: { [weak self] in self?.refreshFromMenu(tab: selectedTab) },
+            onRefresh: { [weak self] in self?.refreshFromMenu() },
             onSettings: { [weak self] in self?.showSettings() },
-            onQuit: { NSApp.terminate(nil) })
+            onQuit: { NSApp.terminate(nil) },
+            allStatuses: store.allStatuses)
         MenuBuilder.populate(persistentMenu, with: state)
         activeRefreshView = persistentMenu.items.compactMap { $0.view as? RefreshMenuItemView }.first
     }
 
-    /// Coalesce publisher bursts and rebuild only the content of the currently
-    /// tracked menu. Replacing `statusItem.menu` while tracking leaves the old
-    /// Ark card on screen and was the source of the mixed-tab screenshots.
-    private func scheduleMenuRebuildIfOpen(selectedTab: ProviderTab? = nil) {
+    private func scheduleMenuRebuildIfOpen(selectedMenu: MenuSelection? = nil) {
         guard isMenuOpen else { return }
-        if let selectedTab {
-            pendingSelectedTab = selectedTab
+        if let selectedMenu {
+            pendingSelectedMenu = selectedMenu
         }
         guard !pendingMenuRebuild else { return }
         pendingMenuRebuild = true
@@ -347,24 +320,18 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             guard let self else { return }
             self.pendingMenuRebuild = false
             guard self.isMenuOpen else {
-                self.pendingSelectedTab = nil
+                self.pendingSelectedMenu = nil
                 return
             }
-            let selectedTab = self.pendingSelectedTab
-            self.pendingSelectedTab = nil
-            self.rebuildMenu(selectedTab: selectedTab)
+            let menu = self.pendingSelectedMenu
+            self.pendingSelectedMenu = nil
+            self.rebuildMenu(selectedMenu: menu)
         }
     }
 
-    private func refreshFromMenu(tab: ProviderTab) {
-        store.refresh(tab: tab)
-        // The row also transitions itself before invoking this callback. This
-        // explicit update covers accessibility activation and any AppKit menu
-        // delivery quirk without waiting for a publisher scheduling hop.
-        updateActiveRefreshView(
-            isRefreshing: store.isRefreshing(for: tab),
-            lastUpdatedAt: store.lastUpdatedAt(for: tab),
-            status: store.status(for: tab))
+    private func refreshFromMenu() {
+        store.refresh()
+        updateActiveRefreshView()
     }
 
     private func updateActiveRefreshView(
@@ -382,6 +349,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             lastUpdatedAt: lastUpdatedAt ?? store.currentLastUpdatedAt,
             errorMessage: errorMessage,
             title: L(.refreshNow))
+    }
+
+    /// Convenience: icon + menu rebuild when any provider status changes.
+    private func updateIconAndMenu() {
+        updateIcon()
+        scheduleMenuRebuildIfOpen()
     }
 
     private var preferencesController: PreferencesWindowController?

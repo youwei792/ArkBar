@@ -106,7 +106,9 @@ enum LKey: String {
     case tabOpenCode = "tab.opencode"
     case tabDeepSeek = "tab.deepseek"
     case tabNebula = "tab.nebula"
+    case tabSummary = "tab.summary"
     case showProvider = "settings.showProvider"
+    case showSummary = "settings.showSummary"
     case sectionDisplay = "settings.sectionDisplay"
     case opencodeCookie = "settings.opencodeCookie"
     case opencodeCookiePlaceholder = "settings.opencodeCookiePlaceholder"
@@ -391,6 +393,8 @@ final class L10n: ObservableObject {
         add(.tabOpenCode, "OpenCode", "OpenCode")
         add(.tabDeepSeek, "DeepSeek", "DeepSeek")
         add(.tabNebula, "APINebula", "APINebula")
+        add(.tabSummary, "概览", "Overview")
+        add(.showSummary, "在菜单栏显示概览", "Show overview in menu bar")
         add(.showProvider, "在菜单栏显示", "Show in menu bar")
         add(.sectionDisplay, "显示", "Display")
         add(.opencodeCookie, "会话 Cookie", "Session Cookie")

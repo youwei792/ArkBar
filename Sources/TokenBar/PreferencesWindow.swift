@@ -213,6 +213,8 @@ private struct GeneralPreferencesPane: View {
                             Text(language.displayName).tag(language)
                         }
                     }
+                    Toggle(L(.showSummary), isOn: $settings.showSummary)
+                        .toggleStyle(.switch)
                 }
 
                 Section(L(.sectionRefresh)) {

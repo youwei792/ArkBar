@@ -17,3 +17,10 @@ enum ProviderTab: String, CaseIterable, Sendable {
         }
     }
 }
+
+/// What the menu should show: an overview of all providers, or a single
+/// provider's full card. Mirrors CodexBar's `ProviderSwitcherSelection`.
+enum MenuSelection: Equatable, Sendable {
+    case summary
+    case provider(ProviderTab)
+}

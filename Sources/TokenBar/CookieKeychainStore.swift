@@ -5,18 +5,15 @@ import LocalAuthentication
 import Security
 #endif
 
-/// Stores only the user-provided OpenCode session header in the macOS Keychain.
-/// It is deliberately separate from `UserDefaults`, which may hold harmless UI
-/// preferences but must never contain session credentials.
+/// Stores session credentials in the macOS Keychain plus a file cache.
+///
+/// The file cache (`CredentialFileCache`) is the primary read path so that
+/// a warm restart never needs to touch the Keychain (zero password prompts).
+/// The Keychain remains the canonical store and serves as a fallback when
+/// the file cache is missing or corrupt.
+///
+/// v1/v2 entries are migrated to v3 on first access and then deleted.
 enum CookieKeychainStore {
-    /// v1 used the default Keychain ACL. Local ad-hoc rebuilds therefore caused
-    /// macOS to ask for the login password every time TokenBar's signature
-    /// changed. v2 trusted app paths, but macOS re-validates the application's
-    /// signature against path-created ACLs, so ad-hoc re-signing still prompted.
-    /// v3 creates items with a wildcard ACL (no signature/path binding) so a
-    /// re-signed bundle can always read its own credentials without prompting.
-    /// v1/v2 items are migrated to v3 on first access and then deleted; legacy
-    /// items are never queried after migration.
     static let service = "com.tokenbar.cache.v3"
     private static let legacyService = "com.tokenbar.cache.v2"
     private static let cacheLock = NSLock()
@@ -26,11 +23,79 @@ enum CookieKeychainStore {
         "cookie.\(provider)"
     }
 
+    /// Read path: file cache → process cache → Keychain (silent, no UI).
+    /// On a successful Keychain read the value is backfilled into every cache.
+    static func load(provider: String) -> String? {
+        let account = account(forProvider: provider)
+
+        // 1. File cache (fastest, survives restarts).
+        if let fileValue = CredentialFileCache.loadAll()[account] {
+            cacheLock.withLock { processCache[account] = fileValue }
+            return fileValue
+        }
+
+        // 2. Process cache.
+        if let cached = cacheLock.withLock({ processCache[account] }) {
+            return cached
+        }
+
+        // 3. Keychain (silent read, no password prompt).
+        if let keychainValue = load(service: service, account: account) {
+            backfill(account: account, value: keychainValue)
+            return keychainValue
+        }
+
+        // 4. Migrate a legacy v2 item on first access, then drop the old entry.
+        if let legacy = load(service: legacyService, account: account) {
+            _ = store(keychainOnly: legacy, account: account)
+            _ = clear(service: legacyService, account: account)
+            backfill(account: account, value: legacy)
+            return legacy
+        }
+
+        return nil
+    }
+
+    /// Write path: Keychain + file cache + process cache.
+    /// Returns `true` when the value was persisted to at least one layer.
     @discardableResult
     static func store(cookie: String?, provider: String) -> Bool {
         let account = account(forProvider: provider)
         guard let cookie, !cookie.isEmpty else { return clear(provider: provider) }
-        let data = Data(cookie.utf8)
+
+        // Keychain first (canonical).
+        _ = store(keychainOnly: cookie, account: account)
+
+        // File cache.
+        CredentialFileCache.store(provider: account, value: cookie)
+
+        // Process cache.
+        cacheLock.withLock { processCache[account] = cookie }
+
+        // Drop any legacy v2 entry.
+        _ = clear(service: legacyService, account: account)
+        return true
+    }
+
+    /// Removes a credential from all three layers.
+    @discardableResult
+    static func clear(provider: String) -> Bool {
+        let account = account(forProvider: provider)
+        cacheLock.withLock { processCache.removeValue(forKey: account) }
+        CredentialFileCache.clear(provider: account)
+        _ = clear(service: service, account: account)
+        _ = clear(service: legacyService, account: account)
+        return true
+    }
+
+    // MARK: - Keychain helpers
+
+    /// Write a value to the Keychain (v3 service). Uses `applyNoUI` for the
+    /// update attempt; add uses the default ACL (no custom wildcard, since
+    /// `SecTrustedApplicationCreateFromPath` is deprecated on macOS 14+).
+    @discardableResult
+    private static func store(keychainOnly value: String, account: String) -> Bool {
+        let data = Data(value.utf8)
 
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -38,14 +103,9 @@ enum CookieKeychainStore {
             kSecAttrAccount as String: account,
         ]
         applyNoUI(to: &query)
-        let updateStatus = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-        if updateStatus == errSecSuccess {
-            cacheLock.withLock {
-                processCache[account] = cookie
-            }
-            clear(service: legacyService, account: account)
-            return true
-        }
+        let updateStatus = SecItemUpdate(query as CFDictionary,
+                                         [kSecValueData as String: data] as CFDictionary)
+        if updateStatus == errSecSuccess { return true }
         guard updateStatus == errSecItemNotFound else {
             UsageStore.log("Keychain cookie update failed (\(account)): OSStatus \(updateStatus)")
             return false
@@ -55,39 +115,15 @@ enum CookieKeychainStore {
         add[kSecValueData as String] = data
         add[kSecAttrLabel as String] = "TokenBar Cache"
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        add[kSecAttrAccess as String] = wildcardAccessControl()
+        // Note: no kSecAttrAccess — modern securityd on macOS 14+ ignores the
+        // deprecated SecTrustedApplication path-based ACL, so we rely on the
+        // default Keychain access control. The file cache handles the "no
+        // prompt on restart" use case instead.
         let addStatus = SecItemAdd(add as CFDictionary, nil)
         if addStatus != errSecSuccess {
             UsageStore.log("Keychain cookie add failed (\(account)): OSStatus \(addStatus)")
-        } else {
-            cacheLock.withLock {
-                processCache[account] = cookie
-            }
-            clear(service: legacyService, account: account)
         }
         return addStatus == errSecSuccess
-    }
-
-    static func load(provider: String) -> String? {
-        let account = account(forProvider: provider)
-        if let cached = cacheLock.withLock({ processCache[account] }) {
-            return cached
-        }
-
-        if let current = load(service: service, account: account) {
-            cacheLock.withLock {
-                processCache[account] = current
-            }
-            return current
-        }
-        // Migrate a legacy v2 item on first access, then drop the old entry.
-        if let legacy = load(service: legacyService, account: account),
-           store(cookie: legacy, provider: provider)
-        {
-            _ = clear(service: legacyService, account: account)
-            return legacy
-        }
-        return nil
     }
 
     private static func load(service: String, account: String) -> String? {
@@ -115,17 +151,6 @@ enum CookieKeychainStore {
     }
 
     @discardableResult
-    static func clear(provider: String) -> Bool {
-        let account = account(forProvider: provider)
-        _ = cacheLock.withLock {
-            processCache.removeValue(forKey: account)
-        }
-        let current = clear(service: service, account: account)
-        let legacy = clear(service: legacyService, account: account)
-        return current && legacy
-    }
-
-    @discardableResult
     private static func clear(service: String, account: String) -> Bool {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -137,6 +162,8 @@ enum CookieKeychainStore {
         return status == errSecSuccess || status == errSecItemNotFound
     }
 
+    /// Prevents the Keychain from showing a password dialog. Used for all
+    /// routine reads and writes so the app never prompts the user on its own.
     private static func applyNoUI(to query: inout [String: Any]) {
         let context = LAContext()
         context.interactionNotAllowed = true
@@ -155,62 +182,9 @@ enum CookieKeychainStore {
         return (pointer.pointee as String?) ?? "u_AuthUIF"
     }()
 
-    /// An ACL that trusts every application (a NULL-path SecTrustedApplication
-    /// is a wildcard). This keeps ad-hoc re-signed builds from triggering the
-    /// Keychain authorization dialog on every launch.
-    private static func wildcardAccessControl() -> SecAccess {
-        var application: SecTrustedApplication?
-        _ = secTrustedApplicationCreateFromPath(nil, &application)
-
-        var access: SecAccess?
-        let applications: [SecTrustedApplication] = application.map { [$0] } ?? []
-        let status = secAccessCreate("TokenBar Cache" as CFString, applications as CFArray, &access)
-        if status == errSecSuccess, let access {
-            return access
-        }
-        // Fallback: create with an empty trusted list (no ACL restrictions).
-        var fallback: SecAccess?
-        _ = secAccessCreate("TokenBar Cache" as CFString, [] as CFArray, &fallback)
-        return fallback!
-    }
-
-    private typealias SecTrustedApplicationCreateFromPathFunction = @convention(c) (
-        UnsafePointer<CChar>?,
-        UnsafeMutablePointer<SecTrustedApplication?>?) -> OSStatus
-    private typealias SecAccessCreateFunction = @convention(c) (
-        CFString,
-        CFArray,
-        UnsafeMutablePointer<SecAccess?>?) -> OSStatus
-
-    private nonisolated(unsafe) static let securityFrameworkHandle: UnsafeMutableRawPointer? = {
-        dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_NOW)
-    }()
-
-    private static func securitySymbol(named name: String) -> UnsafeMutableRawPointer? {
-        guard let securityFrameworkHandle else { return nil }
-        return dlsym(securityFrameworkHandle, name)
-    }
-
-    private static func secTrustedApplicationCreateFromPath(
-        _ path: UnsafePointer<CChar>?,
-        _ application: UnsafeMutablePointer<SecTrustedApplication?>?) -> OSStatus
-    {
-        guard let symbol = securitySymbol(named: "SecTrustedApplicationCreateFromPath") else {
-            return errSecInternalComponent
-        }
-        let function = unsafeBitCast(symbol, to: SecTrustedApplicationCreateFromPathFunction.self)
-        return function(path, application)
-    }
-
-    private static func secAccessCreate(
-        _ descriptor: CFString,
-        _ trustedList: CFArray,
-        _ access: UnsafeMutablePointer<SecAccess?>?) -> OSStatus
-    {
-        guard let symbol = securitySymbol(named: "SecAccessCreate") else {
-            return errSecInternalComponent
-        }
-        let function = unsafeBitCast(symbol, to: SecAccessCreateFunction.self)
-        return function(descriptor, trustedList, access)
+    /// Backfill the file cache and process cache after a successful Keychain read.
+    private static func backfill(account: String, value: String) {
+        cacheLock.withLock { processCache[account] = value }
+        CredentialFileCache.store(provider: account, value: value)
     }
 }

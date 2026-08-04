@@ -4,16 +4,18 @@ All notable public changes to TokenBar are documented here.
 
 ## Unreleased
 
+- Added a multi-provider **Overview** tab that lists every visible provider with remaining percent and a teal→blue capsule meter; click a row to open that provider's full card. Toggle it in **Settings → General**.
+- Status-item logo glyphs are 16×16pt and percent text uses the system font size, matching CodexBar's menu-bar scale.
+- Credentials are mirrored to a local file cache (`~/Library/Application Support/TokenBar/credentials.json`, mode 0600) so warm restarts never need Keychain UI; Keychain remains the canonical store and backfills the file on first silent read.
 - Added an APINebula (new-api relay) tab with a balance ring (cumulative spend vs spend + balance), today/monthly cost, token counts, request counts, and a cache-read/uncached/output split aggregated from the console usage log.
-- APINebula balance/usage endpoints are console APIs: credentials come from the browser sign-in session (imported explicitly and cached in Keychain) or an optional API key/environment fallback.
+- APINebula balance/usage endpoints are console APIs: credentials come from the browser sign-in session (imported explicitly and cached locally) or an optional API key/environment fallback.
 - Added a DeepSeek tab with balance, today/monthly cost, token counts, request counts, and a cache hit/miss/output breakdown, mirroring CodexBar's DeepSeek monitoring.
 - Added a single balance ring for DeepSeek (this month's spend vs spend + balance) that recalculates automatically after a top-up.
-- Added DeepSeek credential entry in Settings (API Key / Platform Token, stored in Keychain) and silent auto-resolution of the signed-in DeepSeek Platform session from Chrome local storage when no key is configured.
+- Added DeepSeek credential entry in Settings (API Key / Platform Token, stored in Keychain + file cache) and silent auto-resolution of the signed-in DeepSeek Platform session from Chrome local storage when no key is configured.
 - Added per-provider show/hide toggles in each provider's settings pane; hidden providers leave the switcher and stop background refresh.
 - Added CodexBar-style menu-bar display modes: meter bar, bar + percent, percent only, logo only, logo + percent, and logo + bar, with provider brand icons (doubao/opencode/deepseek/apinebula) shipped as resources.
 - Provider brand logos now also appear in the settings sidebar and menu switcher buttons.
-- Keychain items use a wildcard ACL (no signature/path binding) with automatic migration from legacy entries, so ad-hoc re-signed builds never prompt for the login password on launch.
-- Browser-session import (OpenCode) is now an explicit settings action only; background/startup refreshes never decrypt browser cookie stores or prompt for Keychain passwords.
+- Browser-session import (OpenCode / APINebula) is an explicit settings action only; background/startup refreshes never decrypt browser cookie stores or prompt for Keychain passwords.
 - Added an OpenCode Go tab backed by authoritative subscription-page data, with explicit browser-session import or a manual Keychain-stored Cookie.
 - Isolated Ark and OpenCode refresh, error, stale-data, and last-updated state so one provider cannot overwrite the other.
 - Prevented background and ordinary refreshes from repeatedly reading browser cookie stores or triggering recurring Keychain password prompts.

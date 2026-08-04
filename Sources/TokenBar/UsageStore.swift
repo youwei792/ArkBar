@@ -35,13 +35,62 @@ final class UsageStore: ObservableObject {
     @Published private(set) var deepseekIsRefreshing = false
     @Published private(set) var nebulaIsRefreshing = false
 
-    /// Compatibility conveniences for views that only need the selected tab.
+    /// Convenience for the status item: in summary mode, pick the tightest
+    /// (lowest remaining percent) provider.
     var status: LoadStatus { currentStatus }
     var lastUpdatedAt: Date? { currentLastUpdatedAt }
     var isRefreshing: Bool { currentIsRefreshing }
-    var currentStatus: LoadStatus { status(for: settings.selectedTab) }
-    var currentLastUpdatedAt: Date? { lastUpdatedAt(for: settings.selectedTab) }
-    var currentIsRefreshing: Bool { isRefreshing(for: settings.selectedTab) }
+    var currentStatus: LoadStatus {
+        if case let .provider(tab) = settings.selectedMenu {
+            return status(for: tab)
+        }
+        return tightestStatus
+    }
+    var currentLastUpdatedAt: Date? {
+        if case let .provider(tab) = settings.selectedMenu {
+            return lastUpdatedAt(for: tab)
+        }
+        return tightestLastUpdatedAt
+    }
+    var currentIsRefreshing: Bool {
+        if case let .provider(tab) = settings.selectedMenu {
+            return isRefreshing(for: tab)
+        }
+        return settings.visibleTabs.contains { isRefreshing(for: $0) }
+    }
+
+    /// All statuses, keyed by provider tab, for the summary view.
+    var allStatuses: [ProviderTab: LoadStatus] {
+        [.ark: arkStatus, .opencode: opencodeStatus,
+         .deepseek: deepseekStatus, .nebula: nebulaStatus]
+    }
+
+    /// The "tightest" (lowest remaining percent, most urgent) provider.
+    /// Used to drive the status-item icon when in summary mode.
+    private var tightestStatus: LoadStatus {
+        let candidates = settings.visibleTabs.compactMap { tab -> (ProviderTab, LoadStatus)? in
+            let s = status(for: tab)
+            guard s.snapshot != nil else { return nil }
+            return (tab, s)
+        }
+        if let first = candidates.min(by: { a, b in
+            let pa = a.1.snapshot?.sessionWindow?.remainingPercent ?? 100
+            let pb = b.1.snapshot?.sessionWindow?.remainingPercent ?? 100
+            return pa < pb
+        }) {
+            return first.1
+        }
+        // Fallback: first with any data, or .never
+        return settings.visibleTabs
+            .map { status(for: $0) }
+            .first { $0 != .never } ?? .never
+    }
+
+    private var tightestLastUpdatedAt: Date? {
+        settings.visibleTabs
+            .compactMap { lastUpdatedAt(for: $0) }
+            .max()
+    }
 
     private let settings: AppSettings
     private var arkProviders: [UsageProvider] = []
@@ -83,29 +132,29 @@ final class UsageStore: ObservableObject {
             .debounce(for: .milliseconds(350), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.refresh(tab: .opencode) }
             .store(in: &cancellables)
-        // Saving a DeepSeek key in settings refreshes immediately.
         Publishers.MergeMany(
             settings.$deepseekApiKey.map { _ in },
             settings.$deepseekPlatformToken.map { _ in })
             .dropFirst()
             .sink { [weak self] _ in self?.refresh(tab: .deepseek) }
             .store(in: &cancellables)
-        // Saving the Nebula key or base URL refreshes immediately.
         Publishers.MergeMany(
             settings.$nebulaAPIKey.map { _ in },
             settings.$nebulaBaseURL.map { _ in })
             .dropFirst()
             .sink { [weak self] _ in self?.refresh(tab: .nebula) }
             .store(in: &cancellables)
-        settings.$selectedTab
+        // When the selection switches to a provider with no data, refresh it.
+        settings.$selectedMenu
             .dropFirst()
-            .sink { [weak self] tab in
-                guard let self, self.status(for: tab) == .never else { return }
-                self.refresh(tab: tab)
+            .sink { [weak self] menu in
+                guard let self else { return }
+                if case let .provider(tab) = menu, self.status(for: tab) == .never {
+                    self.refresh(tab: tab)
+                }
             }
             .store(in: &cancellables)
-        // Re-enabling a hidden provider fetches it immediately; hiding one stops
-        // its background refreshes (refreshAllConfigured filters visible tabs).
+        // Re-enabling a hidden provider fetches it immediately.
         for tab in ProviderTab.allCases {
             let publisher: AnyPublisher<Bool, Never>
             switch tab {
@@ -125,9 +174,7 @@ final class UsageStore: ObservableObject {
         }
     }
 
-    /// Rebuild the Ark provider priority. OpenCode is a distinct provider, not
-    /// a fallback candidate, because its account data must never be merged with
-    /// Ark usage.
+    /// Rebuild the Ark provider priority.
     func rebuildProviders() {
         let environment = ProcessInfo.processInfo.environment
         var providers: [UsageProvider] = []
@@ -161,11 +208,12 @@ final class UsageStore: ObservableObject {
         scheduleNext()
     }
 
-    /// Refresh the currently visible provider. Manual Refresh and the optional
-    /// “refresh when opening” setting both use this path, so the UI feedback is
-    /// always scoped to the card the user is looking at.
     func refresh() {
-        refresh(tab: settings.selectedTab)
+        if case let .provider(tab) = settings.selectedMenu {
+            refresh(tab: tab)
+        } else {
+            refreshAllConfigured()
+        }
     }
 
     func refresh(tab: ProviderTab) {
@@ -177,8 +225,6 @@ final class UsageStore: ObservableObject {
         }
     }
 
-    /// The only path allowed to interactively read the browser cookie store.
-    /// Routine refreshes only use the cached TokenBar Keychain credential.
     func reimportOpenCodeBrowserSession() {
         guard !opencodeIsRefreshing else { return }
         guard let provider = openCodeProvider,
@@ -192,10 +238,8 @@ final class UsageStore: ObservableObject {
 
         opencodeIsRefreshing = true
         switch opencodeStatus {
-        case .ok, .stale:
-            break
-        case .never, .loading, .error:
-            opencodeStatus = .loading
+        case .ok, .stale: break
+        case .never, .loading, .error: opencodeStatus = .loading
         }
 
         let environment = ProcessInfo.processInfo.environment
@@ -214,8 +258,6 @@ final class UsageStore: ObservableObject {
         }
     }
 
-    /// Explicit user action only: import Nebula console login cookies from the
-    /// browser, then refresh balance/log endpoints with the cached session.
     func reimportNebulaBrowserSession() {
         guard !nebulaIsRefreshing else { return }
         guard let provider = nebulaProvider else {
@@ -227,10 +269,8 @@ final class UsageStore: ObservableObject {
 
         nebulaIsRefreshing = true
         switch nebulaStatus {
-        case .ok, .stale:
-            break
-        case .never, .loading, .error:
-            nebulaStatus = .loading
+        case .ok, .stale: break
+        case .never, .loading, .error: nebulaStatus = .loading
         }
 
         let environment = ProcessInfo.processInfo.environment
@@ -259,10 +299,8 @@ final class UsageStore: ObservableObject {
         guard !arkIsRefreshing else { return }
         arkIsRefreshing = true
         switch arkStatus {
-        case .ok, .stale:
-            break // retain usable data while the request is in flight
-        case .never, .loading, .error:
-            arkStatus = .loading
+        case .ok, .stale: break
+        case .never, .loading, .error: arkStatus = .loading
         }
         let providers = arkProviders
         let environment = ProcessInfo.processInfo.environment
@@ -283,10 +321,8 @@ final class UsageStore: ObservableObject {
         }
         opencodeIsRefreshing = true
         switch opencodeStatus {
-        case .ok, .stale:
-            break
-        case .never, .loading, .error:
-            opencodeStatus = .loading
+        case .ok, .stale: break
+        case .never, .loading, .error: opencodeStatus = .loading
         }
         let environment = ProcessInfo.processInfo.environment
         Task { [weak self] in
@@ -321,7 +357,6 @@ final class UsageStore: ObservableObject {
     }
 
     private func runOpenCodeProvider(_ provider: OpenCodeGoProvider, environment: [String: String]) async {
-        // First attempt: try with the cached credential (fast, no prompt).
         do {
             let snapshot = try await provider.fetch(environment: environment)
             Self.log("✓ \(provider.displayName): \(snapshot.plans.count) plan(s)")
@@ -331,10 +366,6 @@ final class UsageStore: ObservableObject {
             finishOpenCodeRefresh()
             return
         } catch let UsageError.openCodeBrowserSessionMissing(detail) {
-            // No cached credential. Browser import is an explicit settings
-            // action only: routine/startup refreshes must never decrypt the
-            // browser cookie store, because that always prompts for the Chrome
-            // Keychain password on ad-hoc signed builds.
             Self.log("→ OpenCode Go: no cached session, skipping auto import (\(detail))")
             finishOpenCodeRefresh(error: L(.errorOpenCodeBrowserAuthorizationRequired))
             return
@@ -383,10 +414,8 @@ final class UsageStore: ObservableObject {
         }
         deepseekIsRefreshing = true
         switch deepseekStatus {
-        case .ok, .stale:
-            break // retain usable data while the request is in flight
-        case .never, .loading, .error:
-            deepseekStatus = .loading
+        case .ok, .stale: break
+        case .never, .loading, .error: deepseekStatus = .loading
         }
         let environment = ProcessInfo.processInfo.environment
         Task { [weak self] in
@@ -427,10 +456,8 @@ final class UsageStore: ObservableObject {
         guard let provider = nebulaProvider else { return }
         nebulaIsRefreshing = true
         switch nebulaStatus {
-        case .ok, .stale:
-            break // retain usable data while the request is in flight
-        case .never, .loading, .error:
-            nebulaStatus = .loading
+        case .ok, .stale: break
+        case .never, .loading, .error: nebulaStatus = .loading
         }
         let environment = ProcessInfo.processInfo.environment
         Task { [weak self] in
@@ -499,8 +526,6 @@ final class UsageStore: ObservableObject {
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.refreshAllConfigured() }
         }
-        // Menu tracking uses a different run-loop mode. Common modes keep the
-        // configured cadence alive while the popover is open.
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }
