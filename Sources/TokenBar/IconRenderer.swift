@@ -29,7 +29,7 @@ enum IconRenderer {
     static func makeLogoIcon(tab: ProviderTab) -> NSImage {
         let image = NSImage(size: outputSize, flipped: false) { rect in
             if let logo = ProviderLogo.image(for: tab) {
-                let side: CGFloat = 16
+                let side: CGFloat = 14
                 logo.draw(
                     in: NSRect(x: rect.midX - side / 2, y: rect.midY - side / 2,
                                width: side, height: side),
@@ -46,16 +46,16 @@ enum IconRenderer {
     /// Logo on the left plus a compact meter capsule on the right, in one
     /// template image so the whole glyph adopts the menu-bar foreground tint.
     static func makeLogoAndBarIcon(tab: ProviderTab, remainingPercent: Double?, stale: Bool) -> NSImage {
-        let size = NSSize(width: 30, height: 18)
+        let size = NSSize(width: 28, height: 18)
         let image = NSImage(size: size, flipped: false) { rect in
             if let logo = ProviderLogo.image(for: tab) {
                 logo.draw(
-                    in: NSRect(x: 0.5, y: 2.5, width: 13, height: 13),
+                    in: NSRect(x: 1, y: 2.5, width: 13, height: 13),
                     from: .zero,
                     operation: .sourceOver,
                     fraction: 1)
             }
-            Self.drawBar(remainingPercent: remainingPercent, stale: stale, in: NSRect(x: 15, y: 0, width: 15, height: 18))
+            Self.drawBar(remainingPercent: remainingPercent, stale: stale, in: NSRect(x: 14, y: 0, width: 14, height: 18))
             return true
         }
         image.isTemplate = true

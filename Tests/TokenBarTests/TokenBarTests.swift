@@ -412,7 +412,7 @@ struct IconRendererTests {
         #expect(logo.isTemplate == true)
         let combo = IconRenderer.makeLogoAndBarIcon(tab: .deepseek, remainingPercent: 73, stale: false)
         #expect(combo.isTemplate == true)
-        #expect(combo.size.width == 30)
+        #expect(combo.size.width == 28)
     }
 
     @Test("Writes menu-bar style strip for visual inspection")

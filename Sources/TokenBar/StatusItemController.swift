@@ -126,10 +126,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             .sink { [weak self] tab in
                 guard let self else { return }
                 let status = self.store.status(for: tab)
-                // Changing the status-item title from e.g. 60% to 100% changes
-                // its natural width. The item itself has a fixed maximum width,
-                // so the value can update live without moving the menu anchor.
-                self.updateIcon(for: status)
+                // `@Published` sends before the setting is committed, so
+                // `settings.selectedTab` still holds the previous tab here.
+                // Pass the emitted tab explicitly or the status-item logo would
+                // show the old provider while the percent already switched.
+                self.updateIcon(for: status, tab: tab)
                 self.updateActiveRefreshView(
                     isRefreshing: self.store.isRefreshing(for: tab),
                     lastUpdatedAt: self.store.lastUpdatedAt(for: tab),
@@ -188,7 +189,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         statusItem.length = Self.statusItemLength(for: settings.displayMode)
     }
 
-    private func updateIcon(for loadStatus: UsageStore.LoadStatus? = nil) {
+    private func updateIcon(for loadStatus: UsageStore.LoadStatus? = nil, tab explicitTab: ProviderTab? = nil) {
         let remaining: Double?
         let stale: Bool
         switch loadStatus ?? store.currentStatus {
@@ -211,7 +212,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             }
         }
         guard let button = statusItem.button else { return }
-        let tab = settings.selectedTab
+        // Prefer the explicit tab: settings.selectedTab may lag behind @Published.
+        let tab = explicitTab ?? settings.selectedTab
 
         switch settings.displayMode {
         case .iconOnly:
@@ -220,16 +222,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         case .iconAndPercent:
             button.image = IconRenderer.makeBarIcon(remainingPercent: remaining, stale: stale)
             if let remaining, !stale {
-                button.title = "\(Int(remaining.rounded()))%"
+                setPercentTitle("\(Int(remaining.rounded()))%", on: button)
             } else {
-                button.title = "–"
+                setPercentTitle("–", on: button)
             }
         case .percentOnly:
             button.image = nil
             if let remaining, !stale {
-                button.title = "\(Int(remaining.rounded()))%"
+                setPercentTitle("\(Int(remaining.rounded()))%", on: button)
             } else {
-                button.title = "–"
+                setPercentTitle("–", on: button)
             }
         case .logoOnly:
             button.image = IconRenderer.makeLogoIcon(tab: tab)
@@ -237,15 +239,26 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         case .logoAndPercent:
             button.image = IconRenderer.makeLogoIcon(tab: tab)
             if let remaining, !stale {
-                button.title = "\(Int(remaining.rounded()))%"
+                setPercentTitle("\(Int(remaining.rounded()))%", on: button)
             } else {
-                button.title = "–"
+                setPercentTitle("–", on: button)
             }
         case .logoAndBar:
             button.image = IconRenderer.makeLogoAndBarIcon(
                 tab: tab, remainingPercent: remaining, stale: stale)
             button.title = ""
         }
+    }
+
+    /// Compact monospaced percent text, matching CodexBar's tight status-item
+    /// typography rather than the larger default control font.
+    private func setPercentTitle(_ text: String, on button: NSStatusBarButton) {
+        button.attributedTitle = NSAttributedString(
+            string: text,
+            attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
+                .foregroundColor: NSColor.labelColor,
+            ])
     }
 
     func menuWillOpen(_ menu: NSMenu) {

@@ -1,10 +1,11 @@
 import AppKit
 
 /// Lazy-loaded provider brand icons, copied from CodexBar's resources.
-/// Rendered as 16×16 template images so they adopt the menu's foreground tint.
+/// Rendered as 14×14 template images (CodexBar draws its 16pt glyphs with
+/// internal padding, so 14pt reads visually equivalent and slimmer).
 @MainActor
 enum ProviderLogo {
-    private static let size = NSSize(width: 16, height: 16)
+    private static let size = NSSize(width: 14, height: 14)
     private static var cache: [ProviderTab: NSImage] = [:]
 
     static func image(for tab: ProviderTab) -> NSImage? {
