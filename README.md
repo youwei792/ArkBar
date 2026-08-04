@@ -2,7 +2,7 @@
 
 [English](README.en.md) · [安全报告](SECURITY.md) · [更新日志](CHANGELOG.md)
 
-TokenBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding/Agent Plan、OpenCode Go 与 DeepSeek 的剩余用量；不会显示 Dock 图标。
+TokenBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding/Agent Plan、OpenCode Go、DeepSeek 与 APINebula 中转站的剩余用量；不会显示 Dock 图标。
 
 ## 特性
 
@@ -12,11 +12,13 @@ TokenBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding
 - 支持自动选择、`arkcli` SSO、Volcengine AK/SK 和 Ark API Key。
 - DeepSeek 监控（余额、今日/每月费用、Token 用量、请求次数、缓存命中/未命中/输出分类），余额圆环 = 本月已用 ÷ (本月已用 + 余额)，充值后随刷新自动更新。
 - DeepSeek 凭据支持三种来源：设置页填写（存入 Keychain）、环境变量，以及**自动读取 Chrome 中已登录的 DeepSeek 平台会话**（无需任何 Key）。
-- 支持在 Ark、OpenCode Go 与 DeepSeek 之间即时切换，并隔离各边的刷新状态与错误。
+- APINebula（new-api 中转站）监控：余额圆环 = 累计已用 ÷ (累计已用 + 余额)，今日/每月费用、Token、请求次数，以及**缓存读/未缓存/输出**分类（来自控制台使用日志）。
+- APINebula 余额与日志是控制台接口：凭据来自浏览器登录会话（设置页显式导入并缓存到 Keychain），可选 API Key 兜底。
+- 支持在 Ark、OpenCode Go、DeepSeek 与 APINebula 之间即时切换，并隔离各边的刷新状态与错误。
 - 每个 Provider 可在自己的设置页中独立**显示/隐藏**，隐藏后从切换器移除并停止后台刷新。
 - 菜单栏样式可选：进度条、进度条 + 百分比、仅百分比、仅 Logo、Logo + 百分比、Logo + 进度条。
 - 支持跟随系统、简体中文和 English。
-- 不含遥测；OpenCode 自动接入只在用户明确操作时读取认证 Cookie，并将过滤后的认证项保存在本机 Keychain。
+- 不含遥测；OpenCode/APINebula 浏览器接入只在用户明确操作时读取认证 Cookie，并将过滤后的认证项保存在本机 Keychain。
 
 ## 快速开始
 
@@ -66,6 +68,7 @@ lipo -archs TokenBar
 | Ark API Key | `ARK_API_KEY`；可选 `ARK_MODEL_ID` | 仅单个请求限额窗口。探测会发送最小 API 请求，可能消耗请求额度。 |
 | OpenCode Go | 在“设置 → OpenCode Go”中明确点击“重新读取浏览器登录”，或选择手动 Cookie | 从 `opencode.ai` 的订阅页面读取其返回的套餐用量；不会用本地消费记录估算余额。 |
 | DeepSeek | 三选一：设置页填写 API Key / Platform Token（存 Keychain）、环境变量 `DEEPSEEK_API_KEY` / `DEEPSEEK_PLATFORM_TOKEN`，或让 Chrome 登录 platform.deepseek.com 后自动读取 | 余额来自 `api.deepseek.com/user/balance`（或平台钱包）；今日/每月费用、Token、请求次数与分类明细来自平台 `usage/amount` + `usage/cost`。凭据优先级：设置值 > 环境变量 > Chrome 会话。 |
+| APINebula（中转站） | 在“设置 → APINebula 中转”中显式点击“重新读取浏览器登录”（控制台会话缓存到 Keychain）；可选填 API Key | 余额/累计已用来自控制台 `api/user/self`；今日/每月费用、Token、请求次数与缓存读/未缓存/输出分类来自 `api/log/self` 使用日志（缓存 token 位于日志 `other` 字段）。余额与日志是控制台接口，API Key 仅保证 `/v1` 模型调用。 |
 
 Ark CLI 的最新安装方式请以官方 [Ark CLI 文档](https://github.com/volcengine/ark-cli) 为准。
 
@@ -84,6 +87,7 @@ export VOLCENGINE_SECRET_ACCESS_KEY='...'
 - 圆环中心显示会话（或 5 小时）剩余量；每一圈也按自己的**剩余**量填充，因此 100% 会显示为满环。
 - 圆环右侧依次为会话、每周、每月剩余量；每项配有自身的重置倒计时。
 - DeepSeek 标签页使用单个余额圆环：已用比例 = 本月费用 ÷ (本月费用 + 余额)，充值后余额增加，圆环在下次刷新时自动重算；圆环下方显示缓存命中/未命中/输出分类明细与常用模型。
+- APINebula 标签页使用单个余额圆环：已用比例 = 累计已用 ÷ (累计已用 + 余额)；圆环下方显示缓存读/未缓存/输出分类明细与常用模型。
 - 刷新失败时会保留上次确认的数据，并标记为过期数据。
 - 默认仅按“设置 → 刷新 → 间隔”自动同步；可开启“点开菜单栏图标时刷新”，在每次打开角标时额外刷新。重复触发会合并为一次请求。
 - 手动“刷新”会保留面板，在原位置显示“刷新中”；成功后显示“刚刚更新 / X 分钟前更新”，失败时显示原因。
@@ -99,6 +103,8 @@ export VOLCENGINE_SECRET_ACCESS_KEY='...'
 - TokenBar 只保留 `auth` / `__Host-auth` 认证项，并存入本机 macOS Keychain；常规启动、定时刷新和手动刷新只使用这份缓存，不会反复读取浏览器。
 - 手动粘贴的 OpenCode Cookie 同样只保存在本机 Keychain，不会写入 UserDefaults、源码或日志。
 - DeepSeek 自动接入会在没有 Keychain/环境变量凭据时静默读取 Chrome 中 `platform.deepseek.com` 的 `userToken`（浏览器 localStorage 明文条目），仅用于调用 DeepSeek 平台接口；TokenBar 不会把它写入磁盘。结果按浏览器来源标签在设置页展示。
+- APINebula 浏览器接入只在用户点击“重新读取浏览器登录”后读取 `apinebula.ai` 控制台的会话 Cookie（及 localStorage 中的账户 ID），仅用于调用余额/日志接口；会话与 Keychain 中其他凭据一样使用不绑定签名的访问控制，重装后不会弹出钥匙串授权框。
+- 浏览器会话导入（OpenCode/APINebula）是显式设置操作；后台与启动刷新永不读取浏览器 cookie 库，也不会触发钥匙串密码框。
 - 在 DeepSeek 设置页填写的 API Key / Platform Token 只保存在本机 Keychain，不会写入 UserDefaults、源码或日志。
 - `arkcli` 自己管理 SSO 会话；TokenBar 只运行 `arkcli usage plan --format json` 并解析输出。
 - AK/SK 与 Ark API Key 仅从启动环境读取，TokenBar 不会把它们写入磁盘。
@@ -115,7 +121,7 @@ swift test
 ## 目录结构
 
 ```text
-Sources/TokenBar/          应用源码（含 DeepSeekProvider、DeepSeekBrowserSession、DeepSeekCardView、ProviderLogo 与 Resources/provider 图标）
+Sources/TokenBar/          应用源码（含 DeepSeek/APINebula Provider、浏览器会话导入、单环卡片、ProviderLogo 与 Resources/provider 图标）
 Scripts/package_app.sh   本地 Apple Silicon 打包脚本
 Tests/TokenBarTests/       解码与视觉回归测试
 ```
