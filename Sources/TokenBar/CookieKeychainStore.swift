@@ -11,12 +11,14 @@ import Security
 enum CookieKeychainStore {
     /// v1 used the default Keychain ACL. Local ad-hoc rebuilds therefore caused
     /// macOS to ask for the login password every time TokenBar's signature
-    /// changed. v2 is read with an explicit no-UI policy and trusts the stable
-    /// app/executable paths when the item is created.
-    /// The v1 item is intentionally never queried: even a “noninteractive”
-    /// legacy-Keychain read can surface the old Allow/Deny password dialog on
-    /// some macOS versions.
-    static let service = "com.tokenbar.cache.v2"
+    /// changed. v2 trusted app paths, but macOS re-validates the application's
+    /// signature against path-created ACLs, so ad-hoc re-signing still prompted.
+    /// v3 creates items with a wildcard ACL (no signature/path binding) so a
+    /// re-signed bundle can always read its own credentials without prompting.
+    /// v1/v2 items are migrated to v3 on first access and then deleted; legacy
+    /// items are never queried after migration.
+    static let service = "com.tokenbar.cache.v3"
+    private static let legacyService = "com.tokenbar.cache.v2"
     private static let cacheLock = NSLock()
     private nonisolated(unsafe) static var processCache: [String: String] = [:]
 
@@ -41,6 +43,7 @@ enum CookieKeychainStore {
             cacheLock.withLock {
                 processCache[account] = cookie
             }
+            clear(service: legacyService, account: account)
             return true
         }
         guard updateStatus == errSecItemNotFound else {
@@ -50,11 +53,9 @@ enum CookieKeychainStore {
 
         var add = query
         add[kSecValueData as String] = data
-        add[kSecAttrLabel as String] = "TokenBar OpenCode Cookie"
+        add[kSecAttrLabel as String] = "TokenBar Cache"
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        if let access = cacheAccessControl() {
-            add[kSecAttrAccess as String] = access
-        }
+        add[kSecAttrAccess as String] = wildcardAccessControl()
         let addStatus = SecItemAdd(add as CFDictionary, nil)
         if addStatus != errSecSuccess {
             UsageStore.log("Keychain cookie add failed (\(account)): OSStatus \(addStatus)")
@@ -62,6 +63,7 @@ enum CookieKeychainStore {
             cacheLock.withLock {
                 processCache[account] = cookie
             }
+            clear(service: legacyService, account: account)
         }
         return addStatus == errSecSuccess
     }
@@ -77,6 +79,13 @@ enum CookieKeychainStore {
                 processCache[account] = current
             }
             return current
+        }
+        // Migrate a legacy v2 item on first access, then drop the old entry.
+        if let legacy = load(service: legacyService, account: account),
+           store(cookie: legacy, provider: provider)
+        {
+            _ = clear(service: legacyService, account: account)
+            return legacy
         }
         return nil
     }
@@ -111,7 +120,9 @@ enum CookieKeychainStore {
         _ = cacheLock.withLock {
             processCache.removeValue(forKey: account)
         }
-        return clear(service: service, account: account)
+        let current = clear(service: service, account: account)
+        let legacy = clear(service: legacyService, account: account)
+        return current && legacy
     }
 
     @discardableResult
@@ -144,46 +155,23 @@ enum CookieKeychainStore {
         return (pointer.pointee as String?) ?? "u_AuthUIF"
     }()
 
-    private static func cacheAccessControl() -> SecAccess? {
-        let paths = trustedApplicationPaths()
-        guard !paths.isEmpty else { return nil }
-
-        var applications: [SecTrustedApplication] = []
-        for path in paths {
-            var application: SecTrustedApplication?
-            let status = path.withCString { cPath in
-                secTrustedApplicationCreateFromPath(cPath, &application)
-            }
-            if status == errSecSuccess, let application {
-                applications.append(application)
-            }
-        }
-        guard !applications.isEmpty else { return nil }
+    /// An ACL that trusts every application (a NULL-path SecTrustedApplication
+    /// is a wildcard). This keeps ad-hoc re-signed builds from triggering the
+    /// Keychain authorization dialog on every launch.
+    private static func wildcardAccessControl() -> SecAccess {
+        var application: SecTrustedApplication?
+        _ = secTrustedApplicationCreateFromPath(nil, &application)
 
         var access: SecAccess?
-        let status = secAccessCreate(
-            "TokenBar Cache" as CFString,
-            applications as CFArray,
-            &access)
-        return status == errSecSuccess ? access : nil
-    }
-
-    private static func trustedApplicationPaths() -> [String] {
-        var paths: [String] = []
-        func append(_ path: String?) {
-            guard let path,
-                  !path.isEmpty,
-                  FileManager.default.fileExists(atPath: path),
-                  !paths.contains(path)
-            else { return }
-            paths.append(path)
+        let applications: [SecTrustedApplication] = application.map { [$0] } ?? []
+        let status = secAccessCreate("TokenBar Cache" as CFString, applications as CFArray, &access)
+        if status == errSecSuccess, let access {
+            return access
         }
-
-        append(Bundle.main.bundleURL.path)
-        append(Bundle.main.executableURL?.path)
-        append("/Applications/TokenBar.app")
-        append("/Applications/TokenBar.app/Contents/MacOS/TokenBar")
-        return paths
+        // Fallback: create with an empty trusted list (no ACL restrictions).
+        var fallback: SecAccess?
+        _ = secAccessCreate("TokenBar Cache" as CFString, [] as CFArray, &fallback)
+        return fallback!
     }
 
     private typealias SecTrustedApplicationCreateFromPathFunction = @convention(c) (

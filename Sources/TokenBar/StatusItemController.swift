@@ -177,9 +177,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     static func statusItemLength(for displayMode: AppSettings.DisplayMode) -> CGFloat {
         switch displayMode {
-        case .iconOnly, .logoOnly: 28
-        case .iconAndPercent, .logoAndPercent, .logoAndBar: 68
-        case .percentOnly: 46
+        case .iconOnly, .logoOnly: 24
+        case .iconAndPercent, .logoAndPercent: 58
+        case .logoAndBar: 46
+        case .percentOnly: 40
         }
     }
 

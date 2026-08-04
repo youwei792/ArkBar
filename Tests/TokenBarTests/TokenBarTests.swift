@@ -319,9 +319,12 @@ struct MenuBuilderTests {
     @Test("Provider switching uses a fixed-width live status-item anchor")
     @MainActor
     func providerSwitchKeepsStatusItemAnchor() {
-        #expect(StatusItemController.statusItemLength(for: .iconOnly) == 28)
-        #expect(StatusItemController.statusItemLength(for: .iconAndPercent) == 68)
-        #expect(StatusItemController.statusItemLength(for: .percentOnly) == 46)
+        #expect(StatusItemController.statusItemLength(for: .iconOnly) == 24)
+        #expect(StatusItemController.statusItemLength(for: .iconAndPercent) == 58)
+        #expect(StatusItemController.statusItemLength(for: .percentOnly) == 40)
+        #expect(StatusItemController.statusItemLength(for: .logoOnly) == 24)
+        #expect(StatusItemController.statusItemLength(for: .logoAndPercent) == 58)
+        #expect(StatusItemController.statusItemLength(for: .logoAndBar) == 46)
     }
 
     @Test("Clicking OpenCode immediately replaces Ark content in the same menu")
