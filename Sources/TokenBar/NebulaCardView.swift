@@ -20,7 +20,8 @@ final class NebulaCardView: NSView {
             todayCost: nil, currentMonthCost: nil,
             todayTokens: 0, currentMonthTokens: 0,
             requestCount: 0, currentMonthRequestCount: 0,
-            topModel: nil, usageAvailable: false)
+            topModel: nil, promptTokens: 0, completionTokens: 0,
+            usageAvailable: false)
         self.now = now
         let height = Self.computeHeight()
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: height))
@@ -141,6 +142,21 @@ final class NebulaCardView: NSView {
             }
         }
 
+        // Below the ring: input/output token split (this month) and top model.
+        if summary.usageAvailable {
+            let tokensField = label(
+                String(format: L(.nebulaTokenDetail),
+                       Self.compactTokens(summary.promptTokens),
+                       Self.compactTokens(summary.completionTokens)),
+                font: .systemFont(ofSize: 10),
+                color: .secondaryLabelColor)
+            tokensField.lineBreakMode = .byTruncatingTail
+            tokensField.toolTip = tokensField.stringValue
+            tokensField.frame = NSRect(x: horizontalPadding, y: y - ringSize - 15,
+                                       width: bounds.width - horizontalPadding * 2, height: 13)
+            addSubview(tokensField)
+        }
+
         if let topModel = summary.topModel, !topModel.isEmpty {
             let modelField = label(
                 String(format: L(.deepseekTopModel), topModel),
@@ -155,6 +171,10 @@ final class NebulaCardView: NSView {
     }
 
     // MARK: - Formatting (static for tests)
+
+    static func compactTokens(_ count: Int) -> String {
+        DeepSeekCardView.compactTokens(count)
+    }
 
     static func money(_ amount: Double, symbol: String) -> String {
         String(format: "%@%.2f", symbol, amount)

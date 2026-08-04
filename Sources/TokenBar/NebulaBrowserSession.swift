@@ -2,14 +2,17 @@ import AppKit
 import Foundation
 import SweetCookieKit
 
-/// Imports the Nebula console login cookie from an existing browser session.
+/// Imports the Nebula console login session from an existing browser session.
 ///
 /// Official docs only document model-call credentials (`/v1` + API key). Balance
-/// and usage-log endpoints (`/api/user/self`, `/api/log/self`) are console APIs
-/// and typically require the browser session cookie, not the model token.
+/// and usage-log endpoints (`/api/user/self`, `/api/log/self`) are console APIs.
+/// new-api consoles authenticate with a `session` cookie **plus** a
+/// `New-Api-User: <user id>` header; the user id is stored in the site's
+/// localStorage, so both are imported together.
 enum NebulaBrowserSession {
     struct Session: Sendable, Equatable {
         let cookieHeader: String
+        let userId: String?
         let sourceLabel: String
     }
 
@@ -30,6 +33,7 @@ enum NebulaBrowserSession {
     private static let cachedCredentialAccount = "nebula-browser"
     private static let sourceLabelKey = "tokenbar.nebulaBrowserSourceLabel"
     private static let browserKey = "tokenbar.nebulaBrowser"
+    private static let userIdKey = "tokenbar.nebulaUserId"
     private static let client = BrowserCookieClient()
     private static let query = BrowserCookieQuery(domains: [
         "apinebula.ai",
@@ -51,7 +55,8 @@ enum NebulaBrowserSession {
             return nil
         }
         let source = UserDefaults.standard.string(forKey: sourceLabelKey) ?? L(.browserSession)
-        return Session(cookieHeader: header, sourceLabel: source)
+        let userId = UserDefaults.standard.string(forKey: userIdKey)
+        return Session(cookieHeader: header, userId: userId, sourceLabel: source)
     }
 
     static func cachedSourceLabel() -> String? {
@@ -101,7 +106,10 @@ enum NebulaBrowserSession {
                 guard let header = Self.requestCookieHeader(from: rawHeader) else {
                     continue
                 }
-                let session = Session(cookieHeader: header, sourceLabel: source.label)
+                // The console's New-Api-User header needs the account id, which
+                // new-api keeps in the site's localStorage (plaintext).
+                let userId = Self.resolveUserId(browser: browser, sourceLabel: source.label)
+                let session = Session(cookieHeader: header, userId: userId, sourceLabel: source.label)
                 cache(session, browser: browser)
                 return session
             }
@@ -116,6 +124,69 @@ enum NebulaBrowserSession {
         CookieKeychainStore.clear(provider: cachedCredentialAccount)
         UserDefaults.standard.removeObject(forKey: sourceLabelKey)
         UserDefaults.standard.removeObject(forKey: browserKey)
+        UserDefaults.standard.removeObject(forKey: userIdKey)
+    }
+
+    /// Reads the console account id from the browser's localStorage for the
+    /// matching profile (localStorage is plaintext; no Keychain prompt).
+    private static func resolveUserId(browser: Browser, sourceLabel: String) -> String? {
+        let roots = ChromiumProfileLocator.roots(
+            for: [browser],
+            homeDirectories: BrowserCookieClient.defaultHomeDirectories())
+        for root in roots {
+            guard let directories = try? FileManager.default.contentsOfDirectory(
+                at: root.url,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles])
+            else { continue }
+            for directory in directories {
+                guard let isDirectory = try? directory.resourceValues(forKeys: [.isDirectoryKey]).isDirectory,
+                      isDirectory
+                else { continue }
+                let name = directory.lastPathComponent
+                guard name == "Default" || name.hasPrefix("Profile ") || name.hasPrefix("user-") else { continue }
+                let levelDB = directory.appendingPathComponent("Local Storage").appendingPathComponent("leveldb")
+                guard FileManager.default.fileExists(atPath: levelDB.path) else { continue }
+                let entries = ChromiumLocalStorageReader.readEntries(
+                    for: "https://apinebula.ai",
+                    in: levelDB,
+                    logger: nil)
+                if let userId = userID(from: entries) {
+                    UsageStore.log("Nebula console user id resolved (\(sourceLabel))")
+                    return userId
+                }
+            }
+        }
+        UsageStore.log("Nebula console user id not found in localStorage")
+        return nil
+    }
+
+    /// new-api's console stores the account id either as `user_id` in
+    /// localStorage or inside a JSON auth bundle (`user.id`).
+    static func userID(from entries: [ChromiumLocalStorageEntry]) -> String? {
+        for entry in entries where entry.key == "user_id" {
+            let value = entry.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty, value.allSatisfy(\.isNumber) {
+                return value
+            }
+        }
+        for entry in entries {
+            guard let data = entry.value.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data)
+            else { continue }
+            if let dict = object as? [String: Any] {
+                if let user = dict["user"] as? [String: Any],
+                   let id = user["id"] as? Int,
+                   id > 0
+                {
+                    return String(id)
+                }
+                if let id = dict["id"] as? Int, id > 0, dict["username"] != nil {
+                    return String(id)
+                }
+            }
+        }
+        return nil
     }
 
     /// Keep session-related cookies only. new-api commonly uses `session`.
@@ -151,6 +222,11 @@ enum NebulaBrowserSession {
         }
         UserDefaults.standard.set(session.sourceLabel, forKey: sourceLabelKey)
         UserDefaults.standard.set(browser.rawValue, forKey: browserKey)
+        if let userId = session.userId {
+            UserDefaults.standard.set(userId, forKey: userIdKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: userIdKey)
+        }
     }
 
     private static func browser(forApplicationURL url: URL) -> Browser? {

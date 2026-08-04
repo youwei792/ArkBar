@@ -1203,6 +1203,9 @@ struct NebulaProviderTests {
         #expect(abs((stats.currentMonthCost ?? 0) - 0.20) < 0.0001)
         // Top model by month tokens: gpt-4o (900) vs deepseek-chat (1350) -> deepseek-chat.
         #expect(stats.topModel == "deepseek-chat")
+        // Input/output split for the month: prompt 600+900, completion 300+450.
+        #expect(stats.promptTokens == 1500)
+        #expect(stats.completionTokens == 750)
     }
 
     @Test("Ring used percent = cumulative spend / (spend + balance)")
@@ -1243,6 +1246,8 @@ struct NebulaCardTests {
             requestCount: 3,
             currentMonthRequestCount: 87,
             topModel: "deepseek-chat",
+            promptTokens: 8_100,
+            completionTokens: 4_245,
             usageAvailable: true)
         let plan = PlanSnapshot(
             id: "nebula",

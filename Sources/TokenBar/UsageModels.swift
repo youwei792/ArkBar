@@ -73,6 +73,9 @@ struct NebulaSummary: Sendable, Equatable {
     let requestCount: Int
     let currentMonthRequestCount: Int
     let topModel: String?
+    /// Current-month input (prompt) and output (completion) tokens.
+    let promptTokens: Int
+    let completionTokens: Int
     /// True when the consumption log was available for today/month numbers.
     let usageAvailable: Bool
 }

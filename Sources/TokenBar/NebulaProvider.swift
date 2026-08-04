@@ -78,7 +78,7 @@ struct NebulaLogItem: Decodable {
 // MARK: - Auth
 
 private enum NebulaAuth: Sendable {
-    case cookie(String)
+    case cookie(cookie: String, userId: String?)
     case apiKey(String)
 
     var label: String {
@@ -98,7 +98,7 @@ private enum NebulaAuth: Sendable {
 /// APIs. TokenBar therefore prefers the browser console session cookie, and
 /// only falls back to the API key when the console endpoints accept it.
 final class NebulaProvider: UsageProvider {
-    let displayName = "Nebula"
+    let displayName = "APINebula"
 
     /// Verified against https://apinebula.ai/api/status: 1 currency unit = 500000 quota.
     static let defaultQuotaPerUnit: Double = 500_000
@@ -134,8 +134,8 @@ final class NebulaProvider: UsageProvider {
         // Prefer console session cookie. Official docs' API key is for /v1 model
         // calls; console balance endpoints usually need browser login state.
         var authAttempts: [NebulaAuth] = []
-        if let cookie = browserSession?.cookieHeader {
-            authAttempts.append(.cookie(cookie))
+        if let session = browserSession {
+            authAttempts.append(.cookie(cookie: session.cookieHeader, userId: session.userId))
         }
         if let apiKey {
             authAttempts.append(.apiKey(apiKey))
@@ -186,6 +186,8 @@ final class NebulaProvider: UsageProvider {
             requestCount: stats?.requestCount ?? 0,
             currentMonthRequestCount: stats?.currentMonthRequestCount ?? 0,
             topModel: stats?.topModel,
+            promptTokens: stats?.promptTokens ?? 0,
+            completionTokens: stats?.completionTokens ?? 0,
             usageAvailable: stats != nil)
 
         // Ring: cumulative spend vs (spend + balance) — the relay's own numbers.
@@ -312,8 +314,12 @@ final class NebulaProvider: UsageProvider {
 
     private static func apply(auth: NebulaAuth, to request: inout URLRequest) {
         switch auth {
-        case let .cookie(cookie):
+        case let .cookie(cookie, userId):
             request.setValue(cookie, forHTTPHeaderField: "Cookie")
+            // new-api console APIs check New-Api-User against the session id.
+            if let userId, !userId.isEmpty {
+                request.setValue(userId, forHTTPHeaderField: "New-Api-User")
+            }
         case let .apiKey(apiKey):
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
@@ -418,6 +424,8 @@ final class NebulaProvider: UsageProvider {
         var monthCost: Double = 0
         var todayRequests = 0
         var monthRequests = 0
+        var monthPromptTokens = 0
+        var monthCompletionTokens = 0
         var modelTokens: [String: Int] = [:]
 
         let todayStart = calendar.startOfDay(for: now)
@@ -425,7 +433,9 @@ final class NebulaProvider: UsageProvider {
 
         for item in items {
             let createdAt = Date(timeIntervalSince1970: item.createdAt ?? 0)
-            let tokens = (item.promptTokens ?? 0) + (item.completionTokens ?? 0)
+            let prompt = item.promptTokens ?? 0
+            let completion = item.completionTokens ?? 0
+            let tokens = prompt + completion
             let cost = Double(item.quota ?? 0) / Self.defaultQuotaPerUnit
 
             if createdAt >= todayStart {
@@ -437,6 +447,8 @@ final class NebulaProvider: UsageProvider {
                 monthTokens += tokens
                 monthCost += cost
                 monthRequests += 1
+                monthPromptTokens += prompt
+                monthCompletionTokens += completion
                 if let model = item.modelName {
                     modelTokens[model, default: 0] += tokens
                 }
@@ -455,7 +467,9 @@ final class NebulaProvider: UsageProvider {
             currentMonthCost: monthCost,
             requestCount: todayRequests,
             currentMonthRequestCount: monthRequests,
-            topModel: topModel)
+            topModel: topModel,
+            promptTokens: monthPromptTokens,
+            completionTokens: monthCompletionTokens)
     }
 
     private static func trimmed(_ value: String) -> String? {
@@ -482,6 +496,9 @@ struct NebulaUsageStats: Sendable, Equatable {
     let requestCount: Int
     let currentMonthRequestCount: Int
     let topModel: String?
+    /// Current-month input (prompt) and output (completion) tokens.
+    let promptTokens: Int
+    let completionTokens: Int
 }
 
 // MARK: - Credentials

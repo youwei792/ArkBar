@@ -14,19 +14,10 @@ enum ProviderLogo {
         let image: NSImage?
         switch tab {
         case .nebula:
-            // The relay has no official icon; draw a simple nebula/planet glyph.
-            image = makeNebulaIcon()
+            // Official site logo (PNG icon). Template so it adopts the menu tint.
+            image = loadResource(named: "ProviderIcon-nebula", extension: "png")
         case .ark, .opencode, .deepseek:
-            guard let resource = resourceBundle?.url(
-                forResource: fileName(for: tab),
-                withExtension: "svg"),
-                let loaded = NSImage(contentsOf: resource)
-            else {
-                return nil
-            }
-            loaded.size = size
-            loaded.isTemplate = true
-            image = loaded
+            image = loadResource(named: fileName(for: tab), extension: "svg")
         }
         if let image {
             cache[tab] = image
@@ -34,37 +25,27 @@ enum ProviderLogo {
         return image
     }
 
-    /// A ringed planet on a faint orbit: reads as a small template glyph at
-    /// 16pt and stays neutral across light/dark menu appearances.
-    private static func makeNebulaIcon() -> NSImage {
-        let image = NSImage(size: size, flipped: false) { rect in
-            let stroke = NSBezierPath(ovalIn: rect.insetBy(dx: 1.4, dy: 1.4))
-            stroke.lineWidth = 1.1
-            NSColor.labelColor.setStroke()
-            stroke.stroke()
-
-            // Orbit ellipse tilted slightly, clipped to the canvas.
-            let orbit = NSBezierPath()
-            orbit.appendOval(in: NSRect(x: -3, y: 6.2, width: 22, height: 5.6))
-            orbit.lineWidth = 0.9
-            orbit.stroke()
-
-            // Planet on the orbit + centre dot.
-            NSColor.labelColor.setFill()
-            NSBezierPath(ovalIn: NSRect(x: 1.8, y: 10.6, width: 2.6, height: 2.6)).fill()
-            NSBezierPath(ovalIn: NSRect(x: 7.0, y: 7.0, width: 2.0, height: 2.0)).fill()
-            return true
+    private static func loadResource(named name: String, extension ext: String) -> NSImage? {
+        guard let resource = resourceBundle?.url(
+            forResource: name,
+            withExtension: ext),
+            let image = NSImage(contentsOf: resource)
+        else {
+            return nil
         }
+        image.size = size
         image.isTemplate = true
         return image
     }
 
+    /// A ringed planet on a faint orbit: reads as a small template glyph at
+    /// 16pt and stays neutral across light/dark menu appearances.
     private static func fileName(for tab: ProviderTab) -> String {
         switch tab {
         case .ark: "ProviderIcon-doubao"
         case .opencode: "ProviderIcon-opencode"
         case .deepseek: "ProviderIcon-deepseek"
-        case .nebula: "" // programmatic icon, never a resource
+        case .nebula: "ProviderIcon-nebula"
         }
     }
 

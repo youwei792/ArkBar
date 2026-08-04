@@ -331,11 +331,13 @@ final class UsageStore: ObservableObject {
             finishOpenCodeRefresh()
             return
         } catch let UsageError.openCodeBrowserSessionMissing(detail) {
-            // No cached credential — run the browser import once. This triggers a
-            // macOS Keychain password prompt (SweetCookieKit decrypting Chrome's
-            // cookie store). After import the credential is cached in TokenBar's
-            // own Keychain so subsequent refreshes are silent.
-            Self.log("→ OpenCode Go: no cached session, starting browser import (\(detail))")
+            // No cached credential. Browser import is an explicit settings
+            // action only: routine/startup refreshes must never decrypt the
+            // browser cookie store, because that always prompts for the Chrome
+            // Keychain password on ad-hoc signed builds.
+            Self.log("→ OpenCode Go: no cached session, skipping auto import (\(detail))")
+            finishOpenCodeRefresh(error: L(.errorOpenCodeBrowserAuthorizationRequired))
+            return
         } catch let error as UsageError {
             Self.log("✗ \(provider.displayName): \(error.errorDescription ?? "Unknown error")")
             finishOpenCodeRefresh(error: error.errorDescription ?? "Unknown error")
@@ -344,26 +346,6 @@ final class UsageStore: ObservableObject {
             Self.log("✗ \(provider.displayName): \(error.localizedDescription)")
             finishOpenCodeRefresh(error: error.localizedDescription)
             return
-        }
-
-        // Browser import (runs on main actor for the Keychain prompt).
-        let browser = await MainActor.run {
-            OpenCodeGoBrowserSession.browserForInteractiveImport()
-        }
-        do {
-            _ = try await Task.detached(priority: .userInitiated) {
-                try OpenCodeGoBrowserSession.importSessionInteractively(from: browser)
-            }.value
-            // Second attempt: now the credential is cached, fetch again.
-            let snapshot = try await provider.fetch(environment: environment)
-            Self.log("✓ \(provider.displayName): \(snapshot.plans.count) plan(s) (after browser import)")
-            opencodeLastUpdatedAt = Date()
-            lastSuccessfulOpenCodeSnapshot = snapshot
-            opencodeStatus = .ok(snapshot: snapshot)
-            finishOpenCodeRefresh()
-        } catch {
-            Self.log("✗ \(provider.displayName): browser import + fetch failed: \(error.localizedDescription)")
-            finishOpenCodeRefresh(error: error.localizedDescription)
         }
     }
 
