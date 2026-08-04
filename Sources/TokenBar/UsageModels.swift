@@ -76,6 +76,8 @@ struct NebulaSummary: Sendable, Equatable {
     /// Current-month input (prompt) and output (completion) tokens.
     let promptTokens: Int
     let completionTokens: Int
+    /// Current-month cache-hit input tokens.
+    let cacheTokens: Int
     /// True when the consumption log was available for today/month numbers.
     let usageAvailable: Bool
 }

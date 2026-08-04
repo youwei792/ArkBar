@@ -51,6 +51,8 @@ struct NebulaLogItem: Decodable {
     let quota: Int?
     /// Unix seconds.
     let createdAt: TimeInterval?
+    /// JSON blob; cache-hit tokens live under `cache_tokens`.
+    let other: String?
 
     enum CodingKeys: String, CodingKey {
         case modelName = "model_name"
@@ -58,6 +60,7 @@ struct NebulaLogItem: Decodable {
         case completionTokens = "completion_tokens"
         case quota
         case createdAt = "created_at"
+        case other
     }
 
     init(
@@ -65,13 +68,27 @@ struct NebulaLogItem: Decodable {
         promptTokens: Int?,
         completionTokens: Int?,
         quota: Int?,
-        createdAt: TimeInterval?)
+        createdAt: TimeInterval?,
+        other: String? = nil)
     {
         self.modelName = modelName
         self.promptTokens = promptTokens
         self.completionTokens = completionTokens
         self.quota = quota
         self.createdAt = createdAt
+        self.other = other
+    }
+
+    /// Cache-hit input tokens, from the `other` JSON blob (`cache_tokens`).
+    func cacheTokens() -> Int {
+        guard let other,
+              let data = other.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let value = object["cache_tokens"] as? Int
+        else {
+            return 0
+        }
+        return value
     }
 }
 
@@ -188,6 +205,7 @@ final class NebulaProvider: UsageProvider {
             topModel: stats?.topModel,
             promptTokens: stats?.promptTokens ?? 0,
             completionTokens: stats?.completionTokens ?? 0,
+            cacheTokens: stats?.cacheTokens ?? 0,
             usageAvailable: stats != nil)
 
         // Ring: cumulative spend vs (spend + balance) — the relay's own numbers.
@@ -426,6 +444,7 @@ final class NebulaProvider: UsageProvider {
         var monthRequests = 0
         var monthPromptTokens = 0
         var monthCompletionTokens = 0
+        var monthCacheTokens = 0
         var modelTokens: [String: Int] = [:]
 
         let todayStart = calendar.startOfDay(for: now)
@@ -449,6 +468,7 @@ final class NebulaProvider: UsageProvider {
                 monthRequests += 1
                 monthPromptTokens += prompt
                 monthCompletionTokens += completion
+                monthCacheTokens += item.cacheTokens()
                 if let model = item.modelName {
                     modelTokens[model, default: 0] += tokens
                 }
@@ -469,7 +489,8 @@ final class NebulaProvider: UsageProvider {
             currentMonthRequestCount: monthRequests,
             topModel: topModel,
             promptTokens: monthPromptTokens,
-            completionTokens: monthCompletionTokens)
+            completionTokens: monthCompletionTokens,
+            cacheTokens: monthCacheTokens)
     }
 
     private static func trimmed(_ value: String) -> String? {
@@ -499,6 +520,8 @@ struct NebulaUsageStats: Sendable, Equatable {
     /// Current-month input (prompt) and output (completion) tokens.
     let promptTokens: Int
     let completionTokens: Int
+    /// Current-month cache-hit input tokens (from the log's `other` blob).
+    let cacheTokens: Int
 }
 
 // MARK: - Credentials

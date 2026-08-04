@@ -474,7 +474,7 @@ final class L10n: ObservableObject {
         add(.reimportNebulaBrowserSession, "重新读取浏览器登录", "Re-import Browser Sign-in")
         add(.nebulaUsedTotal, "已用 %@", "Used %@")
         add(.nebulaUsageUnavailable, "无法读取使用日志", "Usage log unavailable")
-        add(.nebulaTokenDetail, "输入 %@ · 输出 %@", "Input %@ · Output %@")
+        add(.nebulaTokenDetail, "缓存读 %@ · 未缓存 %@ · 输出 %@", "Cache read %@ · Uncached %@ · Output %@")
         add(.errorArkcliNotFound, "未找到 arkcli。请安装后执行 `arkcli auth login volc-sso`。", "arkcli was not found. Install it, then run `arkcli auth login volc-sso`.")
         add(.errorArkcliNotAuthenticated, "arkcli 尚未登录。请执行 `arkcli auth login volc-sso` 后刷新。", "arkcli is not signed in. Run `arkcli auth login volc-sso`, then refresh.")
         add(.errorArkcliTimedOut, "arkcli 查询超时。请检查登录状态后重试。", "arkcli usage timed out. Check authentication and try again.")

@@ -1143,6 +1143,28 @@ struct NebulaProviderTests {
         #expect(user.quotaPerUnit == 500_000)
     }
 
+    @Test("Cache-hit tokens come from the other JSON blob (real response shape)")
+    func cacheTokensFromOtherBlob() throws {
+        let json = #"""
+        {"success": true, "message": "", "data": {"page": 1, "page_size": 1, "total": 64, "items": [
+          {"id": 1, "user_id": 12345, "created_at": 1785851253, "type": 2,
+           "username": "alice", "token_name": "MyToken", "model_name": "grok-4.5",
+           "quota": 53972, "prompt_tokens": 388822, "completion_tokens": 358,
+           "use_time": 20, "is_stream": true,
+           "other": "{\"billing_source\":\"wallet\",\"cache_ratio\":0.25,\"cache_tokens\":375936,\"completion_ratio\":3,\"group_ratio\":0.5,\"model_ratio\":1,\"request_path\":\"/v1/chat/completions\"}"}
+        ]}}
+        """#
+        let items = try NebulaProvider.decodeLogPage(data: json.data(using: .utf8)!)
+        #expect(items.count == 1)
+        let item = try #require(items.first)
+        #expect(item.modelName == "grok-4.5")
+        #expect(item.promptTokens == 388_822)
+        #expect(item.completionTokens == 358)
+        #expect(item.quota == 53_972)
+        // 375936 cached input tokens, matching the console's "缓存读" column.
+        #expect(item.cacheTokens() == 375_936)
+    }
+
     @Test("Parses log/self items")
     func decodesLogPage() throws {
         let json = #"""
@@ -1174,24 +1196,29 @@ struct NebulaProviderTests {
         components.hour = 12
         let now = calendar.date(from: components)!
 
-        func item(_ day: Int, tokens: Int, quota: Int, model: String = "gpt-4o") -> NebulaLogItem {
+        func item(_ day: Int, tokens: Int, quota: Int, model: String = "gpt-4o", cache: Int? = nil) -> NebulaLogItem {
             var dayComponents = DateComponents()
             dayComponents.year = 2026
             dayComponents.month = 8
             dayComponents.day = day
             dayComponents.hour = 10
+            var other: String?
+            if let cache {
+                other = #"{"cache_tokens":\#(cache)}"#
+            }
             return NebulaLogItem(
                 modelName: model,
                 promptTokens: tokens,
                 completionTokens: tokens / 2,
                 quota: quota,
-                createdAt: calendar.date(from: dayComponents)?.timeIntervalSince1970 ?? 0)
+                createdAt: calendar.date(from: dayComponents)?.timeIntervalSince1970 ?? 0,
+                other: other)
         }
 
         let items = [
-            item(2, tokens: 600, quota: 75_000),      // today: 600 tokens, 0.15 CNY
-            item(1, tokens: 900, quota: 25_000, model: "deepseek-chat"), // this month, not today
-            item(0, tokens: 100, quota: 10_000),      // July 31 -> outside this month
+            item(2, tokens: 600, quota: 75_000, cache: 500),  // today: 600 tokens, 0.15 CNY
+            item(1, tokens: 900, quota: 25_000, model: "deepseek-chat", cache: 400), // this month, not today
+            item(0, tokens: 100, quota: 10_000, cache: 50),   // July 31 -> outside this month
         ]
         let stats = NebulaProvider.aggregate(items: items, now: now, calendar: calendar)
         // Each item's tokens = prompt + completion.
@@ -1203,9 +1230,10 @@ struct NebulaProviderTests {
         #expect(abs((stats.currentMonthCost ?? 0) - 0.20) < 0.0001)
         // Top model by month tokens: gpt-4o (900) vs deepseek-chat (1350) -> deepseek-chat.
         #expect(stats.topModel == "deepseek-chat")
-        // Input/output split for the month: prompt 600+900, completion 300+450.
+        // Input/output/cache split for the month: prompt 600+900, completion 300+450.
         #expect(stats.promptTokens == 1500)
         #expect(stats.completionTokens == 750)
+        #expect(stats.cacheTokens == 900) // 500 + 400 (July item excluded)
     }
 
     @Test("Ring used percent = cumulative spend / (spend + balance)")
@@ -1248,6 +1276,7 @@ struct NebulaCardTests {
             topModel: "deepseek-chat",
             promptTokens: 8_100,
             completionTokens: 4_245,
+            cacheTokens: 3_000,
             usageAvailable: true)
         let plan = PlanSnapshot(
             id: "nebula",

@@ -20,7 +20,7 @@ final class NebulaCardView: NSView {
             todayCost: nil, currentMonthCost: nil,
             todayTokens: 0, currentMonthTokens: 0,
             requestCount: 0, currentMonthRequestCount: 0,
-            topModel: nil, promptTokens: 0, completionTokens: 0,
+            topModel: nil, promptTokens: 0, completionTokens: 0, cacheTokens: 0,
             usageAvailable: false)
         self.now = now
         let height = Self.computeHeight()
@@ -142,11 +142,12 @@ final class NebulaCardView: NSView {
             }
         }
 
-        // Below the ring: input/output token split (this month) and top model.
+        // Below the ring: cache-read / uncached / output split (this month).
         if summary.usageAvailable {
             let tokensField = label(
                 String(format: L(.nebulaTokenDetail),
-                       Self.compactTokens(summary.promptTokens),
+                       Self.compactTokens(summary.cacheTokens),
+                       Self.compactTokens(max(0, summary.promptTokens - summary.cacheTokens)),
                        Self.compactTokens(summary.completionTokens)),
                 font: .systemFont(ofSize: 10),
                 color: .secondaryLabelColor)
