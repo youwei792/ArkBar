@@ -54,6 +54,29 @@ struct DeepSeekSummary: Sendable, Equatable {
     let usageAvailable: Bool
 }
 
+/// Nebula (new-api relay) balance + usage breakdown. Balance and total spend
+/// come from `/api/user/self`; today/month numbers are aggregated from the
+/// consumption log (`/api/log/self`) using the API key as an access token.
+struct NebulaSummary: Sendable, Equatable {
+    /// Currency code of the relay (CNY by default).
+    let currency: String
+    /// Quota units per one unit of currency (new-api `quota_per_unit`).
+    let quotaPerUnit: Double
+    /// Remaining balance in currency units.
+    let balance: Double
+    /// Cumulative spend in currency units.
+    let usedTotal: Double
+    let todayCost: Double?
+    let currentMonthCost: Double?
+    let todayTokens: Int
+    let currentMonthTokens: Int
+    let requestCount: Int
+    let currentMonthRequestCount: Int
+    let topModel: String?
+    /// True when the consumption log was available for today/month numbers.
+    let usageAvailable: Bool
+}
+
 /// One subscribed product (e.g. personal Coding Plan, team Agent Plan).
 struct PlanSnapshot: Sendable, Equatable, Identifiable {
     enum Product: String, Sendable, Equatable {
@@ -63,6 +86,7 @@ struct PlanSnapshot: Sendable, Equatable, Identifiable {
         case agentPlanTeam = "agent-plan-team"
         case openCodeGo = "opencode-go"
         case deepseek = "deepseek"
+        case nebula = "nebula"
 
         var displayName: String {
             L10n.shared.productName(self)
@@ -72,7 +96,7 @@ struct PlanSnapshot: Sendable, Equatable, Identifiable {
         var isTeam: Bool {
             switch self {
             case .codingPlanTeam, .agentPlanTeam: true
-            case .codingPlan, .agentPlan, .openCodeGo, .deepseek: false
+            case .codingPlan, .agentPlan, .openCodeGo, .deepseek, .nebula: false
             }
         }
     }
@@ -90,6 +114,8 @@ struct PlanSnapshot: Sendable, Equatable, Identifiable {
     let errorMessage: String?
     /// DeepSeek-specific balance/usage breakdown (nil for every other provider).
     var deepseek: DeepSeekSummary? = nil
+    /// Nebula (new-api relay) balance/usage breakdown (nil for other providers).
+    var nebula: NebulaSummary? = nil
 
     /// The tightest window (highest used percent) — what the bar icon reflects.
     var tightestWindow: UsageWindow? {
@@ -166,6 +192,9 @@ enum UsageError: LocalizedError, Sendable {
     case openCodeBrowserSessionMissing(String)
     case deepSeekMissingCredentials
     case deepSeekInvalidPlatformToken
+    case nebulaMissingCredentials
+    case nebulaInvalidToken
+    case nebulaBrowserSessionMissing(String)
 
     var errorDescription: String? {
         switch self {
@@ -201,6 +230,12 @@ enum UsageError: LocalizedError, Sendable {
             L(.errorDeepSeekMissingCredentials)
         case .deepSeekInvalidPlatformToken:
             L(.errorDeepSeekInvalidPlatformToken)
+        case .nebulaMissingCredentials:
+            L(.errorNebulaMissingCredentials)
+        case .nebulaInvalidToken:
+            L(.errorNebulaInvalidToken)
+        case let .nebulaBrowserSessionMissing(message):
+            message
         }
     }
 }

@@ -102,6 +102,26 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 self?.updateActiveRefreshView(isRefreshing: isRefreshing)
             }
             .store(in: &cancellables)
+        store.$nebulaStatus
+            .sink { [weak self] status in
+                guard let self, self.settings.selectedTab == .nebula else { return }
+                self.updateIcon(for: status)
+                self.updateActiveRefreshView(status: status)
+                self.scheduleMenuRebuildIfOpen()
+            }
+            .store(in: &cancellables)
+        store.$nebulaLastUpdatedAt
+            .sink { [weak self] lastUpdatedAt in
+                guard self?.settings.selectedTab == .nebula else { return }
+                self?.updateActiveRefreshView(lastUpdatedAt: lastUpdatedAt)
+            }
+            .store(in: &cancellables)
+        store.$nebulaIsRefreshing
+            .sink { [weak self] isRefreshing in
+                guard self?.settings.selectedTab == .nebula else { return }
+                self?.updateActiveRefreshView(isRefreshing: isRefreshing)
+            }
+            .store(in: &cancellables)
         settings.$selectedTab
             .sink { [weak self] tab in
                 guard let self else { return }
@@ -138,7 +158,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         Publishers.MergeMany(
             settings.$showArk.map { _ in },
             settings.$showOpenCode.map { _ in },
-            settings.$showDeepSeek.map { _ in })
+            settings.$showDeepSeek.map { _ in },
+            settings.$showNebula.map { _ in })
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.updateIcon()

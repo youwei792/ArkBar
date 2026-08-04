@@ -99,6 +99,10 @@ enum MenuBuilder {
             menu.addItem(actionItem(L(.openDeepSeekPlatform), action: {
                 NSWorkspace.shared.open(URL(string: "https://platform.deepseek.com")!)
             }))
+        case .nebula:
+            menu.addItem(actionItem(L(.openNebulaConsole), action: {
+                NSWorkspace.shared.open(URL(string: "https://apinebula.ai/console")!)
+            }))
         }
         menu.addItem(actionItem(L(.settings), action: state.onSettings))
         menu.addItem(.separator())
@@ -136,10 +140,12 @@ enum MenuBuilder {
     @MainActor
     private static func planItem(plan: PlanSnapshot, now: Date) -> NSMenuItem {
         let item = NSMenuItem()
-        // DeepSeek plans use the single-ring balance card; everything else uses
-        // the three-ring plan card.
+        // DeepSeek/Nebula plans use the single-ring balance card; everything
+        // else uses the three-ring plan card.
         if plan.deepseek != nil {
             item.view = DeepSeekCardView(plan: plan, now: now, width: cardWidth)
+        } else if plan.nebula != nil {
+            item.view = NebulaCardView(plan: plan, now: now, width: cardWidth)
         } else {
             item.view = PlanCardView(plan: plan, now: now, width: cardWidth)
         }

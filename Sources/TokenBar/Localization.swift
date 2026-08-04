@@ -105,6 +105,7 @@ enum LKey: String {
     case tabArk = "tab.ark"
     case tabOpenCode = "tab.opencode"
     case tabDeepSeek = "tab.deepseek"
+    case tabNebula = "tab.nebula"
     case showProvider = "settings.showProvider"
     case sectionDisplay = "settings.sectionDisplay"
     case opencodeCookie = "settings.opencodeCookie"
@@ -118,6 +119,7 @@ enum LKey: String {
     case settingsArk = "settings.ark"
     case settingsOpenCode = "settings.openCode"
     case settingsDeepSeek = "settings.deepseek"
+    case settingsNebula = "settings.nebula"
     case settingsDiagnostics = "settings.diagnostics"
     case sectionAppearance = "settings.sectionAppearance"
     case sectionBehavior = "settings.sectionBehavior"
@@ -128,7 +130,9 @@ enum LKey: String {
     case refreshArk = "settings.refreshArk"
     case refreshOpenCode = "settings.refreshOpenCode"
     case refreshDeepSeek = "settings.refreshDeepSeek"
+    case refreshNebula = "settings.refreshNebula"
     case openDeepSeekPlatform = "menu.openDeepSeekPlatform"
+    case openNebulaConsole = "menu.openNebulaConsole"
     case openCodeCookieSource = "settings.openCodeCookieSource"
     case openCodeCookieAutomatic = "settings.openCodeCookieAutomatic"
     case openCodeCookieManual = "settings.openCodeCookieManual"
@@ -156,6 +160,7 @@ enum LKey: String {
     case productAgentPlanTeam = "product.agentPlanTeam"
     case productOpenCodeGo = "product.openCodeGo"
     case productDeepSeek = "product.deepseek"
+    case productNebula = "product.nebula"
     case windowSession = "window.session"
     case window5Hour = "window.5hour"
     case windowWeekly = "window.weekly"
@@ -175,6 +180,15 @@ enum LKey: String {
     case deepseekPlatformTokenLabel = "deepseek.platformTokenLabel"
     case saveCredential = "deepseek.saveCredential"
     case deepseekBrowserSession = "deepseek.browserSession"
+    case nebulaBaseURLLabel = "nebula.baseURLLabel"
+    case nebulaBaseURLHint = "nebula.baseURLHint"
+    case nebulaAPIKeyLabel = "nebula.apiKeyLabel"
+    case nebulaCredentialsHint = "nebula.credentialsHint"
+    case nebulaBrowserSession = "nebula.browserSession"
+    case nebulaBrowserHint = "nebula.browserHint"
+    case reimportNebulaBrowserSession = "settings.reimportNebulaBrowserSession"
+    case nebulaUsedTotal = "nebula.usedTotal"
+    case nebulaUsageUnavailable = "nebula.usageUnavailable"
     case errorArkcliNotFound = "error.arkcliNotFound"
     case errorArkcliNotAuthenticated = "error.arkcliNotAuthenticated"
     case errorArkcliTimedOut = "error.arkcliTimedOut"
@@ -190,6 +204,10 @@ enum LKey: String {
     case errorOpenCodeBrowserAuthorizationRequired = "error.openCodeBrowserAuthorizationRequired"
     case errorDeepSeekMissingCredentials = "error.deepSeekMissingCredentials"
     case errorDeepSeekInvalidPlatformToken = "error.deepSeekInvalidPlatformToken"
+    case errorNebulaMissingCredentials = "error.nebulaMissingCredentials"
+    case errorNebulaInvalidToken = "error.nebulaInvalidToken"
+    case errorNebulaBrowserSessionMissing = "error.nebulaBrowserSessionMissing"
+    case errorNebulaBrowserAuthorizationRequired = "error.nebulaBrowserAuthorizationRequired"
     case errorProbeModels = "error.probeModels"
     case apiKeyNoHeaders = "apiKey.noHeaders"
     case apiKeyNoWindow = "apiKey.noWindow"
@@ -260,6 +278,7 @@ final class L10n: ObservableObject {
         case .agentPlanTeam: t(.productAgentPlanTeam)
         case .openCodeGo: t(.productOpenCodeGo)
         case .deepseek: t(.productDeepSeek)
+        case .nebula: t(.productNebula)
         }
     }
 
@@ -370,6 +389,7 @@ final class L10n: ObservableObject {
         add(.tabArk, "Ark", "Ark")
         add(.tabOpenCode, "OpenCode", "OpenCode")
         add(.tabDeepSeek, "DeepSeek", "DeepSeek")
+        add(.tabNebula, "Nebula", "Nebula")
         add(.showProvider, "在菜单栏显示", "Show in menu bar")
         add(.sectionDisplay, "显示", "Display")
         add(.opencodeCookie, "会话 Cookie", "Session Cookie")
@@ -383,6 +403,7 @@ final class L10n: ObservableObject {
         add(.settingsArk, "Ark 套餐", "Ark Plans")
         add(.settingsOpenCode, "OpenCode Go", "OpenCode Go")
         add(.settingsDeepSeek, "DeepSeek", "DeepSeek")
+        add(.settingsNebula, "Nebula 中转", "Nebula Relay")
         add(.settingsDiagnostics, "诊断", "Diagnostics")
         add(.sectionAppearance, "外观", "Appearance")
         add(.sectionBehavior, "行为", "Behavior")
@@ -393,7 +414,9 @@ final class L10n: ObservableObject {
         add(.refreshArk, "刷新 Ark 用量", "Refresh Ark Usage")
         add(.refreshOpenCode, "刷新 OpenCode Go", "Refresh OpenCode Go")
         add(.refreshDeepSeek, "刷新 DeepSeek", "Refresh DeepSeek")
+        add(.refreshNebula, "刷新 Nebula", "Refresh Nebula")
         add(.openDeepSeekPlatform, "打开 DeepSeek 平台", "Open DeepSeek Platform")
+        add(.openNebulaConsole, "打开 Nebula 控制台", "Open Nebula Console")
         add(.openCodeCookieSource, "Cookie 来源", "Cookie source")
         add(.openCodeCookieAutomatic, "自动读取浏览器", "Automatic from browser")
         add(.openCodeCookieManual, "手动 Cookie", "Manual Cookie")
@@ -421,6 +444,7 @@ final class L10n: ObservableObject {
         add(.productAgentPlanTeam, "团队 Agent 套餐", "Agent Plan (Team)")
         add(.productOpenCodeGo, "OpenCode Go", "OpenCode Go")
         add(.productDeepSeek, "DeepSeek", "DeepSeek")
+        add(.productNebula, "Nebula", "Nebula")
         add(.windowSession, "会话", "Session")
         add(.window5Hour, "5 小时", "5-hour")
         add(.windowWeekly, "每周", "Weekly")
@@ -440,6 +464,15 @@ final class L10n: ObservableObject {
         add(.deepseekPlatformTokenLabel, "Platform Token（可选）", "Platform Token (optional)")
         add(.saveCredential, "保存", "Save")
         add(.deepseekBrowserSession, "浏览器会话：%@", "Browser session: %@")
+        add(.nebulaBaseURLLabel, "API 地址", "API base URL")
+        add(.nebulaBaseURLHint, "控制台地址，默认 https://apinebula.ai（不要填 /v1）", "Console base URL, default https://apinebula.ai (do not append /v1)")
+        add(.nebulaAPIKeyLabel, "API Key（可选，仅用于 /v1 模型调用）", "API Key (optional; for /v1 model calls only)")
+        add(.nebulaCredentialsHint, "官方文档只保证 API Key 调用 /v1 模型接口。余额/使用日志是控制台接口，优先使用浏览器登录会话。", "Official docs only guarantee API keys for /v1 model calls. Balance/usage logs are console APIs and prefer a browser sign-in session.")
+        add(.nebulaBrowserSession, "浏览器会话：%@", "Browser session: %@")
+        add(.nebulaBrowserHint, "请先在浏览器登录 apinebula.ai 控制台，再点“重新读取浏览器登录”。常规刷新只使用已缓存会话，不会反复弹钥匙串。", "Sign in to the apinebula.ai console in your browser, then click “Re-import Browser Sign-in”. Routine refreshes only use the cached session and will not re-prompt Keychain.")
+        add(.reimportNebulaBrowserSession, "重新读取浏览器登录", "Re-import Browser Sign-in")
+        add(.nebulaUsedTotal, "已用 %@", "Used %@")
+        add(.nebulaUsageUnavailable, "无法读取使用日志", "Usage log unavailable")
         add(.errorArkcliNotFound, "未找到 arkcli。请安装后执行 `arkcli auth login volc-sso`。", "arkcli was not found. Install it, then run `arkcli auth login volc-sso`.")
         add(.errorArkcliNotAuthenticated, "arkcli 尚未登录。请执行 `arkcli auth login volc-sso` 后刷新。", "arkcli is not signed in. Run `arkcli auth login volc-sso`, then refresh.")
         add(.errorArkcliTimedOut, "arkcli 查询超时。请检查登录状态后重试。", "arkcli usage timed out. Check authentication and try again.")
@@ -455,6 +488,10 @@ final class L10n: ObservableObject {
         add(.errorOpenCodeBrowserAuthorizationRequired, "TokenBar 尚未缓存浏览器登录，或原会话已失效。请在 OpenCode Go 设置中点“重新读取浏览器登录”；后台刷新不会主动弹出密码框。", "TokenBar has no cached browser sign-in, or the previous session expired. Click “Re-import Browser Sign-in” in OpenCode Go settings; background refreshes will not show a password prompt.")
         add(.errorDeepSeekMissingCredentials, "未找到 DeepSeek 凭据。可在 DeepSeek 设置中填写，或先在 Chrome 登录 platform.deepseek.com 后刷新。", "No DeepSeek credentials were found. Enter them in the DeepSeek settings, or sign in to platform.deepseek.com in Chrome and refresh.")
         add(.errorDeepSeekInvalidPlatformToken, "DeepSeek 平台会话无效或已过期。请更新 DEEPSEEK_PLATFORM_TOKEN。", "The DeepSeek Platform session is invalid or expired. Update DEEPSEEK_PLATFORM_TOKEN.")
+        add(.errorNebulaMissingCredentials, "未配置 Nebula 控制台会话或 API Key。请先在浏览器登录 apinebula.ai，再点“重新读取浏览器登录”。", "No Nebula console session or API key is configured. Sign in at apinebula.ai, then click “Re-import Browser Sign-in”.")
+        add(.errorNebulaInvalidToken, "Nebula 控制台会话或 API Key 无效。余额接口通常需要浏览器登录会话，请重新导入。", "The Nebula console session or API key is invalid. Balance endpoints usually need a browser sign-in session; re-import it.")
+        add(.errorNebulaBrowserSessionMissing, "没有在浏览器中找到 apinebula.ai 登录会话。请先在浏览器登录控制台。", "No apinebula.ai browser session was found. Sign in to the console in a browser first.")
+        add(.errorNebulaBrowserAuthorizationRequired, "TokenBar 尚未缓存 Nebula 浏览器登录。请在 Nebula 设置中点“重新读取浏览器登录”。", "TokenBar has no cached Nebula browser sign-in. Click “Re-import Browser Sign-in” in Nebula settings.")
         add(.errorProbeModels, "所有探测模型均不可用", "All probe models failed")
         add(.apiKeyNoHeaders, "API Key 有效，但响应未返回请求限额头。", "API key is valid, but no request-limit headers were returned.")
         add(.apiKeyNoWindow, "API Key 有效，但未返回用量窗口。", "API key is valid, but no usage window was returned.")

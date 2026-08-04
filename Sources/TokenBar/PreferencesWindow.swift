@@ -46,6 +46,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
     case ark
     case openCode
     case deepseek
+    case nebula
     case diagnostics
 
     var id: Self { self }
@@ -56,6 +57,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .ark: L(.settingsArk)
         case .openCode: L(.settingsOpenCode)
         case .deepseek: L(.settingsDeepSeek)
+        case .nebula: L(.settingsNebula)
         case .diagnostics: L(.settingsDiagnostics)
         }
     }
@@ -66,6 +68,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .ark: "chart.donut"
         case .openCode: "terminal"
         case .deepseek: "fish"
+        case .nebula: "cloud"
         case .diagnostics: "stethoscope"
         }
     }
@@ -77,6 +80,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .ark: .ark
         case .openCode: .opencode
         case .deepseek: .deepseek
+        case .nebula: .nebula
         case .general, .diagnostics: nil
         }
     }
@@ -157,6 +161,8 @@ private struct PreferencesRootView: View {
             OpenCodePreferencesPane(settings: settings, store: store)
         case .deepseek:
             DeepSeekPreferencesPane(settings: settings, store: store)
+        case .nebula:
+            NebulaPreferencesPane(settings: settings, store: store)
         case .diagnostics:
             DiagnosticsPreferencesPane()
         }
@@ -485,6 +491,99 @@ private struct DeepSeekPreferencesPane: View {
 
     private func savePlatformToken() {
         settings.setDeepSeekPlatformToken(platformTokenField)
+    }
+}
+
+private struct NebulaPreferencesPane: View {
+    @ObservedObject var settings: AppSettings
+    @ObservedObject var store: UsageStore
+    @State private var apiKeyField: String
+
+    init(settings: AppSettings, store: UsageStore) {
+        self.settings = settings
+        self.store = store
+        _apiKeyField = State(initialValue: settings.nebulaAPIKey)
+    }
+
+    var body: some View {
+        PreferencesPaneContainer(title: L(.settingsNebula)) {
+            Form {
+                Section(L(.sectionDisplay)) {
+                    Toggle(L(.showProvider), isOn: Binding(
+                        get: { settings.showNebula },
+                        set: { settings.setVisible(.nebula, $0) }))
+                        .toggleStyle(.switch)
+                }
+
+                Section(L(.sectionConnection)) {
+                    TextField(L(.nebulaBaseURLLabel), text: $settings.nebulaBaseURL,
+                              prompt: Text(NebulaProvider.defaultBaseURL))
+                    Text(L(.nebulaBaseURLHint))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    SecureField(L(.nebulaAPIKeyLabel), text: $apiKeyField)
+                        .onSubmit(saveAPIKey)
+                    Button(L(.saveCredential), action: saveAPIKey)
+
+                    if let source = NebulaBrowserSession.cachedSourceLabel() {
+                        Label(String(format: L(.nebulaBrowserSession), source), systemImage: "globe")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+
+                    ProviderStatusRows(
+                        status: store.nebulaStatus,
+                        isRefreshing: store.nebulaIsRefreshing,
+                        lastUpdatedAt: store.nebulaLastUpdatedAt)
+
+                    Label(L(.nebulaCredentialsHint), systemImage: "key")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+
+                    Label(L(.nebulaBrowserHint), systemImage: "safari")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Section(L(.sectionActions)) {
+                    Button {
+                        store.reimportNebulaBrowserSession()
+                    } label: {
+                        Label(
+                            store.nebulaIsRefreshing
+                                ? L(.refreshingStatus)
+                                : L(.reimportNebulaBrowserSession),
+                            systemImage: "person.crop.circle.badge.arrow.trianglehead.counterclockwise")
+                    }
+                    .disabled(store.nebulaIsRefreshing)
+
+                    Button {
+                        store.refresh(tab: .nebula)
+                    } label: {
+                        Label(
+                            store.nebulaIsRefreshing ? L(.refreshing) : L(.refreshNebula),
+                            systemImage: "arrow.clockwise")
+                    }
+
+                    Button {
+                        NSWorkspace.shared.open(URL(string: "https://apinebula.ai/zh/console/topup")!)
+                    } label: {
+                        Label(L(.openNebulaConsole), systemImage: "safari")
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        }
+    }
+
+    private func saveAPIKey() {
+        settings.setNebulaAPIKey(apiKeyField)
     }
 }
 

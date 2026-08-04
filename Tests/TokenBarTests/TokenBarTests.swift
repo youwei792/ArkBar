@@ -1003,15 +1003,17 @@ struct ProviderVisibilityTests {
     @Test("Hidden providers drop out of the switcher list")
     func visibleTabsFilters() {
         let settings = AppSettings.shared
-        let original = (settings.showArk, settings.showOpenCode, settings.showDeepSeek)
+        let original = (settings.showArk, settings.showOpenCode, settings.showDeepSeek, settings.showNebula)
         defer {
             settings.showArk = original.0
             settings.showOpenCode = original.1
             settings.showDeepSeek = original.2
+            settings.showNebula = original.3
         }
         settings.showArk = false
         settings.showOpenCode = true
         settings.showDeepSeek = true
+        settings.showNebula = false
         #expect(settings.visibleTabs == [.opencode, .deepseek])
         #expect(settings.isVisible(.ark) == false)
         settings.showOpenCode = false
@@ -1022,12 +1024,13 @@ struct ProviderVisibilityTests {
     func hidingSelectedTabSwitches() {
         let settings = AppSettings.shared
         let originalTab = settings.selectedTab
-        let original = (settings.showArk, settings.showOpenCode, settings.showDeepSeek)
+        let original = (settings.showArk, settings.showOpenCode, settings.showDeepSeek, settings.showNebula)
         defer {
             settings.selectedTab = originalTab
             settings.showArk = original.0
             settings.showOpenCode = original.1
             settings.showDeepSeek = original.2
+            settings.showNebula = original.3
         }
         settings.setVisible(.deepseek, true)
         settings.selectedTab = .deepseek
@@ -1121,5 +1124,217 @@ struct ProviderLogoTests {
             dashboardRep.representation(using: .png, properties: [:]))
         try dashboardPNG.write(to: URL(fileURLWithPath: "/tmp/tokenbar_deepseek_dashboard.png"))
         #expect(FileManager.default.fileExists(atPath: "/tmp/tokenbar_deepseek_dashboard.png"))
+    }
+}
+
+@Suite("NebulaProvider decode")
+struct NebulaProviderTests {
+    @Test("Parses user/self quota into currency units")
+    func decodesUserSelf() throws {
+        let json = #"""
+        {"success": true, "message": "", "data": {
+          "id": 1, "username": "alice", "quota": 123456789, "used_quota": 9876543
+        }}
+        """#
+        let user = try NebulaProvider.decodeUserSelf(data: json.data(using: .utf8)!)
+        #expect(user.quota == 123_456_789)
+        #expect(user.usedQuota == 9_876_543)
+        // 500000 quota = 1 CNY.
+        #expect(user.quotaPerUnit == 500_000)
+    }
+
+    @Test("Parses log/self items")
+    func decodesLogPage() throws {
+        let json = #"""
+        {"success": true, "message": "", "data": {
+          "items": [
+            {"id": 1, "model_name": "gpt-4o", "prompt_tokens": 100, "completion_tokens": 50,
+             "quota": 75000, "created_at": 1785672000}
+          ],
+          "total": 1
+        }}
+        """#
+        let items = try NebulaProvider.decodeLogPage(data: json.data(using: .utf8)!)
+        #expect(items.count == 1)
+        #expect(items.first?.modelName == "gpt-4o")
+        #expect(items.first?.promptTokens == 100)
+        #expect(items.first?.completionTokens == 50)
+        #expect(items.first?.quota == 75_000)
+        #expect(items.first?.createdAt == 1_785_672_000)
+    }
+
+    @Test("Aggregates today and month cost, tokens, and requests")
+    func aggregatesLogs() {
+        let calendar = Calendar.current
+        // Fixed local "now": 2026-08-02 12:00.
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 8
+        components.day = 2
+        components.hour = 12
+        let now = calendar.date(from: components)!
+
+        func item(_ day: Int, tokens: Int, quota: Int, model: String = "gpt-4o") -> NebulaLogItem {
+            var dayComponents = DateComponents()
+            dayComponents.year = 2026
+            dayComponents.month = 8
+            dayComponents.day = day
+            dayComponents.hour = 10
+            return NebulaLogItem(
+                modelName: model,
+                promptTokens: tokens,
+                completionTokens: tokens / 2,
+                quota: quota,
+                createdAt: calendar.date(from: dayComponents)?.timeIntervalSince1970 ?? 0)
+        }
+
+        let items = [
+            item(2, tokens: 600, quota: 75_000),      // today: 600 tokens, 0.15 CNY
+            item(1, tokens: 900, quota: 25_000, model: "deepseek-chat"), // this month, not today
+            item(0, tokens: 100, quota: 10_000),      // July 31 -> outside this month
+        ]
+        let stats = NebulaProvider.aggregate(items: items, now: now, calendar: calendar)
+        // Each item's tokens = prompt + completion.
+        #expect(stats.todayTokens == 900) // 600 + 300
+        #expect(stats.requestCount == 1)
+        #expect(abs((stats.todayCost ?? 0) - 0.15) < 0.0001)
+        #expect(stats.currentMonthTokens == 2250) // (600+300) + (900+450)
+        #expect(stats.currentMonthRequestCount == 2)
+        #expect(abs((stats.currentMonthCost ?? 0) - 0.20) < 0.0001)
+        // Top model by month tokens: gpt-4o (900) vs deepseek-chat (1350) -> deepseek-chat.
+        #expect(stats.topModel == "deepseek-chat")
+    }
+
+    @Test("Ring used percent = cumulative spend / (spend + balance)")
+    func ringUsedPercent() {
+        // ¥100 balance, ¥50 spent -> 33.3% used.
+        #expect(abs(NebulaProvider.ringUsedPercent(balance: 100, usedTotal: 50) - (50.0 / 150.0 * 100)) < 0.001)
+        // Zero balance: fully used.
+        #expect(NebulaProvider.ringUsedPercent(balance: 0, usedTotal: 50) == 100)
+        // Top-up raises balance -> used share shrinks.
+        let before = NebulaProvider.ringUsedPercent(balance: 100, usedTotal: 50)
+        let after = NebulaProvider.ringUsedPercent(balance: 500, usedTotal: 50)
+        #expect(after < before)
+    }
+
+    @Test("Base URL normalization strips /v1 and trailing slashes")
+    func normalizesBaseURL() {
+        #expect(NebulaProvider.normalizedBaseURL("https://apinebula.ai") == "https://apinebula.ai")
+        #expect(NebulaProvider.normalizedBaseURL("https://apinebula.ai/") == "https://apinebula.ai")
+        #expect(NebulaProvider.normalizedBaseURL("https://apinebula.ai/v1") == "https://apinebula.ai")
+        #expect(NebulaProvider.normalizedBaseURL("") == nil)
+    }
+}
+
+@Suite("Nebula card")
+@MainActor
+struct NebulaCardTests {
+    @Test("Renders balance ring and legend rows")
+    func rendersCard() throws {
+        let summary = NebulaSummary(
+            currency: "CNY",
+            quotaPerUnit: 500_000,
+            balance: 246.91,
+            usedTotal: 19.75,
+            todayCost: 0.15,
+            currentMonthCost: 1.23,
+            todayTokens: 600,
+            currentMonthTokens: 12_345,
+            requestCount: 3,
+            currentMonthRequestCount: 87,
+            topModel: "deepseek-chat",
+            usageAvailable: true)
+        let plan = PlanSnapshot(
+            id: "nebula",
+            product: .nebula,
+            edition: nil,
+            tier: nil,
+            seatID: nil,
+            subscribed: true,
+            windows: [UsageWindow(label: "balance", usedPercent: 7.4, used: nil, total: nil, resetsAt: nil)],
+            expiryDate: nil,
+            errorMessage: nil,
+            deepseek: nil,
+            nebula: summary)
+        let view = NebulaCardView(plan: plan, now: Date(), width: 340)
+        view.updateTrackingAreas()
+        #expect(view.subviews.allSatisfy {
+            $0.frame.minX >= 0 && $0.frame.maxX <= view.bounds.maxX
+        })
+        let labels = view.subviews.compactMap { $0 as? NSTextField }.map(\.stringValue)
+        #expect(labels.contains(L(.windowBalance)))
+        #expect(labels.contains("¥246.91"))
+
+        // Render for visual inspection on a dark material approximation.
+        let card = NebulaCardView(plan: plan, now: Date(), width: 340)
+        let header = HeaderCardView(
+            snapshot: ProviderSnapshot(
+                providerName: "Nebula",
+                authMethod: "apikey",
+                plans: [plan],
+                updatedAt: Date(),
+                errorMessage: nil),
+            width: 340)
+        let switcher = ProviderSwitcherView(tabs: ProviderTab.allCases, selected: .nebula, width: 340, onSelect: { _ in })
+        let totalHeight = switcher.bounds.height + header.bounds.height + card.bounds.height
+        let dashboard = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: totalHeight))
+        dashboard.wantsLayer = true
+        dashboard.layer?.backgroundColor = NSColor(calibratedWhite: 0.30, alpha: 1).cgColor
+        card.frame.origin = .zero
+        header.frame.origin = NSPoint(x: 0, y: card.bounds.height)
+        switcher.frame.origin = NSPoint(x: 0, y: card.bounds.height + header.bounds.height)
+        dashboard.addSubview(card)
+        dashboard.addSubview(header)
+        dashboard.addSubview(switcher)
+        dashboard.layoutSubtreeIfNeeded()
+
+        let dashboardRep = try #require(dashboard.bitmapImageRepForCachingDisplay(in: dashboard.bounds))
+        dashboard.cacheDisplay(in: dashboard.bounds, to: dashboardRep)
+        let dashboardPNG = try #require(
+            dashboardRep.representation(using: .png, properties: [:]))
+        try dashboardPNG.write(to: URL(fileURLWithPath: "/tmp/tokenbar_nebula_dashboard.png"))
+        #expect(FileManager.default.fileExists(atPath: "/tmp/tokenbar_nebula_dashboard.png"))
+    }
+}
+
+@Suite("Nebula browser session")
+struct NebulaBrowserSessionTests {
+    @Test("Keeps session-like cookies and drops unrelated ones")
+    func filtersCookieHeader() {
+        let header = NebulaBrowserSession.requestCookieHeader(
+            from: "theme=dark; session=abc123; analytics=drop; access_token=tok-xyz")
+        #expect(header?.contains("session=abc123") == true)
+        #expect(header?.contains("access_token=tok-xyz") == true)
+        #expect(header?.contains("theme=dark") != true)
+        #expect(header?.contains("analytics=drop") != true)
+    }
+
+    @Test("Rejects empty cookie strings")
+    func rejectsEmptyCookie() {
+        #expect(NebulaBrowserSession.requestCookieHeader(from: "") == nil)
+        #expect(NebulaBrowserSession.requestCookieHeader(from: "theme=dark") != nil)
+    }
+}
+
+@Suite("Nebula console auth errors")
+struct NebulaConsoleAuthErrorTests {
+    @Test("user/self unauthorized body maps to invalid token")
+    func userSelfUnauthorized() {
+        let json = #"{"success":false,"message":"Unauthorized, invalid access token"}"#
+        #expect(throws: UsageError.self) {
+            _ = try NebulaProvider.decodeUserSelf(data: json.data(using: .utf8)!)
+        }
+        do {
+            _ = try NebulaProvider.decodeUserSelf(data: json.data(using: .utf8)!)
+            Issue.record("expected throw")
+        } catch let error as UsageError {
+            if case .nebulaInvalidToken = error {
+                // ok
+            } else {
+                Issue.record("unexpected \(error)")
+            }
+        } catch {
+            Issue.record("unexpected non-UsageError \(error)")
+        }
     }
 }

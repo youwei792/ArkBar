@@ -104,6 +104,9 @@ final class AppSettings: ObservableObject {
     @Published var showDeepSeek: Bool {
         didSet { UserDefaults.standard.set(showDeepSeek, forKey: Keys.showDeepSeek) }
     }
+    @Published var showNebula: Bool {
+        didSet { UserDefaults.standard.set(showNebula, forKey: Keys.showNebula) }
+    }
     /// Providers the switcher offers, in canonical order, minus hidden ones.
     var visibleTabs: [ProviderTab] {
         ProviderTab.allCases.filter(isVisible)
@@ -114,6 +117,7 @@ final class AppSettings: ObservableObject {
         case .ark: showArk
         case .opencode: showOpenCode
         case .deepseek: showDeepSeek
+        case .nebula: showNebula
         }
     }
 
@@ -125,6 +129,7 @@ final class AppSettings: ObservableObject {
         case .ark: showArk = visible
         case .opencode: showOpenCode = visible
         case .deepseek: showDeepSeek = visible
+        case .nebula: showNebula = visible
         }
         if !visible, selectedTab == tab, let first = visibleTabs.first {
             selectedTab = first
@@ -147,8 +152,27 @@ final class AppSettings: ObservableObject {
     @Published private(set) var deepseekApiKey: String
     @Published private(set) var deepseekPlatformToken: String
 
+    /// Nebula relay base URL (a harmless UI preference, so it lives in
+    /// UserDefaults) and its API key (Keychain mirror, never persisted there).
+    @Published var nebulaBaseURL: String {
+        didSet { UserDefaults.standard.set(nebulaBaseURL, forKey: Keys.nebulaBaseURL) }
+    }
+    @Published private(set) var nebulaAPIKey: String
+
     var deepseekApiKeyHasValue: Bool { !deepseekApiKey.isEmpty }
     var deepseekPlatformTokenHasValue: Bool { !deepseekPlatformToken.isEmpty }
+    var nebulaAPIKeyHasValue: Bool { !nebulaAPIKey.isEmpty }
+
+    func setNebulaAPIKey(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: key, provider: "nebula-key")
+        nebulaAPIKey = persisted ? (key ?? "") : (CookieKeychainStore.load(provider: "nebula-key") ?? "")
+    }
+
+    func loadNebulaFromKeychain() {
+        nebulaAPIKey = CookieKeychainStore.load(provider: "nebula-key") ?? ""
+    }
 
     func setDeepSeekAPIKey(_ value: String?) {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -195,6 +219,8 @@ final class AppSettings: ObservableObject {
         static let showArk = "tokenbar.showArk"
         static let showOpenCode = "tokenbar.showOpenCode"
         static let showDeepSeek = "tokenbar.showDeepSeek"
+        static let showNebula = "tokenbar.showNebula"
+        static let nebulaBaseURL = "tokenbar.nebulaBaseURL"
         static let opencodeWorkspaceID = "tokenbar.opencodeWorkspaceID"
         static let opencodeCookieSource = "tokenbar.opencodeCookieSource"
     }
@@ -215,6 +241,7 @@ final class AppSettings: ObservableObject {
         self.showArk = defaults.object(forKey: Keys.showArk) as? Bool ?? true
         self.showOpenCode = defaults.object(forKey: Keys.showOpenCode) as? Bool ?? true
         self.showDeepSeek = defaults.object(forKey: Keys.showDeepSeek) as? Bool ?? true
+        self.showNebula = defaults.object(forKey: Keys.showNebula) as? Bool ?? true
         self.opencodeWorkspaceID = defaults.string(forKey: Keys.opencodeWorkspaceID) ?? ""
         let cookieSourceRaw = defaults.string(forKey: Keys.opencodeCookieSource)
             ?? OpenCodeCookieSource.automatic.rawValue
@@ -222,5 +249,8 @@ final class AppSettings: ObservableObject {
         self.opencodeCookie = CookieKeychainStore.load(provider: "opencode") ?? ""
         self.deepseekApiKey = CookieKeychainStore.load(provider: "deepseek-apikey") ?? ""
         self.deepseekPlatformToken = CookieKeychainStore.load(provider: "deepseek-platform") ?? ""
+        self.nebulaBaseURL = defaults.string(forKey: Keys.nebulaBaseURL)
+            ?? NebulaProvider.defaultBaseURL
+        self.nebulaAPIKey = CookieKeychainStore.load(provider: "nebula-key") ?? ""
     }
 }

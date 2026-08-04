@@ -25,12 +25,15 @@ final class UsageStore: ObservableObject {
     @Published private(set) var arkStatus: LoadStatus = .never
     @Published private(set) var opencodeStatus: LoadStatus = .never
     @Published private(set) var deepseekStatus: LoadStatus = .never
+    @Published private(set) var nebulaStatus: LoadStatus = .never
     @Published private(set) var arkLastUpdatedAt: Date?
     @Published private(set) var opencodeLastUpdatedAt: Date?
     @Published private(set) var deepseekLastUpdatedAt: Date?
+    @Published private(set) var nebulaLastUpdatedAt: Date?
     @Published private(set) var arkIsRefreshing = false
     @Published private(set) var opencodeIsRefreshing = false
     @Published private(set) var deepseekIsRefreshing = false
+    @Published private(set) var nebulaIsRefreshing = false
 
     /// Compatibility conveniences for views that only need the selected tab.
     var status: LoadStatus { currentStatus }
@@ -44,10 +47,12 @@ final class UsageStore: ObservableObject {
     private var arkProviders: [UsageProvider] = []
     private var openCodeProvider: OpenCodeGoProvider?
     private var deepSeekProvider: DeepSeekProvider?
+    private var nebulaProvider: NebulaProvider?
     private var timer: Timer?
     private var lastSuccessfulArkSnapshot: ProviderSnapshot?
     private var lastSuccessfulOpenCodeSnapshot: ProviderSnapshot?
     private var lastSuccessfulDeepSeekSnapshot: ProviderSnapshot?
+    private var lastSuccessfulNebulaSnapshot: ProviderSnapshot?
     private var cancellables = Set<AnyCancellable>()
 
     init(settings: AppSettings = .shared) {
@@ -85,6 +90,13 @@ final class UsageStore: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in self?.refresh(tab: .deepseek) }
             .store(in: &cancellables)
+        // Saving the Nebula key or base URL refreshes immediately.
+        Publishers.MergeMany(
+            settings.$nebulaAPIKey.map { _ in },
+            settings.$nebulaBaseURL.map { _ in })
+            .dropFirst()
+            .sink { [weak self] _ in self?.refresh(tab: .nebula) }
+            .store(in: &cancellables)
         settings.$selectedTab
             .dropFirst()
             .sink { [weak self] tab in
@@ -100,6 +112,7 @@ final class UsageStore: ObservableObject {
             case .ark: publisher = settings.$showArk.eraseToAnyPublisher()
             case .opencode: publisher = settings.$showOpenCode.eraseToAnyPublisher()
             case .deepseek: publisher = settings.$showDeepSeek.eraseToAnyPublisher()
+            case .nebula: publisher = settings.$showNebula.eraseToAnyPublisher()
             }
             publisher
                 .dropFirst()
@@ -140,6 +153,7 @@ final class UsageStore: ObservableObject {
         arkProviders = providers
         openCodeProvider = OpenCodeGoProvider(settings: settings)
         deepSeekProvider = DeepSeekProvider(settings: settings)
+        nebulaProvider = NebulaProvider(settings: settings)
     }
 
     func start() {
@@ -159,6 +173,7 @@ final class UsageStore: ObservableObject {
         case .ark: refreshArk()
         case .opencode: refreshOpenCode()
         case .deepseek: refreshDeepSeek()
+        case .nebula: refreshNebula()
         }
     }
 
@@ -195,6 +210,41 @@ final class UsageStore: ObservableObject {
             } catch {
                 Self.log("✗ OpenCode Go browser import: \(error.localizedDescription)")
                 self.finishOpenCodeRefresh(error: error.localizedDescription)
+            }
+        }
+    }
+
+    /// Explicit user action only: import Nebula console login cookies from the
+    /// browser, then refresh balance/log endpoints with the cached session.
+    func reimportNebulaBrowserSession() {
+        guard !nebulaIsRefreshing else { return }
+        guard let provider = nebulaProvider else {
+            if lastSuccessfulNebulaSnapshot == nil {
+                nebulaStatus = .error(message: L(.errorNebulaBrowserAuthorizationRequired))
+            }
+            return
+        }
+
+        nebulaIsRefreshing = true
+        switch nebulaStatus {
+        case .ok, .stale:
+            break
+        case .never, .loading, .error:
+            nebulaStatus = .loading
+        }
+
+        let environment = ProcessInfo.processInfo.environment
+        let browser = NebulaBrowserSession.browserForInteractiveImport()
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try NebulaBrowserSession.importSessionInteractively(from: browser)
+                }.value
+                await self.runNebulaProvider(provider, environment: environment)
+            } catch {
+                Self.log("✗ Nebula browser import: \(error.localizedDescription)")
+                self.finishNebulaRefresh(error: error.localizedDescription)
             }
         }
     }
@@ -390,11 +440,56 @@ final class UsageStore: ObservableObject {
         }
     }
 
+    private func refreshNebula() {
+        guard !nebulaIsRefreshing else { return }
+        guard let provider = nebulaProvider else { return }
+        nebulaIsRefreshing = true
+        switch nebulaStatus {
+        case .ok, .stale:
+            break // retain usable data while the request is in flight
+        case .never, .loading, .error:
+            nebulaStatus = .loading
+        }
+        let environment = ProcessInfo.processInfo.environment
+        Task { [weak self] in
+            await self?.runNebulaProvider(provider, environment: environment)
+        }
+    }
+
+    private func runNebulaProvider(_ provider: NebulaProvider, environment: [String: String]) async {
+        do {
+            let snapshot = try await provider.fetch(environment: environment)
+            Self.log("✓ \(provider.displayName): balance + usage")
+            nebulaLastUpdatedAt = Date()
+            lastSuccessfulNebulaSnapshot = snapshot
+            nebulaStatus = .ok(snapshot: snapshot)
+            finishNebulaRefresh()
+        } catch let error as UsageError {
+            Self.log("✗ \(provider.displayName): \(error.errorDescription ?? "Unknown error")")
+            finishNebulaRefresh(error: error.errorDescription ?? "Unknown error")
+        } catch {
+            Self.log("✗ \(provider.displayName): \(error.localizedDescription)")
+            finishNebulaRefresh(error: error.localizedDescription)
+        }
+    }
+
+    private func finishNebulaRefresh(error: String? = nil) {
+        nebulaIsRefreshing = false
+        if let error {
+            if let snapshot = lastSuccessfulNebulaSnapshot {
+                nebulaStatus = .stale(snapshot: snapshot, message: error)
+            } else {
+                nebulaStatus = .error(message: error)
+            }
+        }
+    }
+
     func status(for tab: ProviderTab) -> LoadStatus {
         switch tab {
         case .ark: return arkStatus
         case .opencode: return opencodeStatus
         case .deepseek: return deepseekStatus
+        case .nebula: return nebulaStatus
         }
     }
 
@@ -403,6 +498,7 @@ final class UsageStore: ObservableObject {
         case .ark: return arkLastUpdatedAt
         case .opencode: return opencodeLastUpdatedAt
         case .deepseek: return deepseekLastUpdatedAt
+        case .nebula: return nebulaLastUpdatedAt
         }
     }
 
@@ -411,6 +507,7 @@ final class UsageStore: ObservableObject {
         case .ark: return arkIsRefreshing
         case .opencode: return opencodeIsRefreshing
         case .deepseek: return deepseekIsRefreshing
+        case .nebula: return nebulaIsRefreshing
         }
     }
 
