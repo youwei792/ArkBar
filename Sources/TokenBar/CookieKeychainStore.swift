@@ -63,14 +63,22 @@ enum CookieKeychainStore {
         let account = account(forProvider: provider)
         guard let cookie, !cookie.isEmpty else { return clear(provider: provider) }
 
-        // Keychain first (canonical).
-        _ = store(keychainOnly: cookie, account: account)
+        // Skip the Keychain write entirely when the value is unchanged. On
+        // ad-hoc signed builds SecItemUpdate triggers an ACL authorization
+        // dialog (admin password); the file cache + process cache already
+        // serve all reads, so an identical write has no benefit.
+        let unchanged = cacheLock.withLock { processCache[account] == cookie }
+        if !unchanged {
+            _ = store(keychainOnly: cookie, account: account)
+        }
 
         // File cache.
         CredentialFileCache.store(provider: account, value: cookie)
 
         // Process cache.
         cacheLock.withLock { processCache[account] = cookie }
+
+        if unchanged { return true }
 
         // Drop any legacy v2 entry.
         _ = clear(service: legacyService, account: account)

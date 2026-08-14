@@ -18,6 +18,7 @@ TokenBar is a native macOS menu-bar app for Volcengine Ark Coding/Agent Plan, Op
 - An **Overview** tab lists every visible provider's remaining percent with a teal→blue capsule meter; click a row to open that provider's full card. Toggle it in **Settings → General**.
 - Each provider can be independently shown/hidden from its own settings pane; hidden providers leave the switcher and stop refreshing.
 - Menu-bar styles: meter bar, bar + percent, percent only, logo only, logo + percent, and logo + bar. Logo glyphs are 16pt and percent text uses the system font size, matching CodexBar's menu-bar scale.
+- For DeepSeek and APINebula you can choose, per provider, whether the menu bar shows the remaining percent or the money balance with its currency symbol: DeepSeek shows `¥` (CNY) or `$` (USD) depending on the wallet currency returned by the API, APINebula always shows `¥` (CNY), both with two decimals. The status item widens automatically in balance mode to fit the amount.
 - System, Simplified Chinese, and English interfaces.
 - No telemetry. OpenCode/APINebula browser import runs only after an explicit user action. Sessions and API keys are stored in the local Keychain and mirrored to a file cache in the app-support directory, so ordinary restarts never prompt for the Keychain password.
 
@@ -92,8 +93,8 @@ export KIMI_CODE_API_KEY='...'
 - The switcher's leading **Overview** tab is optional; with 4+ tabs the switcher collapses to icons (full names in tooltips).
 - The ring centre shows the Session (or 5-hour) quota left, and every ring fills from its own **remaining** value—100% is a full ring.
 - The three ring rows are Session, Weekly, and Monthly remaining quota; each row keeps its own reset countdown.
-- The DeepSeek tab uses a single balance ring: used share = this month's cost ÷ (cost + balance). Topping up raises the balance, so the ring recalculates on the next refresh. Below the ring, the cache hit/miss/output breakdown and the top model are shown.
-- The APINebula tab uses a single balance ring: used share = cumulative spend ÷ (spend + balance). Below the ring, the cache-read/uncached/output breakdown and the top model are shown.
+- The DeepSeek tab uses a single balance ring: used share = this month's cost ÷ (cost + balance). Topping up raises the balance, so the ring recalculates on the next refresh. Below the ring, the cache hit/miss/output breakdown and the top model are shown. In that provider's "Menu bar shows" setting you can display either the remaining percent or the balance (DeepSeek balance carries the `¥`/`$` symbol for its currency).
+- The APINebula tab uses a single balance ring: used share = cumulative spend ÷ (spend + balance). Below the ring, the cache-read/uncached/output breakdown and the top model are shown. In that provider's setting you can display either the remaining percent or the CNY balance (`¥`).
 - The Z.ai (Zhipu GLM) tab shows Coding Plan quota rings: the 5-hour window drives the session ring, the weekly window the weekly ring, and an optional monthly MCP time window (monthly ring) on some plans. Rings and legend rows fill from their **remaining** values.
 - The Kimi For Coding tab shows membership quota rings: Code's total weekly quota drives the weekly ring and the 5-hour rate-limit window the session ring; after importing the browser sign-in, the **shared Kimi Code + Kimi Work pool** additionally drives the monthly ring. Rings and legend rows fill from their **remaining** values.
 - A refresh failure preserves the last confirmed data and marks it stale.

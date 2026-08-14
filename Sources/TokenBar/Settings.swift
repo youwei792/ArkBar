@@ -38,6 +38,23 @@ final class AppSettings: ObservableObject {
         case manual
     }
 
+    /// What numeric value the menu bar shows for balance-based providers
+    /// (DeepSeek, Nebula). Plan-based providers always show a percentage;
+    /// this only affects providers whose "remaining" is a money balance.
+    enum BalanceDisplay: String, CaseIterable {
+        /// Remaining percentage of the balance/quota, e.g. `73%`.
+        case percent
+        /// Remaining money balance with currency symbol, e.g. `¥45.00`.
+        case balance
+
+        var displayName: String {
+            switch self {
+            case .percent: L(.displayValuePercent)
+            case .balance: L(.displayValueBalance)
+            }
+        }
+    }
+
     /// Menu-bar display layout. Mirrors CodexBar's menu-bar style options:
     /// a meter capsule, the provider logo, the remaining percent, or combos.
     enum DisplayMode: String, CaseIterable {
@@ -124,6 +141,14 @@ final class AppSettings: ObservableObject {
     @Published var showKimi: Bool {
         didSet { UserDefaults.standard.set(showKimi, forKey: Keys.showKimi) }
     }
+    /// Whether the menu bar shows the remaining percent or the money balance
+    /// for balance-based providers (DeepSeek, Nebula).
+    @Published var deepseekValueDisplay: BalanceDisplay {
+        didSet { UserDefaults.standard.set(deepseekValueDisplay.rawValue, forKey: Keys.deepseekValueDisplay) }
+    }
+    @Published var nebulaValueDisplay: BalanceDisplay {
+        didSet { UserDefaults.standard.set(nebulaValueDisplay.rawValue, forKey: Keys.nebulaValueDisplay) }
+    }
     /// Providers the switcher offers, in canonical order, minus hidden ones.
     /// When `showSummary` is true, the summary button is always the first item.
     var visibleTabs: [ProviderTab] {
@@ -138,6 +163,17 @@ final class AppSettings: ObservableObject {
         case .nebula: showNebula
         case .zai: showZai
         case .kimi: showKimi
+        }
+    }
+
+    /// Whether the given tab should display a money balance instead of a
+    /// percentage in the menu bar. Only DeepSeek and Nebula carry currency
+    /// balances; all other providers return false.
+    func showsBalanceInStatusBar(_ tab: ProviderTab) -> Bool {
+        switch tab {
+        case .deepseek: deepseekValueDisplay == .balance
+        case .nebula: nebulaValueDisplay == .balance
+        case .ark, .opencode, .zai, .kimi: false
         }
     }
 
@@ -223,6 +259,11 @@ final class AppSettings: ObservableObject {
 
     func loadKimiFromKeychain() {
         kimiAPIKey = CookieKeychainStore.load(provider: "kimi-key") ?? ""
+        kimiAuthToken = CookieKeychainStore.load(provider: "kimi-auth") ?? ""
+    }
+
+    func loadKimiAuthFromKeychain() {
+        kimiAuthToken = CookieKeychainStore.load(provider: "kimi-auth") ?? ""
     }
 
     func setNebulaAPIKey(_ value: String?) {
@@ -285,6 +326,8 @@ final class AppSettings: ObservableObject {
         static let showNebula = "tokenbar.showNebula"
         static let showZai = "tokenbar.showZai"
         static let showKimi = "tokenbar.showKimi"
+        static let deepseekValueDisplay = "tokenbar.deepseekValueDisplay"
+        static let nebulaValueDisplay = "tokenbar.nebulaValueDisplay"
         static let zaiRegion = "tokenbar.zaiRegion"
         static let nebulaBaseURL = "tokenbar.nebulaBaseURL"
         static let opencodeWorkspaceID = "tokenbar.opencodeWorkspaceID"
@@ -315,6 +358,12 @@ final class AppSettings: ObservableObject {
         self.showNebula = defaults.object(forKey: Keys.showNebula) as? Bool ?? true
         self.showZai = defaults.object(forKey: Keys.showZai) as? Bool ?? true
         self.showKimi = defaults.object(forKey: Keys.showKimi) as? Bool ?? true
+        let deepseekValueRaw = defaults.string(forKey: Keys.deepseekValueDisplay)
+            ?? BalanceDisplay.percent.rawValue
+        self.deepseekValueDisplay = BalanceDisplay(rawValue: deepseekValueRaw) ?? .percent
+        let nebulaValueRaw = defaults.string(forKey: Keys.nebulaValueDisplay)
+            ?? BalanceDisplay.percent.rawValue
+        self.nebulaValueDisplay = BalanceDisplay(rawValue: nebulaValueRaw) ?? .percent
         self.opencodeWorkspaceID = defaults.string(forKey: Keys.opencodeWorkspaceID) ?? ""
         let cookieSourceRaw = defaults.string(forKey: Keys.opencodeCookieSource)
             ?? OpenCodeCookieSource.automatic.rawValue

@@ -43,6 +43,21 @@ enum KimiCredentialResolver {
 private struct KimiCodeAPIUsageResponse: Decodable {
     let usage: KimiUsageDetail
     let limits: [KimiRateLimit]?
+    let totalQuota: KimiUsageDetail?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.usage = try container.decode(KimiUsageDetail.self, forKey: .usage)
+        self.limits = try container.decodeIfPresent([KimiRateLimit].self, forKey: .limits)
+        // The Code API often sends `"totalQuota": {}` when the key has no pool view.
+        self.totalQuota = try? container.decode(KimiUsageDetail.self, forKey: .totalQuota)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case usage
+        case limits
+        case totalQuota
+    }
 }
 
 struct KimiUsageDetail: Decodable {
@@ -125,6 +140,18 @@ private struct KimiWindow: Decodable {
 
 private struct KimiUsageResponse: Decodable {
     let usages: [KimiUsage]
+    let totalQuota: KimiUsageDetail?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.usages = try container.decodeIfPresent([KimiUsage].self, forKey: .usages) ?? []
+        self.totalQuota = try? container.decode(KimiUsageDetail.self, forKey: .totalQuota)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case usages
+        case totalQuota
+    }
 }
 
 private struct KimiUsage: Decodable {
@@ -168,6 +195,7 @@ struct KimiUsageSnapshot {
     let rateLimit: KimiUsageDetail?
     let sharedPool: KimiSubscriptionBalance?
     let codeWeeklyLimit: KimiSubscriptionRateLimit?
+    let totalQuota: KimiUsageDetail?
 }
 
 // MARK: - Provider
@@ -215,29 +243,97 @@ final class KimiProvider: UsageProvider {
     func fetch(environment: [String: String]) async throws -> ProviderSnapshot {
         let apiKey = await MainActor.run { Self.trimmed(self.settings.kimiAPIKey) }
             ?? KimiCredentialResolver.apiKey(environment: environment)
-        let authToken = await MainActor.run { Self.trimmed(self.settings.kimiAuthToken) }
+        let cachedToken = await MainActor.run { Self.trimmed(self.settings.kimiAuthToken) }
             ?? KimiCredentialResolver.authToken(environment: environment)
+        var credential = KimiBrowserSession.resolveCredential(cached: cachedToken)
+
+        // If the resolved access token is expired/expiring, proactively refresh
+        // it using the long-lived refresh token. Access tokens live only ~15
+        // minutes, so without this step the monthly ring disappears between
+        // Kimi.app launches.
+        if let cred = credential, KimiBrowserSession.accessTokenNeedsRefresh(cred.accessToken) {
+            credential = await refreshIfPossible(credential: cred)
+        }
+
+        if let cred = credential {
+            if let accessToken = cred.accessToken, accessToken != cachedToken {
+                KimiBrowserSession.persist(
+                    token: accessToken,
+                    sourceLabel: cred.source)
+            }
+            if let refreshToken = cred.refreshToken {
+                KimiBrowserSession.persistRefreshToken(refreshToken)
+            }
+            if cred.accessToken != nil && cred.accessToken != cachedToken {
+                await MainActor.run { self.settings.loadKimiAuthFromKeychain() }
+            }
+        }
+        let authToken = credential?.accessToken ?? cachedToken
 
         guard let apiKey, !apiKey.isEmpty else {
-            // No API key: the web session alone still reports Code usage plus the
-            // shared pool and Code 7-day windows from the membership console.
             guard let authToken, !authToken.isEmpty else {
                 throw UsageError.kimiMissingCredentials
             }
-            let snapshot = try await fetchWebSession(authToken: authToken)
+            let snapshot = try await fetchWebSessionWithRetry(
+                authToken: authToken,
+                refreshToken: credential?.refreshToken)
             return Self.makeProviderSnapshot(from: snapshot)
         }
 
         let snapshot = try await fetchUsage(apiKey: apiKey)
-        // Enrich with the shared-pool / Code 7-day windows when a web session is
-        // cached or in the environment. Best-effort: a failed stats call never
-        // fails the whole refresh.
         if let authToken, !authToken.isEmpty {
-            if let enriched = try? await fetchWebSession(authToken: authToken) {
+            if let enriched = try? await fetchWebSessionWithRetry(
+                authToken: authToken,
+                refreshToken: credential?.refreshToken)
+            {
                 return Self.makeProviderSnapshot(from: enriched)
             }
         }
         return Self.makeProviderSnapshot(from: snapshot)
+    }
+
+    /// Refreshes the access token if a refresh token is available; returns the
+    /// original credential when refresh is not possible or fails.
+    private func refreshIfPossible(
+        credential: KimiBrowserSession.Credential
+    ) async -> KimiBrowserSession.Credential {
+        let refreshToken = credential.refreshToken ?? KimiBrowserSession.cachedRefreshToken()
+        guard let refreshToken else { return credential }
+        do {
+            let refreshed = try await KimiBrowserSession.refreshAccessToken(
+                refreshToken: refreshToken,
+                transport: transport)
+            KimiBrowserSession.persistRefreshed(
+                accessToken: refreshed.accessToken,
+                refreshToken: refreshed.refreshToken)
+            await MainActor.run { self.settings.loadKimiAuthFromKeychain() }
+            return KimiBrowserSession.Credential(
+                accessToken: refreshed.accessToken,
+                refreshToken: refreshed.refreshToken,
+                source: credential.source)
+        } catch {
+            return credential
+        }
+    }
+
+    /// Fetches the web session, and on a 401 tries one refresh-and-retry.
+    private func fetchWebSessionWithRetry(
+        authToken: String,
+        refreshToken: String?
+    ) async throws -> KimiUsageSnapshot {
+        do {
+            return try await fetchWebSession(authToken: authToken)
+        } catch UsageError.kimiInvalidToken {
+            guard let refreshToken else { throw UsageError.kimiInvalidToken }
+            let refreshed = try await KimiBrowserSession.refreshAccessToken(
+                refreshToken: refreshToken,
+                transport: transport)
+            KimiBrowserSession.persistRefreshed(
+                accessToken: refreshed.accessToken,
+                refreshToken: refreshed.refreshToken)
+            await MainActor.run { self.settings.loadKimiAuthFromKeychain() }
+            return try await fetchWebSession(authToken: refreshed.accessToken)
+        }
     }
 
     static func makeWindows(from snapshot: KimiUsageSnapshot) -> [UsageWindow] {
@@ -267,6 +363,8 @@ final class KimiProvider: UsageProvider {
                 usedPercent: Self.clampedPercent(ratio * 100),
                 resetsAt: Self.parseDate(sharedPool.expireTime),
                 label: "Monthly", windowMinutes: nil))
+        } else if let totalQuota = snapshot.totalQuota {
+            windows.append(Self.window(from: totalQuota, label: "Monthly", windowMinutes: nil))
         }
         return windows
     }
@@ -328,18 +426,22 @@ final class KimiProvider: UsageProvider {
     }
 
     /// Full web path: Code usage (GetUsages) plus the shared-pool / Code 7-day
-    /// windows (GetSubscriptionStats), authenticated with the `kimi-auth` JWT.
+    /// windows (GetSubscriptionStats), authenticated with an account access JWT.
     private func fetchWebSession(authToken: String) async throws -> KimiUsageSnapshot {
-        let usage = try await fetchWebUsage(authToken: authToken)
+        let usageResponse = try await fetchWebUsage(authToken: authToken)
+        guard let codingUsage = usageResponse.usages.first(where: { $0.scope == "FEATURE_CODING" }) else {
+            throw UsageError.parseFailed("FEATURE_CODING scope not found in Kimi usage response")
+        }
         let stats = try? await fetchSubscriptionStats(authToken: authToken)
         return KimiUsageSnapshot(
-            weekly: usage.detail,
-            rateLimit: usage.limits?.first?.detail,
+            weekly: codingUsage.detail,
+            rateLimit: codingUsage.limits?.first?.detail,
             sharedPool: stats?.subscriptionBalance,
-            codeWeeklyLimit: stats?.ratelimitCode7d)
+            codeWeeklyLimit: stats?.ratelimitCode7d,
+            totalQuota: usageResponse.totalQuota)
     }
 
-    private func fetchWebUsage(authToken: String) async throws -> KimiUsage {
+    private func fetchWebUsage(authToken: String) async throws -> KimiUsageResponse {
         var request = Self.webRequest(path: "apiv2/kimi.gateway.billing.v1.BillingService/GetUsages", authToken: authToken)
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["scope": ["FEATURE_CODING"]])
         let response = try await transport.response(for: request)
@@ -352,11 +454,7 @@ final class KimiProvider: UsageProvider {
             throw UsageError.apiError(statusCode: response.statusCode, message: "Kimi web usage: \(body)")
         }
         Self.webSessionInvalid = false
-        let usageResponse = try JSONDecoder().decode(KimiUsageResponse.self, from: response.data)
-        guard let codingUsage = usageResponse.usages.first(where: { $0.scope == "FEATURE_CODING" }) else {
-            throw UsageError.parseFailed("FEATURE_CODING scope not found in Kimi usage response")
-        }
-        return codingUsage
+        return try JSONDecoder().decode(KimiUsageResponse.self, from: response.data)
     }
 
     private func fetchSubscriptionStats(authToken: String) async throws -> KimiSubscriptionStatsResponse {
@@ -393,6 +491,17 @@ final class KimiProvider: UsageProvider {
         request.setValue("en-US", forHTTPHeaderField: "x-language")
         request.setValue("web", forHTTPHeaderField: "x-msh-platform")
         request.setValue(TimeZone.current.identifier, forHTTPHeaderField: "r-timezone")
+        if let claims = KimiBrowserSession.decodeJWTPayload(authToken) {
+            if let deviceId = claims["device_id"] as? String, !deviceId.isEmpty {
+                request.setValue(deviceId, forHTTPHeaderField: "x-msh-device-id")
+            }
+            if let sessionId = claims["ssid"] as? String, !sessionId.isEmpty {
+                request.setValue(sessionId, forHTTPHeaderField: "x-msh-session-id")
+            }
+            if let traffic = claims["sub"] as? String, !traffic.isEmpty {
+                request.setValue(traffic, forHTTPHeaderField: "x-traffic-id")
+            }
+        }
         request.timeoutInterval = Self.timeoutSeconds
         return request
     }
@@ -450,6 +559,7 @@ final class KimiProvider: UsageProvider {
             weekly: response.usage,
             rateLimit: response.limits?.first?.detail,
             sharedPool: nil,
-            codeWeeklyLimit: nil)
+            codeWeeklyLimit: nil,
+            totalQuota: response.totalQuota)
     }
 }

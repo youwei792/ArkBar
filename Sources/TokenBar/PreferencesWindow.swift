@@ -454,6 +454,12 @@ private struct DeepSeekPreferencesPane: View {
                         get: { settings.showDeepSeek },
                         set: { settings.setVisible(.deepseek, $0) }))
                         .toggleStyle(.switch)
+                    Picker(L(.menuBarValue), selection: $settings.deepseekValueDisplay) {
+                        ForEach(AppSettings.BalanceDisplay.allCases, id: \.self) { value in
+                            Text(value.displayName).tag(value)
+                        }
+                    }
+                    .pickerStyle(.radioGroup)
                 }
 
                 Section(L(.sectionConnection)) {
@@ -537,6 +543,12 @@ private struct NebulaPreferencesPane: View {
                         get: { settings.showNebula },
                         set: { settings.setVisible(.nebula, $0) }))
                         .toggleStyle(.switch)
+                    Picker(L(.menuBarValue), selection: $settings.nebulaValueDisplay) {
+                        ForEach(AppSettings.BalanceDisplay.allCases, id: \.self) { value in
+                            Text(value.displayName).tag(value)
+                        }
+                    }
+                    .pickerStyle(.radioGroup)
                 }
 
                 Section(L(.sectionConnection)) {

@@ -123,6 +123,22 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 self?.updateIcon()
             }
             .store(in: &cancellables)
+        // Per-provider value (percent vs balance) affects both the title text
+        // and the item width.
+        settings.$deepseekValueDisplay
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.applyStatusItemLength()
+                self?.updateIcon()
+            }
+            .store(in: &cancellables)
+        settings.$nebulaValueDisplay
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.applyStatusItemLength()
+                self?.updateIcon()
+            }
+            .store(in: &cancellables)
         NotificationCenter.default.publisher(for: L10n.languageDidChange)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.scheduleMenuRebuildIfOpen() }
@@ -146,17 +162,19 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         statusItem.menu = persistentMenu
     }
 
-    static func statusItemLength(for displayMode: AppSettings.DisplayMode) -> CGFloat {
+    static func statusItemLength(for displayMode: AppSettings.DisplayMode, showsBalance: Bool = false) -> CGFloat {
         switch displayMode {
         case .iconOnly, .logoOnly: 24
-        case .iconAndPercent, .logoAndPercent: 58
+        case .iconAndPercent, .logoAndPercent: showsBalance ? 86 : 58
         case .logoAndBar: 46
-        case .percentOnly: 40
+        case .percentOnly: showsBalance ? 64 : 40
         }
     }
 
     private func applyStatusItemLength() {
-        statusItem.length = Self.statusItemLength(for: settings.displayMode)
+        statusItem.length = Self.statusItemLength(
+            for: settings.displayMode,
+            showsBalance: settings.showsBalanceInStatusBar(iconTab(for: store.currentStatus)))
     }
 
     /// Picks the best provider tab for the status-item icon: the explicit tab in
@@ -205,6 +223,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         guard let button = statusItem.button else { return }
         let tab = explicitTab ?? iconTab(for: effectiveStatus)
+        let showBalance = settings.showsBalanceInStatusBar(tab)
+        let valueText = statusValueText(
+            for: effectiveStatus, tab: tab, remaining: remaining,
+            stale: stale, showBalance: showBalance)
 
         switch settings.displayMode {
         case .iconOnly:
@@ -212,32 +234,56 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             button.title = ""
         case .iconAndPercent:
             button.image = IconRenderer.makeBarIcon(remainingPercent: remaining, stale: stale)
-            if let remaining, !stale {
-                setPercentTitle("\(Int(remaining.rounded()))%", on: button)
-            } else {
-                setPercentTitle("–", on: button)
-            }
+            setPercentTitle(valueText, on: button)
         case .percentOnly:
             button.image = nil
-            if let remaining, !stale {
-                setPercentTitle("\(Int(remaining.rounded()))%", on: button)
-            } else {
-                setPercentTitle("–", on: button)
-            }
+            setPercentTitle(valueText, on: button)
         case .logoOnly:
             button.image = IconRenderer.makeLogoIcon(tab: tab)
             button.title = ""
         case .logoAndPercent:
             button.image = IconRenderer.makeLogoIcon(tab: tab)
-            if let remaining, !stale {
-                setPercentTitle("\(Int(remaining.rounded()))%", on: button)
-            } else {
-                setPercentTitle("–", on: button)
-            }
+            setPercentTitle(valueText, on: button)
         case .logoAndBar:
             button.image = IconRenderer.makeLogoAndBarIcon(
                 tab: tab, remainingPercent: remaining, stale: stale)
             button.title = ""
+        }
+    }
+
+    /// Builds the numeric title shown next to the icon. For balance-capable
+    /// providers configured to show balance, this is the remaining money with
+    /// its currency symbol; otherwise it is the remaining percent. Falls back to
+    /// "–" when there is no value to display.
+    private func statusValueText(
+        for status: UsageStore.LoadStatus, tab: ProviderTab,
+        remaining: Double?, stale: Bool, showBalance: Bool
+    ) -> String {
+        if showBalance {
+            let snapshot = status.snapshot
+            if let snapshot, let text = balanceText(for: tab, snapshot: snapshot) {
+                return text
+            }
+        }
+        if let remaining {
+            return "\(Int(remaining.rounded()))%"
+        }
+        return "–"
+    }
+
+    /// Formats the remaining balance for a balance-capable provider, or nil if
+    /// the snapshot carries no balance (e.g. fetch only partially succeeded).
+    private func balanceText(for tab: ProviderTab, snapshot: ProviderSnapshot) -> String? {
+        switch tab {
+        case .deepseek:
+            guard let summary = snapshot.plans.first?.deepseek else { return nil }
+            let symbol = DeepSeekCardView.currencySymbol(summary.currency)
+            return DeepSeekCardView.money(summary.totalBalance, symbol: symbol)
+        case .nebula:
+            guard let summary = snapshot.plans.first?.nebula else { return nil }
+            return NebulaCardView.money(summary.balance, symbol: "¥")
+        case .ark, .opencode, .zai, .kimi:
+            return nil
         }
     }
 
@@ -373,6 +419,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     /// Convenience: icon + menu rebuild when any provider status changes.
     private func updateIconAndMenu() {
+        applyStatusItemLength()
         updateIcon()
         scheduleMenuRebuildIfOpen()
     }
