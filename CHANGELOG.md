@@ -4,7 +4,7 @@ All notable public changes to TokenBar are documented here.
 
 ## Unreleased
 
-- Added a Kimi For Coding tab: membership quota from `api.kimi.com/coding/v1/usages` (weekly quota + 5-hour rate-limit window, mapped to the weekly and session rings), with an API key stored in Keychain + file cache (or the `KIMI_CODE_API_KEY` environment fallback).
+- Added a Kimi For Coding tab: membership quota from `api.kimi.com/coding/v1/usages` (weekly quota + 5-hour rate-limit window, mapped to the weekly and session rings), with an API key stored in Keychain + file cache (or the `KIMI_CODE_API_KEY` environment fallback). Importing the `www.kimi.com` browser sign-in additionally reads `GetSubscriptionStats` and maps the **shared Kimi Code + Kimi Work pool** to the monthly ring (the two products bill against one shared pool).
 - Added a Z.ai (Zhipu GLM) Coding Plan tab: quota windows from `api/monitor/usage/quota/limit` (5-hour session + weekly rings, plus a monthly MCP time window on some plans), with Global / BigModel CN region selection and an API key stored in Keychain + file cache (or the `Z_AI_API_KEY` environment fallback).
 - `CREDIT_LIMIT` windows (the type newer BigModel CN plans return instead of `TOKENS_LIMIT`) are treated as token/credit windows and drive the 5-hour and weekly rings; the plan tier is read from the response's `level` field.
 - Added a multi-provider **Overview** tab that lists every visible provider with remaining percent and a teal→blue capsule meter; click a row to open that provider's full card. Toggle it in **Settings → General**.

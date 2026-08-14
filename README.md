@@ -71,7 +71,7 @@ lipo -archs TokenBar
 | DeepSeek | 三选一：设置页填写 API Key / Platform Token（存 Keychain）、环境变量 `DEEPSEEK_API_KEY` / `DEEPSEEK_PLATFORM_TOKEN`，或让 Chrome 登录 platform.deepseek.com 后自动读取 | 余额来自 `api.deepseek.com/user/balance`（或平台钱包）；今日/每月费用、Token、请求次数与分类明细来自平台 `usage/amount` + `usage/cost`。凭据优先级：设置值 > 环境变量 > Chrome 会话。 |
 | APINebula（中转站） | 在“设置 → APINebula 中转”中显式点击“重新读取浏览器登录”（控制台会话缓存到 Keychain）；可选填 API Key | 余额/累计已用来自控制台 `api/user/self`；今日/每月费用、Token、请求次数与缓存读/未缓存/输出分类来自 `api/log/self` 使用日志（缓存 token 位于日志 `other` 字段）。余额与日志是控制台接口，API Key 仅保证 `/v1` 模型调用。 |
 | 智谱（Z.ai） | 在“设置 → 智谱 Coding Plan”中填写 API Key（存 Keychain + 文件缓存）；可选环境变量 `Z_AI_API_KEY` 兜底；API 区域可选 Global（`api.z.ai`）或 BigModel 国内站（`open.bigmodel.cn`），默认国内站 | 读取 `api/monitor/usage/quota/limit` 返回的 Coding Plan 额度窗口：5 小时 + 每周（session/weekly 环），部分套餐另有每月 MCP 时间窗口（monthly 环）。凭据优先级：设置值 > 环境变量。 |
-| Kimi For Coding | 在“设置 → Kimi For Coding”中填写 API Key（存 Keychain + 文件缓存）；可选环境变量 `KIMI_CODE_API_KEY` 兜底 | 读取 `api.kimi.com/coding/v1/usages` 返回的会员配额：总配额（每周，weekly 环）+ 5 小时限流窗口（session 环）。凭据优先级：设置值 > 环境变量。 |
+| Kimi For Coding | API Key 可选（在“设置 → Kimi For Coding”填写，存 Keychain + 文件缓存；环境变量 `KIMI_CODE_API_KEY` 兜底）；在“设置 → Kimi For Coding”点“重新读取浏览器登录”导入 `www.kimi.com` 会话后可额外读取共享总池 | 读取 `api.kimi.com/coding/v1/usages` 的 Code 会员配额：总配额（每周，weekly 环）+ 5 小时限流窗口（session 环）；浏览器会话另读取 `www.kimi.com` 的 `GetSubscriptionStats`，把 **Kimi Code + Kimi Work 共享总池**映射为 monthly 环。凭据优先级：设置值 > 环境变量。 |
 
 Ark CLI 的最新安装方式请以官方 [Ark CLI 文档](https://github.com/volcengine/ark-cli) 为准。
 
@@ -95,7 +95,7 @@ export KIMI_CODE_API_KEY='...'
 - DeepSeek 标签页使用单个余额圆环：已用比例 = 本月费用 ÷ (本月费用 + 余额)，充值后余额增加，圆环在下次刷新时自动重算；圆环下方显示缓存命中/未命中/输出分类明细与常用模型。
 - APINebula 标签页使用单个余额圆环：已用比例 = 累计已用 ÷ (累计已用 + 余额)；圆环下方显示缓存读/未缓存/输出分类明细与常用模型。
 - 智谱（Z.ai）标签页显示 Coding Plan 额度圆环：5 小时窗口对应 session 环、每周窗口对应 weekly 环（部分套餐另有每月 MCP 时间窗口对应 monthly 环）；圆环与图例均按**剩余**填充。
-- Kimi For Coding 标签页显示会员配额圆环：总配额（每周）对应 weekly 环、5 小时限流窗口对应 session 环；圆环与图例均按**剩余**填充。
+- Kimi For Coding 标签页显示会员配额圆环：Code 总配额（每周）对应 weekly 环、5 小时限流窗口对应 session 环；导入浏览器登录后，**Kimi Code + Kimi Work 共享总池**额外对应 monthly 环。圆环与图例均按**剩余**填充。
 - 刷新失败时会保留上次确认的数据，并标记为过期数据。
 - 默认仅按“设置 → 刷新 → 间隔”自动同步；可开启“点开菜单栏图标时刷新”，在每次打开角标时额外刷新。重复触发会合并为一次请求。
 - 手动“刷新”会保留面板，在原位置显示“刷新中”；成功后显示“刚刚更新 / X 分钟前更新”，失败时显示原因。
@@ -115,10 +115,10 @@ export KIMI_CODE_API_KEY='...'
 - 浏览器会话导入（OpenCode/APINebula）是显式设置操作；后台与启动刷新永不读取浏览器 cookie 库，也不会因 ad-hoc 重签而反复弹出钥匙串密码框。
 - 在 DeepSeek 设置页填写的 API Key / Platform Token 只保存在本机 Keychain + 文件缓存，不会写入 UserDefaults、源码或日志。
 - 在智谱设置页填写的 API Key 同样只保存在本机 Keychain + 文件缓存，不会写入 UserDefaults、源码或日志；区域偏好仅存 UserDefaults，不含任何凭据。
-- 在 Kimi For Coding 设置页填写的 API Key 同样只保存在本机 Keychain + 文件缓存，不会写入 UserDefaults、源码或日志。
+- 在 Kimi For Coding 设置页填写的 API Key 同样只保存在本机 Keychain + 文件缓存，不会写入 UserDefaults、源码或日志；浏览器导入只读取 `www.kimi.com` 的 `kimi-auth` cookie（JWT），仅用于调用控制台用量接口，同样只存 Keychain + 文件缓存。
 - `arkcli` 自己管理 SSO 会话；TokenBar 只运行 `arkcli usage plan --format json` 并解析输出。
 - AK/SK 与 Ark API Key 仅从启动环境读取，TokenBar 不会把它们写入磁盘。
-- 网络请求仅发送到所选数据源需要的火山方舟接口、`opencode.ai`、`platform.deepseek.com`、智谱配额接口（`open.bigmodel.cn` / `api.z.ai`）或 Kimi 配额接口（`api.kimi.com`）。
+- 网络请求仅发送到所选数据源需要的火山方舟接口、`opencode.ai`、`platform.deepseek.com`、智谱配额接口（`open.bigmodel.cn` / `api.z.ai`）、Kimi 配额接口（`api.kimi.com`）或 Kimi 控制台接口（`www.kimi.com`）。
 
 ## 开发与测试
 
