@@ -1018,17 +1018,19 @@ struct ProviderVisibilityTests {
     @Test("Hidden providers drop out of the switcher list")
     func visibleTabsFilters() {
         let settings = AppSettings.shared
-        let original = (settings.showArk, settings.showOpenCode, settings.showDeepSeek, settings.showNebula)
+        let original = (settings.showArk, settings.showOpenCode, settings.showDeepSeek, settings.showNebula, settings.showZai)
         defer {
             settings.showArk = original.0
             settings.showOpenCode = original.1
             settings.showDeepSeek = original.2
             settings.showNebula = original.3
+            settings.showZai = original.4
         }
         settings.showArk = false
         settings.showOpenCode = true
         settings.showDeepSeek = true
         settings.showNebula = false
+        settings.showZai = false
         #expect(settings.visibleTabs == [.opencode, .deepseek])
         #expect(settings.isVisible(.ark) == false)
         settings.showOpenCode = false
@@ -1388,5 +1390,54 @@ struct NebulaConsoleAuthErrorTests {
         } catch {
             Issue.record("unexpected non-UsageError \(error)")
         }
+    }
+}
+
+@Suite("ZaiProvider decode")
+struct ZaiProviderTests {
+    @Test("CREDIT_LIMIT windows (real BigModel payload) parse as token-like")
+    func parsesCreditLimits() throws {
+        let json = #"""
+        {"code":200,"msg":"操作成功","data":{"limits":[
+          {"type":"CREDIT_LIMIT","unit":3,"number":5,"usage":2000,"currentValue":1332,"remaining":667,"percentage":66,"nextResetTime":1786708599093},
+          {"type":"CREDIT_LIMIT","unit":6,"number":1,"usage":10000,"currentValue":1332,"remaining":8667,"percentage":13,"nextResetTime":1787295317998}],
+          "level":"lite"},"success":true}
+        """#
+        let snapshot = try ZaiProvider.parse(data: json.data(using: .utf8)!)
+        // BigModel CN returns the tier under `level`, not `planName`.
+        #expect(snapshot.planName == "lite")
+        #expect(snapshot.timeLimit == nil)
+        let session = try #require(snapshot.sessionTokenLimit)
+        let weekly = try #require(snapshot.tokenLimit)
+        // 5-hour (unit=3, number=5) drives the session ring; the weekly window
+        // (unit=6, number=1) the weekly ring. Neither may be dropped.
+        #expect(session.windowMinutes == 300)
+        #expect(weekly.windowMinutes == 7 * 24 * 60)
+        // Derived from usage/remaining/currentValue (66%/13% are the API's own).
+        #expect(session.usedPercent == Double(1333) / Double(2000) * 100)
+        #expect(weekly.usedPercent == Double(1333) / Double(10000) * 100)
+        #expect(snapshot.isValid)
+    }
+
+    @Test("TOKENS_LIMIT + TIME_LIMIT (CodexBar shape) still parses")
+    func parsesClassicLimits() throws {
+        let json = #"""
+        {"code":200,"success":true,"data":{"limits":[
+          {"type":"TOKENS_LIMIT","unit":3,"number":5,"usage":2000,"remaining":500,"currentValue":1500,"percentage":75,"nextResetTime":1786708599093},
+          {"type":"TIME_LIMIT","unit":5,"number":1,"usage":60,"remaining":45,"percentage":25,"nextResetTime":1786794999093}],
+          "planName":"personal"}}
+        """#
+        let snapshot = try ZaiProvider.parse(data: json.data(using: .utf8)!)
+        #expect(snapshot.planName == "personal")
+        #expect(snapshot.sessionTokenLimit == nil)
+        let token = try #require(snapshot.tokenLimit)
+        #expect(token.type == .tokensLimit)
+        #expect(token.windowMinutes == 300)
+        #expect(token.usedPercent == Double(1500) / Double(2000) * 100)
+        let time = try #require(snapshot.timeLimit)
+        #expect(time.type == .timeLimit)
+        #expect(time.windowMinutes == 1)
+        #expect(time.usedPercent == Double(15) / Double(60) * 100)
+        #expect(snapshot.isValid)
     }
 }

@@ -118,6 +118,9 @@ final class AppSettings: ObservableObject {
     @Published var showNebula: Bool {
         didSet { UserDefaults.standard.set(showNebula, forKey: Keys.showNebula) }
     }
+    @Published var showZai: Bool {
+        didSet { UserDefaults.standard.set(showZai, forKey: Keys.showZai) }
+    }
     /// Providers the switcher offers, in canonical order, minus hidden ones.
     /// When `showSummary` is true, the summary button is always the first item.
     var visibleTabs: [ProviderTab] {
@@ -130,6 +133,7 @@ final class AppSettings: ObservableObject {
         case .opencode: showOpenCode
         case .deepseek: showDeepSeek
         case .nebula: showNebula
+        case .zai: showZai
         }
     }
 
@@ -141,6 +145,7 @@ final class AppSettings: ObservableObject {
         case .opencode: showOpenCode = visible
         case .deepseek: showDeepSeek = visible
         case .nebula: showNebula = visible
+        case .zai: showZai = visible
         }
         if !visible, case .provider(tab) = selectedMenu {
             if showSummary {
@@ -174,9 +179,28 @@ final class AppSettings: ObservableObject {
     }
     @Published private(set) var nebulaAPIKey: String
 
+    /// Z.ai (智谱 GLM) Coding Plan region (Global vs BigModel CN) and its API
+    /// key (Keychain mirror, never persisted to UserDefaults).
+    @Published var zaiRegion: ZaiAPIRegion {
+        didSet { UserDefaults.standard.set(zaiRegion.rawValue, forKey: Keys.zaiRegion) }
+    }
+    @Published private(set) var zaiAPIKey: String
+
     var deepseekApiKeyHasValue: Bool { !deepseekApiKey.isEmpty }
     var deepseekPlatformTokenHasValue: Bool { !deepseekPlatformToken.isEmpty }
     var nebulaAPIKeyHasValue: Bool { !nebulaAPIKey.isEmpty }
+    var zaiAPIKeyHasValue: Bool { !zaiAPIKey.isEmpty }
+
+    func setZaiAPIKey(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: key, provider: "zai-token")
+        zaiAPIKey = persisted ? (key ?? "") : (CookieKeychainStore.load(provider: "zai-token") ?? "")
+    }
+
+    func loadZaiFromKeychain() {
+        zaiAPIKey = CookieKeychainStore.load(provider: "zai-token") ?? ""
+    }
 
     func setNebulaAPIKey(_ value: String?) {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -236,6 +260,8 @@ final class AppSettings: ObservableObject {
         static let showOpenCode = "tokenbar.showOpenCode"
         static let showDeepSeek = "tokenbar.showDeepSeek"
         static let showNebula = "tokenbar.showNebula"
+        static let showZai = "tokenbar.showZai"
+        static let zaiRegion = "tokenbar.zaiRegion"
         static let nebulaBaseURL = "tokenbar.nebulaBaseURL"
         static let opencodeWorkspaceID = "tokenbar.opencodeWorkspaceID"
         static let opencodeCookieSource = "tokenbar.opencodeCookieSource"
@@ -263,6 +289,7 @@ final class AppSettings: ObservableObject {
         self.showOpenCode = defaults.object(forKey: Keys.showOpenCode) as? Bool ?? true
         self.showDeepSeek = defaults.object(forKey: Keys.showDeepSeek) as? Bool ?? true
         self.showNebula = defaults.object(forKey: Keys.showNebula) as? Bool ?? true
+        self.showZai = defaults.object(forKey: Keys.showZai) as? Bool ?? true
         self.opencodeWorkspaceID = defaults.string(forKey: Keys.opencodeWorkspaceID) ?? ""
         let cookieSourceRaw = defaults.string(forKey: Keys.opencodeCookieSource)
             ?? OpenCodeCookieSource.automatic.rawValue
@@ -273,5 +300,8 @@ final class AppSettings: ObservableObject {
         self.nebulaBaseURL = defaults.string(forKey: Keys.nebulaBaseURL)
             ?? NebulaProvider.defaultBaseURL
         self.nebulaAPIKey = CookieKeychainStore.load(provider: "nebula-key") ?? ""
+        let zaiRegionRaw = defaults.string(forKey: Keys.zaiRegion) ?? ZaiAPIRegion.bigmodelCN.rawValue
+        self.zaiRegion = ZaiAPIRegion(rawValue: zaiRegionRaw) ?? .bigmodelCN
+        self.zaiAPIKey = CookieKeychainStore.load(provider: "zai-token") ?? ""
     }
 }

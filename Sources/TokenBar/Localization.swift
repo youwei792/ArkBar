@@ -106,6 +106,7 @@ enum LKey: String {
     case tabOpenCode = "tab.opencode"
     case tabDeepSeek = "tab.deepseek"
     case tabNebula = "tab.nebula"
+    case tabZai = "tab.zai"
     case tabSummary = "tab.summary"
     case showProvider = "settings.showProvider"
     case showSummary = "settings.showSummary"
@@ -122,6 +123,7 @@ enum LKey: String {
     case settingsOpenCode = "settings.openCode"
     case settingsDeepSeek = "settings.deepseek"
     case settingsNebula = "settings.nebula"
+    case settingsZai = "settings.zai"
     case settingsDiagnostics = "settings.diagnostics"
     case sectionAppearance = "settings.sectionAppearance"
     case sectionBehavior = "settings.sectionBehavior"
@@ -133,8 +135,10 @@ enum LKey: String {
     case refreshOpenCode = "settings.refreshOpenCode"
     case refreshDeepSeek = "settings.refreshDeepSeek"
     case refreshNebula = "settings.refreshNebula"
+    case refreshZai = "settings.refreshZai"
     case openDeepSeekPlatform = "menu.openDeepSeekPlatform"
     case openNebulaConsole = "menu.openNebulaConsole"
+    case openZaiConsole = "menu.openZaiConsole"
     case openCodeCookieSource = "settings.openCodeCookieSource"
     case openCodeCookieAutomatic = "settings.openCodeCookieAutomatic"
     case openCodeCookieManual = "settings.openCodeCookieManual"
@@ -192,6 +196,9 @@ enum LKey: String {
     case nebulaUsedTotal = "nebula.usedTotal"
     case nebulaUsageUnavailable = "nebula.usageUnavailable"
     case nebulaTokenDetail = "nebula.tokenDetail"
+    case zaiAPIKeyLabel = "zai.apiKeyLabel"
+    case zaiRegionLabel = "zai.regionLabel"
+    case zaiCredentialsHint = "zai.credentialsHint"
     case errorArkcliNotFound = "error.arkcliNotFound"
     case errorArkcliNotAuthenticated = "error.arkcliNotAuthenticated"
     case errorArkcliTimedOut = "error.arkcliTimedOut"
@@ -211,6 +218,8 @@ enum LKey: String {
     case errorNebulaInvalidToken = "error.nebulaInvalidToken"
     case errorNebulaBrowserSessionMissing = "error.nebulaBrowserSessionMissing"
     case errorNebulaBrowserAuthorizationRequired = "error.nebulaBrowserAuthorizationRequired"
+    case errorZaiMissingCredentials = "error.zaiMissingCredentials"
+    case errorZaiInvalidToken = "error.zaiInvalidToken"
     case errorProbeModels = "error.probeModels"
     case apiKeyNoHeaders = "apiKey.noHeaders"
     case apiKeyNoWindow = "apiKey.noWindow"
@@ -393,6 +402,7 @@ final class L10n: ObservableObject {
         add(.tabOpenCode, "OpenCode", "OpenCode")
         add(.tabDeepSeek, "DeepSeek", "DeepSeek")
         add(.tabNebula, "APINebula", "APINebula")
+        add(.tabZai, "智谱", "Z.ai")
         add(.tabSummary, "概览", "Overview")
         add(.showSummary, "在菜单栏显示概览", "Show overview in menu bar")
         add(.showProvider, "在菜单栏显示", "Show in menu bar")
@@ -409,6 +419,7 @@ final class L10n: ObservableObject {
         add(.settingsOpenCode, "OpenCode Go", "OpenCode Go")
         add(.settingsDeepSeek, "DeepSeek", "DeepSeek")
         add(.settingsNebula, "APINebula 中转", "APINebula Relay")
+        add(.settingsZai, "智谱 Coding Plan", "Z.ai Coding Plan")
         add(.settingsDiagnostics, "诊断", "Diagnostics")
         add(.sectionAppearance, "外观", "Appearance")
         add(.sectionBehavior, "行为", "Behavior")
@@ -420,8 +431,10 @@ final class L10n: ObservableObject {
         add(.refreshOpenCode, "刷新 OpenCode Go", "Refresh OpenCode Go")
         add(.refreshDeepSeek, "刷新 DeepSeek", "Refresh DeepSeek")
         add(.refreshNebula, "刷新 APINebula", "Refresh APINebula")
+        add(.refreshZai, "刷新智谱", "Refresh Z.ai")
         add(.openDeepSeekPlatform, "打开 DeepSeek 平台", "Open DeepSeek Platform")
         add(.openNebulaConsole, "打开 APINebula 控制台", "Open APINebula Console")
+        add(.openZaiConsole, "打开智谱用量页", "Open Z.ai Usage")
         add(.openCodeCookieSource, "Cookie 来源", "Cookie source")
         add(.openCodeCookieAutomatic, "自动读取浏览器", "Automatic from browser")
         add(.openCodeCookieManual, "手动 Cookie", "Manual Cookie")
@@ -479,6 +492,9 @@ final class L10n: ObservableObject {
         add(.nebulaUsedTotal, "已用 %@", "Used %@")
         add(.nebulaUsageUnavailable, "无法读取使用日志", "Usage log unavailable")
         add(.nebulaTokenDetail, "缓存读 %@ · 未缓存 %@ · 输出 %@", "Cache read %@ · Uncached %@ · Output %@")
+        add(.zaiAPIKeyLabel, "API Key", "API Key")
+        add(.zaiRegionLabel, "API 区域", "API region")
+        add(.zaiCredentialsHint, "在 bigmodel.cn 用户中心创建 API Key 并填入；也可设置环境变量 Z_AI_API_KEY。国内用户选 BigModel CN 区域。", "Create an API key at bigmodel.cn and paste it here, or set the Z_AI_API_KEY environment variable. China-mainland users should pick BigModel CN.")
         add(.errorArkcliNotFound, "未找到 arkcli。请安装后执行 `arkcli auth login volc-sso`。", "arkcli was not found. Install it, then run `arkcli auth login volc-sso`.")
         add(.errorArkcliNotAuthenticated, "arkcli 尚未登录。请执行 `arkcli auth login volc-sso` 后刷新。", "arkcli is not signed in. Run `arkcli auth login volc-sso`, then refresh.")
         add(.errorArkcliTimedOut, "arkcli 查询超时。请检查登录状态后重试。", "arkcli usage timed out. Check authentication and try again.")
@@ -498,6 +514,8 @@ final class L10n: ObservableObject {
         add(.errorNebulaInvalidToken, "APINebula 控制台会话或 API Key 无效。余额接口通常需要浏览器登录会话，请重新导入。", "The APINebula console session or API key is invalid. Balance endpoints usually need a browser sign-in session; re-import it.")
         add(.errorNebulaBrowserSessionMissing, "没有在浏览器中找到 apinebula.ai 登录会话。请先在浏览器登录控制台。", "No apinebula.ai browser session was found. Sign in to the console in a browser first.")
         add(.errorNebulaBrowserAuthorizationRequired, "TokenBar 尚未缓存 APINebula 浏览器登录。请在 APINebula 设置中点“重新读取浏览器登录”。", "TokenBar has no cached APINebula browser sign-in. Click “Re-import Browser Sign-in” in APINebula settings.")
+        add(.errorZaiMissingCredentials, "未找到智谱 API Key。请在智谱设置中填写，或设置环境变量 Z_AI_API_KEY。", "No Z.ai API key found. Enter one in the Z.ai settings, or set Z_AI_API_KEY.")
+        add(.errorZaiInvalidToken, "智谱 API Key 无效或已过期。请检查区域与 Key 是否匹配（BigModel CN / Global）。", "The Z.ai API key is invalid or expired. Check that the region and key match (BigModel CN / Global).")
         add(.errorProbeModels, "所有探测模型均不可用", "All probe models failed")
         add(.apiKeyNoHeaders, "API Key 有效，但响应未返回请求限额头。", "API key is valid, but no request-limit headers were returned.")
         add(.apiKeyNoWindow, "API Key 有效，但未返回用量窗口。", "API key is valid, but no usage window was returned.")

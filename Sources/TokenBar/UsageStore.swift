@@ -26,14 +26,17 @@ final class UsageStore: ObservableObject {
     @Published private(set) var opencodeStatus: LoadStatus = .never
     @Published private(set) var deepseekStatus: LoadStatus = .never
     @Published private(set) var nebulaStatus: LoadStatus = .never
+    @Published private(set) var zaiStatus: LoadStatus = .never
     @Published private(set) var arkLastUpdatedAt: Date?
     @Published private(set) var opencodeLastUpdatedAt: Date?
     @Published private(set) var deepseekLastUpdatedAt: Date?
     @Published private(set) var nebulaLastUpdatedAt: Date?
+    @Published private(set) var zaiLastUpdatedAt: Date?
     @Published private(set) var arkIsRefreshing = false
     @Published private(set) var opencodeIsRefreshing = false
     @Published private(set) var deepseekIsRefreshing = false
     @Published private(set) var nebulaIsRefreshing = false
+    @Published private(set) var zaiIsRefreshing = false
 
     /// Convenience for the status item: in summary mode, pick the tightest
     /// (lowest remaining percent) provider.
@@ -62,7 +65,7 @@ final class UsageStore: ObservableObject {
     /// All statuses, keyed by provider tab, for the summary view.
     var allStatuses: [ProviderTab: LoadStatus] {
         [.ark: arkStatus, .opencode: opencodeStatus,
-         .deepseek: deepseekStatus, .nebula: nebulaStatus]
+         .deepseek: deepseekStatus, .nebula: nebulaStatus, .zai: zaiStatus]
     }
 
     /// The "tightest" (lowest remaining percent, most urgent) provider.
@@ -97,11 +100,13 @@ final class UsageStore: ObservableObject {
     private var openCodeProvider: OpenCodeGoProvider?
     private var deepSeekProvider: DeepSeekProvider?
     private var nebulaProvider: NebulaProvider?
+    private var zaiProvider: ZaiProvider?
     private var timer: Timer?
     private var lastSuccessfulArkSnapshot: ProviderSnapshot?
     private var lastSuccessfulOpenCodeSnapshot: ProviderSnapshot?
     private var lastSuccessfulDeepSeekSnapshot: ProviderSnapshot?
     private var lastSuccessfulNebulaSnapshot: ProviderSnapshot?
+    private var lastSuccessfulZaiSnapshot: ProviderSnapshot?
     private var cancellables = Set<AnyCancellable>()
 
     init(settings: AppSettings = .shared) {
@@ -144,6 +149,14 @@ final class UsageStore: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in self?.refresh(tab: .nebula) }
             .store(in: &cancellables)
+        settings.$zaiAPIKey
+            .dropFirst()
+            .sink { [weak self] _ in self?.refresh(tab: .zai) }
+            .store(in: &cancellables)
+        settings.$zaiRegion
+            .dropFirst()
+            .sink { [weak self] _ in self?.refresh(tab: .zai) }
+            .store(in: &cancellables)
         // When the selection switches to a provider with no data, refresh it.
         settings.$selectedMenu
             .dropFirst()
@@ -162,6 +175,7 @@ final class UsageStore: ObservableObject {
             case .opencode: publisher = settings.$showOpenCode.eraseToAnyPublisher()
             case .deepseek: publisher = settings.$showDeepSeek.eraseToAnyPublisher()
             case .nebula: publisher = settings.$showNebula.eraseToAnyPublisher()
+            case .zai: publisher = settings.$showZai.eraseToAnyPublisher()
             }
             publisher
                 .dropFirst()
@@ -201,6 +215,7 @@ final class UsageStore: ObservableObject {
         openCodeProvider = OpenCodeGoProvider(settings: settings)
         deepSeekProvider = DeepSeekProvider(settings: settings)
         nebulaProvider = NebulaProvider(settings: settings)
+        zaiProvider = ZaiProvider(settings: settings)
     }
 
     func start() {
@@ -222,6 +237,7 @@ final class UsageStore: ObservableObject {
         case .opencode: refreshOpenCode()
         case .deepseek: refreshDeepSeek()
         case .nebula: refreshNebula()
+        case .zai: refreshZai()
         }
     }
 
@@ -493,12 +509,55 @@ final class UsageStore: ObservableObject {
         }
     }
 
+    private func refreshZai() {
+        guard !zaiIsRefreshing else { return }
+        guard let provider = zaiProvider else { return }
+        zaiIsRefreshing = true
+        switch zaiStatus {
+        case .ok, .stale: break
+        case .never, .loading, .error: zaiStatus = .loading
+        }
+        let environment = ProcessInfo.processInfo.environment
+        Task { [weak self] in
+            await self?.runZaiProvider(provider, environment: environment)
+        }
+    }
+
+    private func runZaiProvider(_ provider: ZaiProvider, environment: [String: String]) async {
+        do {
+            let snapshot = try await provider.fetch(environment: environment)
+            Self.log("✓ \(provider.displayName): \(snapshot.plans.count) plan(s)")
+            zaiLastUpdatedAt = Date()
+            lastSuccessfulZaiSnapshot = snapshot
+            zaiStatus = .ok(snapshot: snapshot)
+            finishZaiRefresh()
+        } catch let error as UsageError {
+            Self.log("✗ \(provider.displayName): \(error.errorDescription ?? "Unknown error")")
+            finishZaiRefresh(error: error.errorDescription ?? "Unknown error")
+        } catch {
+            Self.log("✗ \(provider.displayName): \(error.localizedDescription)")
+            finishZaiRefresh(error: error.localizedDescription)
+        }
+    }
+
+    private func finishZaiRefresh(error: String? = nil) {
+        zaiIsRefreshing = false
+        if let error {
+            if let snapshot = lastSuccessfulZaiSnapshot {
+                zaiStatus = .stale(snapshot: snapshot, message: error)
+            } else {
+                zaiStatus = .error(message: error)
+            }
+        }
+    }
+
     func status(for tab: ProviderTab) -> LoadStatus {
         switch tab {
         case .ark: return arkStatus
         case .opencode: return opencodeStatus
         case .deepseek: return deepseekStatus
         case .nebula: return nebulaStatus
+        case .zai: return zaiStatus
         }
     }
 
@@ -508,6 +567,7 @@ final class UsageStore: ObservableObject {
         case .opencode: return opencodeLastUpdatedAt
         case .deepseek: return deepseekLastUpdatedAt
         case .nebula: return nebulaLastUpdatedAt
+        case .zai: return zaiLastUpdatedAt
         }
     }
 
@@ -517,6 +577,7 @@ final class UsageStore: ObservableObject {
         case .opencode: return opencodeIsRefreshing
         case .deepseek: return deepseekIsRefreshing
         case .nebula: return nebulaIsRefreshing
+        case .zai: return zaiIsRefreshing
         }
     }
 

@@ -86,6 +86,10 @@ enum MenuBuilder {
                 menu.addItem(actionItem(L(.openNebulaConsole), action: {
                     NSWorkspace.shared.open(URL(string: "https://apinebula.ai/console")!)
                 }))
+            case .zai:
+                menu.addItem(actionItem(L(.openZaiConsole), action: {
+                    NSWorkspace.shared.open(AppSettings.shared.zaiRegion.dashboardURL)
+                }))
             }
         }
         menu.addItem(actionItem(L(.settings), action: state.onSettings))

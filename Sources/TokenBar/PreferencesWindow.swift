@@ -47,6 +47,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
     case openCode
     case deepseek
     case nebula
+    case zai
     case diagnostics
 
     var id: Self { self }
@@ -58,6 +59,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .openCode: L(.settingsOpenCode)
         case .deepseek: L(.settingsDeepSeek)
         case .nebula: L(.settingsNebula)
+        case .zai: L(.settingsZai)
         case .diagnostics: L(.settingsDiagnostics)
         }
     }
@@ -69,6 +71,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .openCode: "terminal"
         case .deepseek: "fish"
         case .nebula: "cloud"
+        case .zai: "sparkles"
         case .diagnostics: "stethoscope"
         }
     }
@@ -81,6 +84,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .openCode: .opencode
         case .deepseek: .deepseek
         case .nebula: .nebula
+        case .zai: .zai
         case .general, .diagnostics: nil
         }
     }
@@ -163,6 +167,8 @@ private struct PreferencesRootView: View {
             DeepSeekPreferencesPane(settings: settings, store: store)
         case .nebula:
             NebulaPreferencesPane(settings: settings, store: store)
+        case .zai:
+            ZaiPreferencesPane(settings: settings, store: store)
         case .diagnostics:
             DiagnosticsPreferencesPane()
         }
@@ -243,6 +249,11 @@ private struct GeneralPreferencesPane: View {
                             store.refresh(tab: .deepseek)
                         } label: {
                             Label(L(.refreshDeepSeek), systemImage: "arrow.clockwise")
+                        }
+                        Button {
+                            store.refresh(tab: .zai)
+                        } label: {
+                            Label(L(.refreshZai), systemImage: "arrow.clockwise")
                         }
                     }
                 }
@@ -586,6 +597,74 @@ private struct NebulaPreferencesPane: View {
 
     private func saveAPIKey() {
         settings.setNebulaAPIKey(apiKeyField)
+    }
+}
+
+private struct ZaiPreferencesPane: View {
+    @ObservedObject var settings: AppSettings
+    @ObservedObject var store: UsageStore
+    @State private var apiKeyField: String
+
+    init(settings: AppSettings, store: UsageStore) {
+        self.settings = settings
+        self.store = store
+        _apiKeyField = State(initialValue: settings.zaiAPIKey)
+    }
+
+    var body: some View {
+        PreferencesPaneContainer(title: L(.settingsZai)) {
+            Form {
+                Section(L(.sectionDisplay)) {
+                    Toggle(L(.showProvider), isOn: Binding(
+                        get: { settings.showZai },
+                        set: { settings.setVisible(.zai, $0) }))
+                        .toggleStyle(.switch)
+                }
+
+                Section(L(.sectionConnection)) {
+                    Picker(L(.zaiRegionLabel), selection: $settings.zaiRegion) {
+                        ForEach(ZaiAPIRegion.allCases, id: \.self) { region in
+                            Text(region.displayName).tag(region)
+                        }
+                    }
+
+                    SecureField(L(.zaiAPIKeyLabel), text: $apiKeyField)
+                        .onSubmit(saveAPIKey)
+                    Button(L(.saveCredential), action: saveAPIKey)
+
+                    ProviderStatusRows(
+                        status: store.zaiStatus,
+                        isRefreshing: store.zaiIsRefreshing,
+                        lastUpdatedAt: store.zaiLastUpdatedAt)
+
+                    Label(L(.zaiCredentialsHint), systemImage: "key")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+
+                Section(L(.sectionActions)) {
+                    Button {
+                        store.refresh(tab: .zai)
+                    } label: {
+                        Label(
+                            store.zaiIsRefreshing ? L(.refreshing) : L(.refreshZai),
+                            systemImage: "arrow.clockwise")
+                    }
+                    Button {
+                        NSWorkspace.shared.open(settings.zaiRegion.dashboardURL)
+                    } label: {
+                        Label(L(.openZaiConsole), systemImage: "safari")
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        }
+    }
+
+    private func saveAPIKey() {
+        settings.setZaiAPIKey(apiKeyField)
     }
 }
 
