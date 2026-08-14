@@ -330,6 +330,24 @@ struct MenuBuilderTests {
         #expect(StatusItemController.statusItemLength(for: .logoAndBar) == 46)
     }
 
+    @Test("Balance display widens the status item to fit currency text")
+    @MainActor
+    func balanceDisplayWidensStatusItem() {
+        #expect(StatusItemController.statusItemLength(for: .iconAndPercent, showsBalance: true) == 86)
+        #expect(StatusItemController.statusItemLength(for: .percentOnly, showsBalance: true) == 64)
+        // Icon-only/logo/logoAndBar layouts have no text and stay unchanged.
+        #expect(StatusItemController.statusItemLength(for: .iconOnly, showsBalance: true) == 24)
+        #expect(StatusItemController.statusItemLength(for: .logoAndBar, showsBalance: true) == 46)
+    }
+
+    @Test("Money formatting uses the correct currency symbol per provider")
+    func moneyFormattingUsesCorrectSymbol() {
+        #expect(DeepSeekCardView.currencySymbol("CNY") == "¥")
+        #expect(DeepSeekCardView.currencySymbol("USD") == "$")
+        #expect(DeepSeekCardView.money(45.6, symbol: "¥") == "¥45.60")
+        #expect(NebulaCardView.money(12.3, symbol: "¥") == "¥12.30")
+    }
+
     @Test("Clicking OpenCode immediately replaces Ark content in the same menu")
     @MainActor
     func providerSwitcherClickUpdatesContentImmediately() {
@@ -1547,7 +1565,8 @@ struct KimiProviderWebTests {
                 feature: "FEATURE_OMNI", type: "SUBSCRIPTION",
                 amountUsedRatio: 1, kimiCodeUsedRatio: 0.2854, expireTime: "2026-07-23T00:00:00Z"),
             codeWeeklyLimit: KimiSubscriptionRateLimit(
-                ratio: 0.0946, enabled: true, resetTime: "2026-07-09T06:56:36Z"))
+                ratio: 0.0946, enabled: true, resetTime: "2026-07-09T06:56:36Z"),
+            totalQuota: nil)
 
         let windows = KimiProvider.makeWindows(from: snapshot)
         func find(_ label: String) -> UsageWindow? {
@@ -1571,7 +1590,8 @@ struct KimiProviderWebTests {
             weekly: KimiUsageDetail(limit: "2048", used: "214", remaining: "1834", resetTime: nil),
             rateLimit: nil,
             sharedPool: nil,
-            codeWeeklyLimit: nil)
+            codeWeeklyLimit: nil,
+            totalQuota: nil)
         let windows = KimiProvider.makeWindows(from: snapshot)
         #expect(windows.count == 1)
         #expect(windows.first?.label.lowercased() == "weekly")
@@ -1584,9 +1604,176 @@ struct KimiProviderWebTests {
             weekly: KimiUsageDetail(limit: "2048", used: "214", remaining: "1834", resetTime: nil),
             rateLimit: nil,
             sharedPool: nil,
-            codeWeeklyLimit: nil)
+            codeWeeklyLimit: nil,
+            totalQuota: nil)
         let windows = KimiProvider.makeWindows(from: snapshot)
         #expect(windows.count == 1)
         #expect(windows.first?.label.lowercased() == "weekly")
+    }
+
+    @Test("GetUsages totalQuota fills the monthly ring when stats are missing")
+    func mapsTotalQuotaToMonthly() throws {
+        let snapshot = KimiUsageSnapshot(
+            weekly: KimiUsageDetail(limit: "100", used: "0", remaining: "100", resetTime: nil),
+            rateLimit: nil,
+            sharedPool: nil,
+            codeWeeklyLimit: nil,
+            totalQuota: KimiUsageDetail(limit: "100", used: "17", remaining: "83", resetTime: nil))
+        let windows = KimiProvider.makeWindows(from: snapshot)
+        let monthly = try #require(windows.first { $0.label.lowercased() == "monthly" })
+        #expect(monthly.usedPercent == 17)
+        #expect(monthly.remainingPercent == 83)
+    }
+}
+
+@Suite("KimiBrowserSession token ranking")
+struct KimiBrowserSessionTokenTests {
+    @Test("Account access JWT outranks user-center cookie")
+    func prefersAccountAccess() throws {
+        // Unsigned fixtures: only the payload segment is decoded.
+        func jwt(iss: String, typ: String, extra: String = "") -> String {
+            func b64(_ object: [String: String]) -> String {
+                let data = try! JSONSerialization.data(withJSONObject: object)
+                return data.base64EncodedString()
+                    .replacingOccurrences(of: "+", with: "-")
+                    .replacingOccurrences(of: "/", with: "_")
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "="))
+            }
+            var payload = ["iss": iss, "typ": typ]
+            if !extra.isEmpty { payload["code_membership"] = extra }
+            return "eyJhbGciOiJub25lIn0.\(b64(payload)).sig"
+        }
+        let cookie = jwt(iss: "user-center", typ: "access")
+        let access = jwt(iss: "account", typ: "access", extra: "{}")
+        let best = try #require(KimiBrowserSession.preferredAuthToken(from: [
+            (cookie, "cookie"),
+            (access, "Kimi.app"),
+        ]))
+        #expect(best.source == "Kimi.app")
+        #expect(best.token == access)
+    }
+
+    @Test("Refresh tokens are ignored")
+    func ignoresRefresh() {
+        func jwt(typ: String) -> String {
+            let payload = try! JSONSerialization.data(withJSONObject: ["iss": "account", "typ": typ])
+            let b64 = payload.base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+                .trimmingCharacters(in: CharacterSet(charactersIn: "="))
+            return "eyJhbGciOiJub25lIn0.\(b64).sig"
+        }
+        let best = KimiBrowserSession.preferredAuthToken(from: [
+            (jwt(typ: "refresh"), "refresh"),
+        ])
+        #expect(best == nil)
+    }
+
+    @Test("bestRefreshToken picks the longest-lived unexpired refresh token")
+    func bestRefreshPicksLongestLived() throws {
+        func jwt(typ: String, exp: TimeInterval) -> String {
+            let payload = try! JSONSerialization.data(withJSONObject: [
+                "iss": "account", "typ": typ, "exp": exp,
+            ])
+            let b64 = payload.base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+                .trimmingCharacters(in: CharacterSet(charactersIn: "="))
+            return "eyJhbGciOiJub25lIn0.\(b64).sig"
+        }
+        let now = Date().timeIntervalSince1970
+        let expired = jwt(typ: "refresh", exp: now - 100)
+        let shortLived = jwt(typ: "refresh", exp: now + 3600)
+        let longLived = jwt(typ: "refresh", exp: now + 99999)
+        let access = jwt(typ: "access", exp: now + 900)
+        let best = try #require(KimiBrowserSession.bestRefreshToken(from: [
+            (expired, "a"),
+            (shortLived, "b"),
+            (longLived, "c"),
+            (access, "d"),
+        ]))
+        #expect(best == longLived)
+    }
+
+    @Test("accessTokenNeedsRefresh detects expired and missing tokens")
+    func needsRefreshDetection() {
+        #expect(KimiBrowserSession.accessTokenNeedsRefresh(nil) == true)
+        #expect(KimiBrowserSession.accessTokenNeedsRefresh("not-a-jwt") == true)
+
+        func jwt(typ: String, exp: TimeInterval) -> String {
+            let payload = try! JSONSerialization.data(withJSONObject: [
+                "iss": "account", "typ": typ, "exp": exp,
+            ])
+            let b64 = payload.base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+                .trimmingCharacters(in: CharacterSet(charactersIn: "="))
+            return "eyJhbGciOiJub25lIn0.\(b64).sig"
+        }
+        let now = Date().timeIntervalSince1970
+        #expect(KimiBrowserSession.accessTokenNeedsRefresh(jwt(typ: "access", exp: now - 10)) == true)
+        #expect(KimiBrowserSession.accessTokenNeedsRefresh(jwt(typ: "access", exp: now + 30)) == true)  // within 60s margin
+        #expect(KimiBrowserSession.accessTokenNeedsRefresh(jwt(typ: "access", exp: now + 900)) == false)
+        #expect(KimiBrowserSession.accessTokenNeedsRefresh(jwt(typ: "refresh", exp: now + 99999)) == true)
+    }
+
+    @Test("refreshAccessToken parses token pair from 200 response")
+    func refreshParsesResponse() async throws {
+        let newAccess = makeTestJWT(typ: "access", exp: Date().timeIntervalSince1970 + 900)
+        let newRefresh = makeTestJWT(typ: "refresh", exp: Date().timeIntervalSince1970 + 99999)
+        let body = try JSONSerialization.data(withJSONObject: [
+            "access_token": newAccess,
+            "refresh_token": newRefresh,
+        ])
+        let transport = BodyTransport(statusCode: 200, body: body)
+        let result = try await KimiBrowserSession.refreshAccessToken(
+            refreshToken: makeTestJWT(typ: "refresh", exp: Date().timeIntervalSince1970 + 99999),
+            transport: transport)
+        #expect(result.accessToken == newAccess)
+        #expect(result.refreshToken == newRefresh)
+    }
+
+    @Test("refreshAccessToken throws on 401")
+    func refreshThrowsOn401() async {
+        let transport = BodyTransport(statusCode: 401, body: Data())
+        do {
+            _ = try await KimiBrowserSession.refreshAccessToken(
+                refreshToken: makeTestJWT(typ: "refresh", exp: Date().timeIntervalSince1970 + 99999),
+                transport: transport)
+            Issue.record("Expected kimiInvalidToken error")
+        } catch UsageError.kimiInvalidToken {
+            // expected
+        } catch {
+            Issue.record("Expected kimiInvalidToken, got \(error)")
+        }
+    }
+}
+
+// MARK: - Test helpers
+
+private func makeTestJWT(typ: String, exp: TimeInterval) -> String {
+    let payload = try! JSONSerialization.data(withJSONObject: [
+        "iss": "account", "typ": typ, "exp": exp,
+    ])
+    let b64 = payload.base64EncodedString()
+        .replacingOccurrences(of: "+", with: "-")
+        .replacingOccurrences(of: "/", with: "_")
+        .trimmingCharacters(in: CharacterSet(charactersIn: "="))
+    return "eyJhbGciOiJub25lIn0.\(b64).sig"
+}
+
+private struct BodyTransport: HTTPTransport {
+    let statusCode: Int
+    let body: Data
+
+    func response(for request: URLRequest) async throws -> HTTPResponse {
+        HTTPResponse(
+            data: body,
+            statusCode: statusCode,
+            response: HTTPURLResponse(
+                url: request.url ?? URL(string: "https://example.com")!,
+                statusCode: statusCode,
+                httpVersion: nil,
+                headerFields: nil)!)
     }
 }

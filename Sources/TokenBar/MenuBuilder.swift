@@ -108,7 +108,10 @@ enum MenuBuilder {
         var hasContent = false
         for tab in state.visibleTabs {
             let loadStatus = state.allStatuses[tab] ?? .never
-            let row = SummaryRowView(tab: tab, loadStatus: loadStatus, width: cardWidth) {
+            let showsBalance = AppSettings.shared.showsBalanceInStatusBar(tab)
+            let row = SummaryRowView(
+                tab: tab, loadStatus: loadStatus, width: cardWidth,
+                showsBalance: showsBalance) {
                 state.onSelectTab(tab)
             }
             let item = NSMenuItem()
@@ -292,14 +295,17 @@ final class SummaryRowView: NSView {
     private let isStale: Bool
     private let hoverView = NSVisualEffectView()
 
-    init(tab: ProviderTab, loadStatus: UsageStore.LoadStatus, width: CGFloat, onTap: @escaping () -> Void) {
+    init(tab: ProviderTab, loadStatus: UsageStore.LoadStatus, width: CGFloat,
+         showsBalance: Bool = false, onTap: @escaping () -> Void)
+    {
         self.onTap = onTap
-        let info = Self.statusInfo(for: loadStatus)
+        let info = Self.statusInfo(for: loadStatus, tab: tab, showsBalance: showsBalance)
         self.remainingPercent = info.remaining
         self.isStale = info.stale
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 44))
         wantsLayer = true
-        build(tab: tab, statusText: info.text, statusColor: info.color, width: width)
+        build(tab: tab, statusText: info.text, statusColor: info.color,
+              width: width, wideValue: showsBalance)
         let recognizer = NSClickGestureRecognizer(target: self, action: #selector(handleClick(_:)))
         recognizer.buttonMask = 0x1
         addGestureRecognizer(recognizer)
@@ -307,7 +313,8 @@ final class SummaryRowView: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    private func build(tab: ProviderTab, statusText: String, statusColor: NSColor, width: CGFloat) {
+    private func build(tab: ProviderTab, statusText: String, statusColor: NSColor,
+                       width: CGFloat, wideValue: Bool) {
         let horizontalPadding: CGFloat = 14
         let rowHeight: CGFloat = 44
         let contentY = (rowHeight - 16) / 2
@@ -323,10 +330,10 @@ final class SummaryRowView: NSView {
         addSubview(hoverView)
 
         // Fixed columns so every row lines up:
-        // [logo 16] [name ~92] [percent 44 right-aligned] …… [meter 64]
+        // [logo 16] [name ~92] [value 44/64 right-aligned] …… [meter 64]
         let logoSide: CGFloat = 16
         let nameColWidth: CGFloat = 92
-        let percentColWidth: CGFloat = 44
+        let percentColWidth: CGFloat = wideValue ? 64 : 44
         let meterWidth: CGFloat = 64
         let meterHeight: CGFloat = 8
         let gap: CGFloat = 8
@@ -381,7 +388,7 @@ final class SummaryRowView: NSView {
         addSubview(sep)
     }
 
-    private static func statusInfo(for loadStatus: UsageStore.LoadStatus)
+    private static func statusInfo(for loadStatus: UsageStore.LoadStatus, tab: ProviderTab, showsBalance: Bool)
         -> (text: String, color: NSColor, remaining: Double?, stale: Bool)
     {
         switch loadStatus {
@@ -391,15 +398,39 @@ final class SummaryRowView: NSView {
             let short = message.count > 18 ? String(message.prefix(16)) + "…" : message
             return (short, .systemRed, nil, true)
         case let .stale(snapshot, _):
+            if showsBalance, let balance = balanceText(for: tab, snapshot: snapshot) {
+                return (balance, .labelColor,
+                        snapshot.sessionWindow?.remainingPercent, true)
+            }
             if let pct = snapshot.sessionWindow?.remainingPercent {
                 return ("\(Int(pct.rounded()))%", .labelColor, pct, true)
             }
             return (L(.staleData), .systemOrange, nil, true)
         case let .ok(snapshot):
+            if showsBalance, let balance = balanceText(for: tab, snapshot: snapshot) {
+                return (balance, .labelColor,
+                        snapshot.sessionWindow?.remainingPercent, false)
+            }
             if let pct = snapshot.sessionWindow?.remainingPercent {
                 return ("\(Int(pct.rounded()))%", .labelColor, pct, false)
             }
             return ("–", .secondaryLabelColor, nil, false)
+        }
+    }
+
+    /// Formats the remaining balance for DeepSeek/Nebula summary rows. Returns
+    /// nil for providers that have no money balance or a missing summary.
+    private static func balanceText(for tab: ProviderTab, snapshot: ProviderSnapshot) -> String? {
+        switch tab {
+        case .deepseek:
+            guard let summary = snapshot.plans.first?.deepseek else { return nil }
+            let symbol = DeepSeekCardView.currencySymbol(summary.currency)
+            return DeepSeekCardView.money(summary.totalBalance, symbol: symbol)
+        case .nebula:
+            guard let summary = snapshot.plans.first?.nebula else { return nil }
+            return NebulaCardView.money(summary.balance, symbol: "¥")
+        case .ark, .opencode, .zai, .kimi:
+            return nil
         }
     }
 
