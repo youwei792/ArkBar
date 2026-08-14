@@ -121,6 +121,9 @@ final class AppSettings: ObservableObject {
     @Published var showZai: Bool {
         didSet { UserDefaults.standard.set(showZai, forKey: Keys.showZai) }
     }
+    @Published var showKimi: Bool {
+        didSet { UserDefaults.standard.set(showKimi, forKey: Keys.showKimi) }
+    }
     /// Providers the switcher offers, in canonical order, minus hidden ones.
     /// When `showSummary` is true, the summary button is always the first item.
     var visibleTabs: [ProviderTab] {
@@ -134,6 +137,7 @@ final class AppSettings: ObservableObject {
         case .deepseek: showDeepSeek
         case .nebula: showNebula
         case .zai: showZai
+        case .kimi: showKimi
         }
     }
 
@@ -146,6 +150,7 @@ final class AppSettings: ObservableObject {
         case .deepseek: showDeepSeek = visible
         case .nebula: showNebula = visible
         case .zai: showZai = visible
+        case .kimi: showKimi = visible
         }
         if !visible, case .provider(tab) = selectedMenu {
             if showSummary {
@@ -186,10 +191,15 @@ final class AppSettings: ObservableObject {
     }
     @Published private(set) var zaiAPIKey: String
 
+    /// Kimi (Kimi For Coding) API key (Keychain mirror, never persisted to
+    /// UserDefaults).
+    @Published private(set) var kimiAPIKey: String
+
     var deepseekApiKeyHasValue: Bool { !deepseekApiKey.isEmpty }
     var deepseekPlatformTokenHasValue: Bool { !deepseekPlatformToken.isEmpty }
     var nebulaAPIKeyHasValue: Bool { !nebulaAPIKey.isEmpty }
     var zaiAPIKeyHasValue: Bool { !zaiAPIKey.isEmpty }
+    var kimiAPIKeyHasValue: Bool { !kimiAPIKey.isEmpty }
 
     func setZaiAPIKey(_ value: String?) {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -200,6 +210,17 @@ final class AppSettings: ObservableObject {
 
     func loadZaiFromKeychain() {
         zaiAPIKey = CookieKeychainStore.load(provider: "zai-token") ?? ""
+    }
+
+    func setKimiAPIKey(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: key, provider: "kimi-key")
+        kimiAPIKey = persisted ? (key ?? "") : (CookieKeychainStore.load(provider: "kimi-key") ?? "")
+    }
+
+    func loadKimiFromKeychain() {
+        kimiAPIKey = CookieKeychainStore.load(provider: "kimi-key") ?? ""
     }
 
     func setNebulaAPIKey(_ value: String?) {
@@ -261,6 +282,7 @@ final class AppSettings: ObservableObject {
         static let showDeepSeek = "tokenbar.showDeepSeek"
         static let showNebula = "tokenbar.showNebula"
         static let showZai = "tokenbar.showZai"
+        static let showKimi = "tokenbar.showKimi"
         static let zaiRegion = "tokenbar.zaiRegion"
         static let nebulaBaseURL = "tokenbar.nebulaBaseURL"
         static let opencodeWorkspaceID = "tokenbar.opencodeWorkspaceID"
@@ -290,6 +312,7 @@ final class AppSettings: ObservableObject {
         self.showDeepSeek = defaults.object(forKey: Keys.showDeepSeek) as? Bool ?? true
         self.showNebula = defaults.object(forKey: Keys.showNebula) as? Bool ?? true
         self.showZai = defaults.object(forKey: Keys.showZai) as? Bool ?? true
+        self.showKimi = defaults.object(forKey: Keys.showKimi) as? Bool ?? true
         self.opencodeWorkspaceID = defaults.string(forKey: Keys.opencodeWorkspaceID) ?? ""
         let cookieSourceRaw = defaults.string(forKey: Keys.opencodeCookieSource)
             ?? OpenCodeCookieSource.automatic.rawValue
@@ -303,5 +326,6 @@ final class AppSettings: ObservableObject {
         let zaiRegionRaw = defaults.string(forKey: Keys.zaiRegion) ?? ZaiAPIRegion.bigmodelCN.rawValue
         self.zaiRegion = ZaiAPIRegion(rawValue: zaiRegionRaw) ?? .bigmodelCN
         self.zaiAPIKey = CookieKeychainStore.load(provider: "zai-token") ?? ""
+        self.kimiAPIKey = CookieKeychainStore.load(provider: "kimi-key") ?? ""
     }
 }

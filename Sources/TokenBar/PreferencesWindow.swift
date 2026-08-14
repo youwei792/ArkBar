@@ -48,6 +48,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
     case deepseek
     case nebula
     case zai
+    case kimi
     case diagnostics
 
     var id: Self { self }
@@ -60,6 +61,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .deepseek: L(.settingsDeepSeek)
         case .nebula: L(.settingsNebula)
         case .zai: L(.settingsZai)
+        case .kimi: L(.settingsKimi)
         case .diagnostics: L(.settingsDiagnostics)
         }
     }
@@ -72,6 +74,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .deepseek: "fish"
         case .nebula: "cloud"
         case .zai: "sparkles"
+        case .kimi: "sparkles"
         case .diagnostics: "stethoscope"
         }
     }
@@ -85,6 +88,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .deepseek: .deepseek
         case .nebula: .nebula
         case .zai: .zai
+        case .kimi: .kimi
         case .general, .diagnostics: nil
         }
     }
@@ -169,6 +173,8 @@ private struct PreferencesRootView: View {
             NebulaPreferencesPane(settings: settings, store: store)
         case .zai:
             ZaiPreferencesPane(settings: settings, store: store)
+        case .kimi:
+            KimiPreferencesPane(settings: settings, store: store)
         case .diagnostics:
             DiagnosticsPreferencesPane()
         }
@@ -254,6 +260,11 @@ private struct GeneralPreferencesPane: View {
                             store.refresh(tab: .zai)
                         } label: {
                             Label(L(.refreshZai), systemImage: "arrow.clockwise")
+                        }
+                        Button {
+                            store.refresh(tab: .kimi)
+                        } label: {
+                            Label(L(.refreshKimi), systemImage: "arrow.clockwise")
                         }
                     }
                 }
@@ -665,6 +676,68 @@ private struct ZaiPreferencesPane: View {
 
     private func saveAPIKey() {
         settings.setZaiAPIKey(apiKeyField)
+    }
+}
+
+private struct KimiPreferencesPane: View {
+    @ObservedObject var settings: AppSettings
+    @ObservedObject var store: UsageStore
+    @State private var apiKeyField: String
+
+    init(settings: AppSettings, store: UsageStore) {
+        self.settings = settings
+        self.store = store
+        _apiKeyField = State(initialValue: settings.kimiAPIKey)
+    }
+
+    var body: some View {
+        PreferencesPaneContainer(title: L(.settingsKimi)) {
+            Form {
+                Section(L(.sectionDisplay)) {
+                    Toggle(L(.showProvider), isOn: Binding(
+                        get: { settings.showKimi },
+                        set: { settings.setVisible(.kimi, $0) }))
+                        .toggleStyle(.switch)
+                }
+
+                Section(L(.sectionConnection)) {
+                    SecureField(L(.kimiAPIKeyLabel), text: $apiKeyField)
+                        .onSubmit(saveAPIKey)
+                    Button(L(.saveCredential), action: saveAPIKey)
+
+                    ProviderStatusRows(
+                        status: store.kimiStatus,
+                        isRefreshing: store.kimiIsRefreshing,
+                        lastUpdatedAt: store.kimiLastUpdatedAt)
+
+                    Label(L(.kimiCredentialsHint), systemImage: "key")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+
+                Section(L(.sectionActions)) {
+                    Button {
+                        store.refresh(tab: .kimi)
+                    } label: {
+                        Label(
+                            store.kimiIsRefreshing ? L(.refreshing) : L(.refreshKimi),
+                            systemImage: "arrow.clockwise")
+                    }
+                    Button {
+                        NSWorkspace.shared.open(URL(string: "https://www.kimi.com/code/console")!)
+                    } label: {
+                        Label(L(.openKimiConsole), systemImage: "safari")
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        }
+    }
+
+    private func saveAPIKey() {
+        settings.setKimiAPIKey(apiKeyField)
     }
 }
 

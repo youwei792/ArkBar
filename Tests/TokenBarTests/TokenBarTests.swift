@@ -1018,19 +1018,21 @@ struct ProviderVisibilityTests {
     @Test("Hidden providers drop out of the switcher list")
     func visibleTabsFilters() {
         let settings = AppSettings.shared
-        let original = (settings.showArk, settings.showOpenCode, settings.showDeepSeek, settings.showNebula, settings.showZai)
+        let original = (settings.showArk, settings.showOpenCode, settings.showDeepSeek, settings.showNebula, settings.showZai, settings.showKimi)
         defer {
             settings.showArk = original.0
             settings.showOpenCode = original.1
             settings.showDeepSeek = original.2
             settings.showNebula = original.3
             settings.showZai = original.4
+            settings.showKimi = original.5
         }
         settings.showArk = false
         settings.showOpenCode = true
         settings.showDeepSeek = true
         settings.showNebula = false
         settings.showZai = false
+        settings.showKimi = false
         #expect(settings.visibleTabs == [.opencode, .deepseek])
         #expect(settings.isVisible(.ark) == false)
         settings.showOpenCode = false
@@ -1439,5 +1441,65 @@ struct ZaiProviderTests {
         #expect(time.windowMinutes == 1)
         #expect(time.usedPercent == Double(15) / Double(60) * 100)
         #expect(snapshot.isValid)
+    }
+}
+
+@Suite("KimiProvider decode")
+struct KimiProviderTests {
+    @Test("Code API payload parses weekly and rate-limit windows (real shape)")
+    func parsesCodeAPIUsage() throws {
+        let json = #"""
+        {
+          "usage": {
+            "limit": "2048",
+            "used": "214",
+            "remaining": "1834",
+            "resetTime": "2026-01-09T15:23:13.716839300Z"
+          },
+          "limits": [{
+            "window": {"duration": 300, "timeUnit": "TIME_UNIT_MINUTE"},
+            "detail": {
+              "limit": "200",
+              "used": "139",
+              "remaining": "61",
+              "resetTime": "2026-01-06T13:33:02.717479433Z"
+            }
+          }]
+        }
+        """#
+        let snapshot = try KimiProvider.parse(data: json.data(using: .utf8)!)
+        // Weekly quota: 214 used of 2048.
+        #expect(Int(snapshot.weekly.limit) == 2048)
+        #expect(Int(snapshot.weekly.used!) == 214)
+        // Rate-limit window: 139 used of 200 (5-hour).
+        let rate = try #require(snapshot.rateLimit)
+        #expect(Int(rate.limit) == 200)
+        #expect(Int(rate.used!) == 139)
+        // resetTime decodes as ISO8601 with fractional seconds.
+        #expect(snapshot.weekly.resetTime != nil)
+    }
+
+    @Test("Numeric limit/used fields decode without crashing")
+    func parsesNumericFields() throws {
+        let json = #"""
+        {"usage": {"limit": 1000, "used": 250, "remaining": 750},
+         "limits": [{"window": {"duration": 300, "timeUnit": "TIME_UNIT_MINUTE"},
+                     "detail": {"limit": 100, "used": 10, "remaining": 90}}]}
+        """#
+        let snapshot = try KimiProvider.parse(data: json.data(using: .utf8)!)
+        #expect(snapshot.weekly.limit == "1000")
+        #expect(snapshot.weekly.used == "250")
+        #expect(snapshot.rateLimit?.limit == "100")
+        #expect(snapshot.rateLimit?.used == "10")
+    }
+
+    @Test("Missing rate-limit window still parses weekly quota")
+    func parsesWeeklyOnly() throws {
+        let json = #"""
+        {"usage": {"limit": "2048", "used": "214", "remaining": "1834"}}
+        """#
+        let snapshot = try KimiProvider.parse(data: json.data(using: .utf8)!)
+        #expect(snapshot.rateLimit == nil)
+        #expect(Int(snapshot.weekly.limit) == 2048)
     }
 }

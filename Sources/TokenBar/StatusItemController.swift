@@ -56,6 +56,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         store.$zaiStatus
             .sink { [weak self] _ in self?.updateIconAndMenu() }
             .store(in: &cancellables)
+        store.$kimiStatus
+            .sink { [weak self] _ in self?.updateIconAndMenu() }
+            .store(in: &cancellables)
         // Refresh view updates.
         store.$arkLastUpdatedAt
             .sink { [weak self] _ in self?.updateActiveRefreshView() }
@@ -72,6 +75,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         store.$zaiLastUpdatedAt
             .sink { [weak self] _ in self?.updateActiveRefreshView() }
             .store(in: &cancellables)
+        store.$kimiLastUpdatedAt
+            .sink { [weak self] _ in self?.updateActiveRefreshView() }
+            .store(in: &cancellables)
         store.$arkIsRefreshing
             .sink { [weak self] _ in self?.updateActiveRefreshView() }
             .store(in: &cancellables)
@@ -85,6 +91,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             .sink { [weak self] _ in self?.updateActiveRefreshView() }
             .store(in: &cancellables)
         store.$zaiIsRefreshing
+            .sink { [weak self] _ in self?.updateActiveRefreshView() }
+            .store(in: &cancellables)
+        store.$kimiIsRefreshing
             .sink { [weak self] _ in self?.updateActiveRefreshView() }
             .store(in: &cancellables)
         // Selection change.
@@ -123,7 +132,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             settings.$showOpenCode.map { _ in },
             settings.$showDeepSeek.map { _ in },
             settings.$showNebula.map { _ in },
-            settings.$showZai.map { _ in })
+            settings.$showZai.map { _ in },
+            settings.$showKimi.map { _ in })
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.updateIcon()

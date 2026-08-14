@@ -202,6 +202,8 @@ enum UsageError: LocalizedError, Sendable {
     case nebulaBrowserSessionMissing(String)
     case zaiMissingCredentials
     case zaiInvalidToken
+    case kimiMissingCredentials
+    case kimiInvalidToken
 
     var errorDescription: String? {
         switch self {
@@ -247,6 +249,10 @@ enum UsageError: LocalizedError, Sendable {
             L(.errorZaiMissingCredentials)
         case .zaiInvalidToken:
             L(.errorZaiInvalidToken)
+        case .kimiMissingCredentials:
+            L(.errorKimiMissingCredentials)
+        case .kimiInvalidToken:
+            L(.errorKimiInvalidToken)
         }
     }
 }
