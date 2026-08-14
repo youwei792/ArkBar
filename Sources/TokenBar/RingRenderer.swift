@@ -13,12 +13,13 @@ enum RingRenderer {
         case session
         case weekly
         case monthly
+        case balance
     }
 
     struct Ring: Identifiable {
         let id: String
         let label: String
-        /// All visible progress in ArkBar represents remaining quota.
+        /// All visible progress in TokenBar represents remaining quota.
         let remainingPercent: Double
         let tone: Tone
         var color: NSColor {
@@ -156,6 +157,7 @@ enum RingRenderer {
         switch label.lowercased() {
         case "session", "5h", "5-hour", "five_hour": .session
         case "weekly", "week": .weekly
+        case "balance": .balance
         default: .monthly
         }
     }
@@ -181,6 +183,11 @@ enum RingRenderer {
                 (0, RGB(red: 0.25, green: 0.55, blue: 0.98)),
                 (1, RGB(red: 0.42, green: 0.29, blue: 0.91)),
             ]
+        case .balance:
+            stops = [
+                (0, RGB(red: 0.20, green: 0.80, blue: 0.95)),
+                (1, RGB(red: 0.16, green: 0.42, blue: 0.98)),
+            ]
         }
         let t = min(1, max(0, progress))
         let nextIndex = stops.firstIndex(where: { t <= $0.position }) ?? (stops.count - 1)
@@ -196,6 +203,7 @@ enum RingRenderer {
         case .session: toneBrightness = 1.00
         case .weekly: toneBrightness = 0.97
         case .monthly: toneBrightness = 0.94
+        case .balance: toneBrightness = 0.98
         }
         // 100% is luminous; depleted quota becomes deeper without ever losing
         // enough contrast against the azure card to disappear into it.

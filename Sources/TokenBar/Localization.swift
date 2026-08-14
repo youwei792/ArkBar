@@ -38,7 +38,7 @@ enum LKey: String {
     case openArkConsole = "menu.openArkConsole"
     case openCodeGo = "menu.openCodeGo"
     case settings = "menu.settings"
-    case quitArkBar = "menu.quitArkBar"
+    case quitTokenBar = "menu.quitTokenBar"
     case updated = "menu.updated"
     case updatedJustNow = "menu.updatedJustNow"
     case updatedSecondsAgo = "menu.updatedSecondsAgo"
@@ -104,6 +104,13 @@ enum LKey: String {
     case noProvider = "settings.noProvider"
     case tabArk = "tab.ark"
     case tabOpenCode = "tab.opencode"
+    case tabDeepSeek = "tab.deepseek"
+    case tabNebula = "tab.nebula"
+    case tabZai = "tab.zai"
+    case tabSummary = "tab.summary"
+    case showProvider = "settings.showProvider"
+    case showSummary = "settings.showSummary"
+    case sectionDisplay = "settings.sectionDisplay"
     case opencodeCookie = "settings.opencodeCookie"
     case opencodeCookiePlaceholder = "settings.opencodeCookiePlaceholder"
     case opencodeWorkspaceID = "settings.opencodeWorkspaceID"
@@ -114,6 +121,9 @@ enum LKey: String {
     case settingsGeneral = "settings.general"
     case settingsArk = "settings.ark"
     case settingsOpenCode = "settings.openCode"
+    case settingsDeepSeek = "settings.deepseek"
+    case settingsNebula = "settings.nebula"
+    case settingsZai = "settings.zai"
     case settingsDiagnostics = "settings.diagnostics"
     case sectionAppearance = "settings.sectionAppearance"
     case sectionBehavior = "settings.sectionBehavior"
@@ -123,6 +133,12 @@ enum LKey: String {
     case status = "settings.status"
     case refreshArk = "settings.refreshArk"
     case refreshOpenCode = "settings.refreshOpenCode"
+    case refreshDeepSeek = "settings.refreshDeepSeek"
+    case refreshNebula = "settings.refreshNebula"
+    case refreshZai = "settings.refreshZai"
+    case openDeepSeekPlatform = "menu.openDeepSeekPlatform"
+    case openNebulaConsole = "menu.openNebulaConsole"
+    case openZaiConsole = "menu.openZaiConsole"
     case openCodeCookieSource = "settings.openCodeCookieSource"
     case openCodeCookieAutomatic = "settings.openCodeCookieAutomatic"
     case openCodeCookieManual = "settings.openCodeCookieManual"
@@ -149,11 +165,40 @@ enum LKey: String {
     case productCodingPlanTeam = "product.codingPlanTeam"
     case productAgentPlanTeam = "product.agentPlanTeam"
     case productOpenCodeGo = "product.openCodeGo"
+    case productDeepSeek = "product.deepseek"
+    case productNebula = "product.nebula"
     case windowSession = "window.session"
     case window5Hour = "window.5hour"
     case windowWeekly = "window.weekly"
     case windowMonthly = "window.monthly"
     case windowRequests = "window.requests"
+    case windowBalance = "window.balance"
+    case deepseekToday = "deepseek.today"
+    case deepseekMonthly = "deepseek.monthly"
+    case deepseekPaidGranted = "deepseek.paidGranted"
+    case deepseekUsageDetail = "deepseek.usageDetail"
+    case deepseekUsageUnavailable = "deepseek.usageUnavailable"
+    case deepseekTopModel = "deepseek.topModel"
+    case deepseekCategoryDetail = "deepseek.categoryDetail"
+    case deepseekCredentialsHint = "deepseek.credentialsHint"
+    case deepseekPlatformHint = "deepseek.platformHint"
+    case deepseekAPIKeyLabel = "deepseek.apiKeyLabel"
+    case deepseekPlatformTokenLabel = "deepseek.platformTokenLabel"
+    case saveCredential = "deepseek.saveCredential"
+    case deepseekBrowserSession = "deepseek.browserSession"
+    case nebulaBaseURLLabel = "nebula.baseURLLabel"
+    case nebulaBaseURLHint = "nebula.baseURLHint"
+    case nebulaAPIKeyLabel = "nebula.apiKeyLabel"
+    case nebulaCredentialsHint = "nebula.credentialsHint"
+    case nebulaBrowserSession = "nebula.browserSession"
+    case nebulaBrowserHint = "nebula.browserHint"
+    case reimportNebulaBrowserSession = "settings.reimportNebulaBrowserSession"
+    case nebulaUsedTotal = "nebula.usedTotal"
+    case nebulaUsageUnavailable = "nebula.usageUnavailable"
+    case nebulaTokenDetail = "nebula.tokenDetail"
+    case zaiAPIKeyLabel = "zai.apiKeyLabel"
+    case zaiRegionLabel = "zai.regionLabel"
+    case zaiCredentialsHint = "zai.credentialsHint"
     case errorArkcliNotFound = "error.arkcliNotFound"
     case errorArkcliNotAuthenticated = "error.arkcliNotAuthenticated"
     case errorArkcliTimedOut = "error.arkcliTimedOut"
@@ -167,6 +212,14 @@ enum LKey: String {
     case errorOpenCodeCookieInvalid = "error.openCodeCookieInvalid"
     case errorOpenCodeBrowserSessionMissing = "error.openCodeBrowserSessionMissing"
     case errorOpenCodeBrowserAuthorizationRequired = "error.openCodeBrowserAuthorizationRequired"
+    case errorDeepSeekMissingCredentials = "error.deepSeekMissingCredentials"
+    case errorDeepSeekInvalidPlatformToken = "error.deepSeekInvalidPlatformToken"
+    case errorNebulaMissingCredentials = "error.nebulaMissingCredentials"
+    case errorNebulaInvalidToken = "error.nebulaInvalidToken"
+    case errorNebulaBrowserSessionMissing = "error.nebulaBrowserSessionMissing"
+    case errorNebulaBrowserAuthorizationRequired = "error.nebulaBrowserAuthorizationRequired"
+    case errorZaiMissingCredentials = "error.zaiMissingCredentials"
+    case errorZaiInvalidToken = "error.zaiInvalidToken"
     case errorProbeModels = "error.probeModels"
     case apiKeyNoHeaders = "apiKey.noHeaders"
     case apiKeyNoWindow = "apiKey.noWindow"
@@ -175,6 +228,9 @@ enum LKey: String {
     case displayIconOnly = "display.iconOnly"
     case displayIconAndPercent = "display.iconAndPercent"
     case displayPercentOnly = "display.percentOnly"
+    case displayLogoOnly = "display.logoOnly"
+    case displayLogoAndPercent = "display.logoAndPercent"
+    case displayLogoAndBar = "display.logoAndBar"
 
     // Refresh interval display names
     case interval1m = "interval.1m"
@@ -200,16 +256,16 @@ final class L10n: ObservableObject {
         didSet {
             // Persist and notify. AppSettings owns writes from the Settings window;
             // this manager only publishes the visual-language invalidation.
-            UserDefaults.standard.set(language.rawValue, forKey: "arkbar.language")
+            UserDefaults.standard.set(language.rawValue, forKey: "tokenbar.language")
             // Notify menu controller to rebuild.
             NotificationCenter.default.post(name: Self.languageDidChange, object: nil)
         }
     }
 
-    nonisolated static let languageDidChange = Notification.Name("arkbar.languageDidChange")
+    nonisolated static let languageDidChange = Notification.Name("tokenbar.languageDidChange")
 
     private init() {
-        let raw = UserDefaults.standard.string(forKey: "arkbar.language") ?? Language.system.rawValue
+        let raw = UserDefaults.standard.string(forKey: "tokenbar.language") ?? Language.system.rawValue
         self.language = Language(rawValue: raw) ?? .system
     }
 
@@ -233,6 +289,8 @@ final class L10n: ObservableObject {
         case .codingPlanTeam: t(.productCodingPlanTeam)
         case .agentPlanTeam: t(.productAgentPlanTeam)
         case .openCodeGo: t(.productOpenCodeGo)
+        case .deepseek: t(.productDeepSeek)
+        case .nebula: t(.productNebula)
         }
     }
 
@@ -243,6 +301,7 @@ final class L10n: ObservableObject {
         case "weekly", "week": t(.windowWeekly)
         case "monthly", "month": t(.windowMonthly)
         case "requests": t(.windowRequests)
+        case "balance": t(.windowBalance)
         default: label
         }
     }
@@ -275,7 +334,7 @@ final class L10n: ObservableObject {
         add(.openArkConsole, "打开方舟控制台", "Open Ark Console")
         add(.openCodeGo, "打开 OpenCode Go", "Open OpenCode Go")
         add(.settings, "设置…", "Settings…")
-        add(.quitArkBar, "退出 ArkBar", "Quit ArkBar")
+        add(.quitTokenBar, "退出 TokenBar", "Quit TokenBar")
         add(.updated, "更新于", "Updated")
         add(.updatedJustNow, "刚刚更新", "Updated just now")
         add(.updatedSecondsAgo, "%d 秒前更新", "Updated %d seconds ago")
@@ -312,7 +371,7 @@ final class L10n: ObservableObject {
         add(.expiresOn, "套餐到期 %@", "Plan expires %@")
 
         // Settings window
-        add(.settingsTitle, "ArkBar 设置", "ArkBar Settings")
+        add(.settingsTitle, "TokenBar 设置", "TokenBar Settings")
         add(.sectionMenuBar, "菜单栏", "Menu bar")
         add(.sectionRefresh, "刷新", "Refresh")
         add(.sectionDataSource, "数据源", "Data source")
@@ -341,6 +400,13 @@ final class L10n: ObservableObject {
         add(.noProvider, "没有可用的数据源。请设置 AK/SK、ARK_API_KEY，或登录 arkcli。", "No data source is available. Set AK/SK or ARK_API_KEY, or sign in to arkcli.")
         add(.tabArk, "Ark", "Ark")
         add(.tabOpenCode, "OpenCode", "OpenCode")
+        add(.tabDeepSeek, "DeepSeek", "DeepSeek")
+        add(.tabNebula, "APINebula", "APINebula")
+        add(.tabZai, "智谱", "Z.ai")
+        add(.tabSummary, "概览", "Overview")
+        add(.showSummary, "在菜单栏显示概览", "Show overview in menu bar")
+        add(.showProvider, "在菜单栏显示", "Show in menu bar")
+        add(.sectionDisplay, "显示", "Display")
         add(.opencodeCookie, "会话 Cookie", "Session Cookie")
         add(.opencodeCookiePlaceholder, "粘贴 opencode.ai 的 Cookie 头", "Paste the Cookie header from opencode.ai")
         add(.opencodeWorkspaceID, "Workspace ID", "Workspace ID")
@@ -351,6 +417,9 @@ final class L10n: ObservableObject {
         add(.settingsGeneral, "通用", "General")
         add(.settingsArk, "Ark 套餐", "Ark Plans")
         add(.settingsOpenCode, "OpenCode Go", "OpenCode Go")
+        add(.settingsDeepSeek, "DeepSeek", "DeepSeek")
+        add(.settingsNebula, "APINebula 中转", "APINebula Relay")
+        add(.settingsZai, "智谱 Coding Plan", "Z.ai Coding Plan")
         add(.settingsDiagnostics, "诊断", "Diagnostics")
         add(.sectionAppearance, "外观", "Appearance")
         add(.sectionBehavior, "行为", "Behavior")
@@ -360,10 +429,16 @@ final class L10n: ObservableObject {
         add(.status, "状态", "Status")
         add(.refreshArk, "刷新 Ark 用量", "Refresh Ark Usage")
         add(.refreshOpenCode, "刷新 OpenCode Go", "Refresh OpenCode Go")
+        add(.refreshDeepSeek, "刷新 DeepSeek", "Refresh DeepSeek")
+        add(.refreshNebula, "刷新 APINebula", "Refresh APINebula")
+        add(.refreshZai, "刷新智谱", "Refresh Z.ai")
+        add(.openDeepSeekPlatform, "打开 DeepSeek 平台", "Open DeepSeek Platform")
+        add(.openNebulaConsole, "打开 APINebula 控制台", "Open APINebula Console")
+        add(.openZaiConsole, "打开智谱用量页", "Open Z.ai Usage")
         add(.openCodeCookieSource, "Cookie 来源", "Cookie source")
         add(.openCodeCookieAutomatic, "自动读取浏览器", "Automatic from browser")
         add(.openCodeCookieManual, "手动 Cookie", "Manual Cookie")
-        add(.openCodeAutomaticHint, "普通刷新只使用 ArkBar 已缓存的会话，不会弹出密码框。首次使用或登录失效后，请点“重新读取浏览器登录”；只有这个操作可能请求一次钥匙串授权。", "Routine refreshes only use ArkBar's cached session and never show a password prompt. On first use or after sign-in expires, click “Re-import Browser Sign-in”; only that action may request Keychain access once.")
+        add(.openCodeAutomaticHint, "普通刷新只使用 TokenBar 已缓存的会话，不会弹出密码框。首次使用或登录失效后，请点“重新读取浏览器登录”；只有这个操作可能请求一次钥匙串授权。", "Routine refreshes only use TokenBar's cached session and never show a password prompt. On first use or after sign-in expires, click “Re-import Browser Sign-in”; only that action may request Keychain access once.")
         add(.openCodeManualHint, "仅在自动读取失败时使用。Cookie 会保存在本机钥匙串，不会写入偏好设置或日志。", "Use only when automatic import fails. The Cookie is stored in Keychain, never preferences or logs.")
         add(.openCodeAuthoritativeHint, "圆环只使用 OpenCode Go 网页返回的套餐用量；不会用本地消费记录估算余额。", "Rings use only subscription usage returned by OpenCode Go; local spending history is never used as quota.")
         add(.reimportBrowserSession, "重新读取浏览器登录", "Re-import Browser Session")
@@ -373,9 +448,9 @@ final class L10n: ObservableObject {
         add(.browserSession, "浏览器会话", "Browser session")
         add(.manualCookie, "手动 Cookie", "Manual Cookie")
         add(.openCodeBrowserAccessTitle, "允许读取浏览器登录", "Allow Browser Sign-in Access")
-        add(.openCodeBrowserAccessMessage, "ArkBar 将请求 macOS 钥匙串中的“%@”，用于解密 opencode.ai 登录 Cookie。ArkBar 只保留认证 Cookie，不读取浏览历史。", "ArkBar will request “%@” from macOS Keychain to decrypt the opencode.ai sign-in Cookie. ArkBar keeps only the authentication Cookie and does not read browsing history.")
+        add(.openCodeBrowserAccessMessage, "TokenBar 将请求 macOS 钥匙串中的“%@”，用于解密 opencode.ai 登录 Cookie。TokenBar 只保留认证 Cookie，不读取浏览历史。", "TokenBar will request “%@” from macOS Keychain to decrypt the opencode.ai sign-in Cookie. TokenBar keeps only the authentication Cookie and does not read browsing history.")
         add(.continueAction, "继续", "Continue")
-        add(.settingsAppVersion, "ArkBar 版本", "ArkBar version")
+        add(.settingsAppVersion, "TokenBar 版本", "TokenBar version")
         add(.settingsCurrentSource, "当前来源", "Current source")
         add(.settingsPreviousData, "正在显示上次成功数据", "Showing the last successful data")
         add(.settingsNoUsage, "暂无可显示的套餐用量", "No subscription usage to display")
@@ -386,11 +461,40 @@ final class L10n: ObservableObject {
         add(.productCodingPlanTeam, "团队 Coding 套餐", "Coding Plan (Team)")
         add(.productAgentPlanTeam, "团队 Agent 套餐", "Agent Plan (Team)")
         add(.productOpenCodeGo, "OpenCode Go", "OpenCode Go")
+        add(.productDeepSeek, "DeepSeek", "DeepSeek")
+        add(.productNebula, "APINebula", "APINebula")
         add(.windowSession, "会话", "Session")
         add(.window5Hour, "5 小时", "5-hour")
         add(.windowWeekly, "每周", "Weekly")
         add(.windowMonthly, "每月", "Monthly")
         add(.windowRequests, "请求数", "Requests")
+        add(.windowBalance, "余额", "Balance")
+        add(.deepseekToday, "今日", "Today")
+        add(.deepseekMonthly, "每月", "This month")
+        add(.deepseekPaidGranted, "充值 %@ · 赠送 %@", "Paid %@ · Granted %@")
+        add(.deepseekUsageDetail, "%@ tokens · %@ 次请求", "%@ tokens · %@ requests")
+        add(.deepseekUsageUnavailable, "配置 DEEPSEEK_PLATFORM_TOKEN 后显示用量", "Set DEEPSEEK_PLATFORM_TOKEN to see usage")
+        add(.deepseekTopModel, "常用模型：%@", "Top model: %@")
+        add(.deepseekCategoryDetail, "缓存命中 %@ · 未命中 %@ · 输出 %@", "Cache hit %@ · miss %@ · output %@")
+        add(.deepseekCredentialsHint, "凭据按以下优先级读取：本页填写的值（保存在钥匙串）> 环境变量（DEEPSEEK_API_KEY / DEEPSEEK_PLATFORM_TOKEN）> Chrome 浏览器登录。只要 Chrome 登录过 platform.deepseek.com，就无需填写任何 Key。", "Credentials are read in this order: values entered here (stored in Keychain) > environment variables (DEEPSEEK_API_KEY / DEEPSEEK_PLATFORM_TOKEN) > Chrome sign-in. If Chrome is signed in to platform.deepseek.com, no key is needed at all.")
+        add(.deepseekPlatformHint, "余额来自 platform.deepseek.com；充值后圆环会在下次刷新时自动更新。", "Balance comes from platform.deepseek.com; recharging updates the ring on the next refresh.")
+        add(.deepseekAPIKeyLabel, "API Key（可选）", "API Key (optional)")
+        add(.deepseekPlatformTokenLabel, "Platform Token（可选）", "Platform Token (optional)")
+        add(.saveCredential, "保存", "Save")
+        add(.deepseekBrowserSession, "浏览器会话：%@", "Browser session: %@")
+        add(.nebulaBaseURLLabel, "API 地址", "API base URL")
+        add(.nebulaBaseURLHint, "控制台地址，默认 https://apinebula.ai（不要填 /v1）", "Console base URL, default https://apinebula.ai (do not append /v1)")
+        add(.nebulaAPIKeyLabel, "API Key（可选，仅用于 /v1 模型调用）", "API Key (optional; for /v1 model calls only)")
+        add(.nebulaCredentialsHint, "官方文档只保证 API Key 调用 /v1 模型接口。余额/使用日志是控制台接口，优先使用浏览器登录会话。", "Official docs only guarantee API keys for /v1 model calls. Balance/usage logs are console APIs and prefer a browser sign-in session.")
+        add(.nebulaBrowserSession, "浏览器会话：%@", "Browser session: %@")
+        add(.nebulaBrowserHint, "请先在浏览器登录 apinebula.ai 控制台，再点“重新读取浏览器登录”。常规刷新只使用已缓存会话，不会反复弹钥匙串。", "Sign in to the apinebula.ai console in your browser, then click “Re-import Browser Sign-in”. Routine refreshes only use the cached session and will not re-prompt Keychain.")
+        add(.reimportNebulaBrowserSession, "重新读取浏览器登录", "Re-import Browser Sign-in")
+        add(.nebulaUsedTotal, "已用 %@", "Used %@")
+        add(.nebulaUsageUnavailable, "无法读取使用日志", "Usage log unavailable")
+        add(.nebulaTokenDetail, "缓存读 %@ · 未缓存 %@ · 输出 %@", "Cache read %@ · Uncached %@ · Output %@")
+        add(.zaiAPIKeyLabel, "API Key", "API Key")
+        add(.zaiRegionLabel, "API 区域", "API region")
+        add(.zaiCredentialsHint, "在 bigmodel.cn 用户中心创建 API Key 并填入；也可设置环境变量 Z_AI_API_KEY。国内用户选 BigModel CN 区域。", "Create an API key at bigmodel.cn and paste it here, or set the Z_AI_API_KEY environment variable. China-mainland users should pick BigModel CN.")
         add(.errorArkcliNotFound, "未找到 arkcli。请安装后执行 `arkcli auth login volc-sso`。", "arkcli was not found. Install it, then run `arkcli auth login volc-sso`.")
         add(.errorArkcliNotAuthenticated, "arkcli 尚未登录。请执行 `arkcli auth login volc-sso` 后刷新。", "arkcli is not signed in. Run `arkcli auth login volc-sso`, then refresh.")
         add(.errorArkcliTimedOut, "arkcli 查询超时。请检查登录状态后重试。", "arkcli usage timed out. Check authentication and try again.")
@@ -403,15 +507,26 @@ final class L10n: ObservableObject {
         add(.errorOpenCodeCookieMissing, "未配置有效的 OpenCode Go 手动 Cookie。", "No valid manual OpenCode Go Cookie is configured.")
         add(.errorOpenCodeCookieInvalid, "OpenCode Go 登录已失效。请重新登录浏览器，或更新手动 Cookie。", "The OpenCode Go sign-in expired. Sign in again in the browser or update the manual Cookie.")
         add(.errorOpenCodeBrowserSessionMissing, "没有在浏览器中找到 opencode.ai 登录会话。请先在浏览器登录，或改用手动 Cookie。", "No opencode.ai browser session was found. Sign in in a browser or use a manual Cookie.")
-        add(.errorOpenCodeBrowserAuthorizationRequired, "ArkBar 尚未缓存浏览器登录，或原会话已失效。请在 OpenCode Go 设置中点“重新读取浏览器登录”；后台刷新不会主动弹出密码框。", "ArkBar has no cached browser sign-in, or the previous session expired. Click “Re-import Browser Sign-in” in OpenCode Go settings; background refreshes will not show a password prompt.")
+        add(.errorOpenCodeBrowserAuthorizationRequired, "TokenBar 尚未缓存浏览器登录，或原会话已失效。请在 OpenCode Go 设置中点“重新读取浏览器登录”；后台刷新不会主动弹出密码框。", "TokenBar has no cached browser sign-in, or the previous session expired. Click “Re-import Browser Sign-in” in OpenCode Go settings; background refreshes will not show a password prompt.")
+        add(.errorDeepSeekMissingCredentials, "未找到 DeepSeek 凭据。可在 DeepSeek 设置中填写，或先在 Chrome 登录 platform.deepseek.com 后刷新。", "No DeepSeek credentials were found. Enter them in the DeepSeek settings, or sign in to platform.deepseek.com in Chrome and refresh.")
+        add(.errorDeepSeekInvalidPlatformToken, "DeepSeek 平台会话无效或已过期。请更新 DEEPSEEK_PLATFORM_TOKEN。", "The DeepSeek Platform session is invalid or expired. Update DEEPSEEK_PLATFORM_TOKEN.")
+        add(.errorNebulaMissingCredentials, "未配置 APINebula 控制台会话或 API Key。请先在浏览器登录 apinebula.ai，再点“重新读取浏览器登录”。", "No APINebula console session or API key is configured. Sign in at apinebula.ai, then click “Re-import Browser Sign-in”.")
+        add(.errorNebulaInvalidToken, "APINebula 控制台会话或 API Key 无效。余额接口通常需要浏览器登录会话，请重新导入。", "The APINebula console session or API key is invalid. Balance endpoints usually need a browser sign-in session; re-import it.")
+        add(.errorNebulaBrowserSessionMissing, "没有在浏览器中找到 apinebula.ai 登录会话。请先在浏览器登录控制台。", "No apinebula.ai browser session was found. Sign in to the console in a browser first.")
+        add(.errorNebulaBrowserAuthorizationRequired, "TokenBar 尚未缓存 APINebula 浏览器登录。请在 APINebula 设置中点“重新读取浏览器登录”。", "TokenBar has no cached APINebula browser sign-in. Click “Re-import Browser Sign-in” in APINebula settings.")
+        add(.errorZaiMissingCredentials, "未找到智谱 API Key。请在智谱设置中填写，或设置环境变量 Z_AI_API_KEY。", "No Z.ai API key found. Enter one in the Z.ai settings, or set Z_AI_API_KEY.")
+        add(.errorZaiInvalidToken, "智谱 API Key 无效或已过期。请检查区域与 Key 是否匹配（BigModel CN / Global）。", "The Z.ai API key is invalid or expired. Check that the region and key match (BigModel CN / Global).")
         add(.errorProbeModels, "所有探测模型均不可用", "All probe models failed")
         add(.apiKeyNoHeaders, "API Key 有效，但响应未返回请求限额头。", "API key is valid, but no request-limit headers were returned.")
         add(.apiKeyNoWindow, "API Key 有效，但未返回用量窗口。", "API key is valid, but no usage window was returned.")
 
         // Display mode display names
-        add(.displayIconOnly, "仅图标", "Icon only")
-        add(.displayIconAndPercent, "图标 + 百分比", "Icon + percent")
+        add(.displayIconOnly, "进度条", "Meter bar")
+        add(.displayIconAndPercent, "进度条 + 百分比", "Meter bar + percent")
         add(.displayPercentOnly, "仅百分比", "Percent only")
+        add(.displayLogoOnly, "仅 Logo", "Logo only")
+        add(.displayLogoAndPercent, "Logo + 百分比", "Logo + percent")
+        add(.displayLogoAndBar, "Logo + 进度条", "Logo + meter bar")
 
         // Refresh interval display names
         add(.interval1m, "1 分钟", "1 minute")

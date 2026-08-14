@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible ArkBar problem without private credentials or usage data.
+description: Report a reproducible TokenBar problem without private credentials or usage data.
 labels: [bug]
 body:
   - type: markdown
@@ -20,4 +20,4 @@ body:
   - type: input
     id: environment
     attributes:
-      label: macOS and ArkBar version
+      label: macOS and TokenBar version

@@ -57,7 +57,7 @@ final class OpenCodeGoProvider: UsageProvider {
                 credential: credential,
                 workspaceOverride: workspaceOverride)
         } catch UsageError.openCodeCookieInvalid where source == .automatic {
-            // A cached browser session may expire independently of ArkBar.
+            // A cached browser session may expire independently of TokenBar.
             // Background and ordinary refreshes must never fall through to a
             // browser-cookie import: doing so causes recurring macOS Keychain
             // prompts. Clear the stale cache and wait for the explicit repair
@@ -199,7 +199,7 @@ final class OpenCodeGoProvider: UsageProvider {
             throw UsageError.parseFailed("Invalid OpenCode Go workspace URL.")
         }
         components.queryItems = [
-            URLQueryItem(name: "arkbar_refresh", value: String(Int(Date().timeIntervalSince1970))),
+            URLQueryItem(name: "tokenbar_refresh", value: String(Int(Date().timeIntervalSince1970))),
         ]
         guard let url = components.url else {
             throw UsageError.parseFailed("Invalid OpenCode Go workspace URL.")

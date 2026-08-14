@@ -45,6 +45,9 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
     case general
     case ark
     case openCode
+    case deepseek
+    case nebula
+    case zai
     case diagnostics
 
     var id: Self { self }
@@ -54,6 +57,9 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .general: L(.settingsGeneral)
         case .ark: L(.settingsArk)
         case .openCode: L(.settingsOpenCode)
+        case .deepseek: L(.settingsDeepSeek)
+        case .nebula: L(.settingsNebula)
+        case .zai: L(.settingsZai)
         case .diagnostics: L(.settingsDiagnostics)
         }
     }
@@ -63,7 +69,23 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .general: "gearshape"
         case .ark: "chart.donut"
         case .openCode: "terminal"
+        case .deepseek: "fish"
+        case .nebula: "cloud"
+        case .zai: "sparkles"
         case .diagnostics: "stethoscope"
+        }
+    }
+
+    /// Provider panes show their brand logo in the sidebar instead of an SF
+    /// Symbol, matching the switcher buttons in the menu bar.
+    var providerTab: ProviderTab? {
+        switch self {
+        case .ark: .ark
+        case .openCode: .opencode
+        case .deepseek: .deepseek
+        case .nebula: .nebula
+        case .zai: .zai
+        case .general, .diagnostics: nil
         }
     }
 }
@@ -93,7 +115,7 @@ private struct PreferencesRootView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("ArkBar")
+                Text("TokenBar")
                     .font(.system(size: 20, weight: .bold))
                 Text(L(.settingsTitle))
                     .font(.caption)
@@ -105,8 +127,20 @@ private struct PreferencesRootView: View {
 
             List(selection: $selection) {
                 ForEach(PreferencesPane.allCases) { pane in
-                    Label(pane.title, systemImage: pane.symbol)
+                    if let tab = pane.providerTab, let logo = ProviderLogo.image(for: tab) {
+                        Label {
+                            Text(pane.title)
+                        } icon: {
+                            Image(nsImage: logo)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 14, height: 14)
+                        }
                         .tag(Optional(pane))
+                    } else {
+                        Label(pane.title, systemImage: pane.symbol)
+                            .tag(Optional(pane))
+                    }
                 }
             }
             .listStyle(.sidebar)
@@ -129,6 +163,12 @@ private struct PreferencesRootView: View {
             ArkPreferencesPane(settings: settings, store: store)
         case .openCode:
             OpenCodePreferencesPane(settings: settings, store: store)
+        case .deepseek:
+            DeepSeekPreferencesPane(settings: settings, store: store)
+        case .nebula:
+            NebulaPreferencesPane(settings: settings, store: store)
+        case .zai:
+            ZaiPreferencesPane(settings: settings, store: store)
         case .diagnostics:
             DiagnosticsPreferencesPane()
         }
@@ -179,6 +219,8 @@ private struct GeneralPreferencesPane: View {
                             Text(language.displayName).tag(language)
                         }
                     }
+                    Toggle(L(.showSummary), isOn: $settings.showSummary)
+                        .toggleStyle(.switch)
                 }
 
                 Section(L(.sectionRefresh)) {
@@ -203,6 +245,16 @@ private struct GeneralPreferencesPane: View {
                         } label: {
                             Label(L(.refreshOpenCode), systemImage: "arrow.clockwise")
                         }
+                        Button {
+                            store.refresh(tab: .deepseek)
+                        } label: {
+                            Label(L(.refreshDeepSeek), systemImage: "arrow.clockwise")
+                        }
+                        Button {
+                            store.refresh(tab: .zai)
+                        } label: {
+                            Label(L(.refreshZai), systemImage: "arrow.clockwise")
+                        }
                     }
                 }
             }
@@ -218,6 +270,13 @@ private struct ArkPreferencesPane: View {
     var body: some View {
         PreferencesPaneContainer(title: L(.settingsArk)) {
             Form {
+                Section(L(.sectionDisplay)) {
+                    Toggle(L(.showProvider), isOn: Binding(
+                        get: { settings.showArk },
+                        set: { settings.setVisible(.ark, $0) }))
+                        .toggleStyle(.switch)
+                }
+
                 Section(L(.sectionConnection)) {
                     Picker(L(.source), selection: $settings.sourceMode) {
                         ForEach(AppSettings.SourceMode.allCases, id: \.self) { mode in
@@ -279,6 +338,13 @@ private struct OpenCodePreferencesPane: View {
     var body: some View {
         PreferencesPaneContainer(title: L(.settingsOpenCode)) {
             Form {
+                Section(L(.sectionDisplay)) {
+                    Toggle(L(.showProvider), isOn: Binding(
+                        get: { settings.showOpenCode },
+                        set: { settings.setVisible(.opencode, $0) }))
+                        .toggleStyle(.switch)
+                }
+
                 Section(L(.sectionConnection)) {
                     Picker(L(.openCodeCookieSource), selection: $settings.opencodeCookieSource) {
                         Text(L(.openCodeCookieAutomatic))
@@ -353,6 +419,252 @@ private struct OpenCodePreferencesPane: View {
 
     private func saveManualCookie() {
         settings.setOpenCodeCookie(manualCookie)
+    }
+}
+
+private struct DeepSeekPreferencesPane: View {
+    @ObservedObject var settings: AppSettings
+    @ObservedObject var store: UsageStore
+    @State private var apiKeyField: String
+    @State private var platformTokenField: String
+
+    init(settings: AppSettings, store: UsageStore) {
+        self.settings = settings
+        self.store = store
+        _apiKeyField = State(initialValue: settings.deepseekApiKey)
+        _platformTokenField = State(initialValue: settings.deepseekPlatformToken)
+    }
+
+    var body: some View {
+        PreferencesPaneContainer(title: L(.settingsDeepSeek)) {
+            Form {
+                Section(L(.sectionDisplay)) {
+                    Toggle(L(.showProvider), isOn: Binding(
+                        get: { settings.showDeepSeek },
+                        set: { settings.setVisible(.deepseek, $0) }))
+                        .toggleStyle(.switch)
+                }
+
+                Section(L(.sectionConnection)) {
+                    SecureField(L(.deepseekAPIKeyLabel), text: $apiKeyField)
+                        .onSubmit(saveAPIKey)
+                    Button(L(.saveCredential), action: saveAPIKey)
+
+                    SecureField(L(.deepseekPlatformTokenLabel), text: $platformTokenField)
+                        .onSubmit(savePlatformToken)
+                    Button(L(.saveCredential), action: savePlatformToken)
+
+                    if let source = DeepSeekBrowserSession.cachedSourceLabel() {
+                        Label(String(format: L(.deepseekBrowserSession), source), systemImage: "globe")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+
+                    ProviderStatusRows(
+                        status: store.deepseekStatus,
+                        isRefreshing: store.deepseekIsRefreshing,
+                        lastUpdatedAt: store.deepseekLastUpdatedAt)
+
+                    Label(L(.deepseekCredentialsHint), systemImage: "key")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+
+                    Label(L(.deepseekPlatformHint), systemImage: "chart.bar.doc.horizontal")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Section(L(.sectionActions)) {
+                    Button {
+                        store.refresh(tab: .deepseek)
+                    } label: {
+                        Label(
+                            store.deepseekIsRefreshing ? L(.refreshing) : L(.refreshDeepSeek),
+                            systemImage: "arrow.clockwise")
+                    }
+                    Button {
+                        NSWorkspace.shared.open(URL(string: "https://platform.deepseek.com")!)
+                    } label: {
+                        Label(L(.openDeepSeekPlatform), systemImage: "safari")
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        }
+    }
+
+    private func saveAPIKey() {
+        settings.setDeepSeekAPIKey(apiKeyField)
+    }
+
+    private func savePlatformToken() {
+        settings.setDeepSeekPlatformToken(platformTokenField)
+    }
+}
+
+private struct NebulaPreferencesPane: View {
+    @ObservedObject var settings: AppSettings
+    @ObservedObject var store: UsageStore
+    @State private var apiKeyField: String
+
+    init(settings: AppSettings, store: UsageStore) {
+        self.settings = settings
+        self.store = store
+        _apiKeyField = State(initialValue: settings.nebulaAPIKey)
+    }
+
+    var body: some View {
+        PreferencesPaneContainer(title: L(.settingsNebula)) {
+            Form {
+                Section(L(.sectionDisplay)) {
+                    Toggle(L(.showProvider), isOn: Binding(
+                        get: { settings.showNebula },
+                        set: { settings.setVisible(.nebula, $0) }))
+                        .toggleStyle(.switch)
+                }
+
+                Section(L(.sectionConnection)) {
+                    TextField(L(.nebulaBaseURLLabel), text: $settings.nebulaBaseURL,
+                              prompt: Text(NebulaProvider.defaultBaseURL))
+                    Text(L(.nebulaBaseURLHint))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    SecureField(L(.nebulaAPIKeyLabel), text: $apiKeyField)
+                        .onSubmit(saveAPIKey)
+                    Button(L(.saveCredential), action: saveAPIKey)
+
+                    if let source = NebulaBrowserSession.cachedSourceLabel() {
+                        Label(String(format: L(.nebulaBrowserSession), source), systemImage: "globe")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+
+                    ProviderStatusRows(
+                        status: store.nebulaStatus,
+                        isRefreshing: store.nebulaIsRefreshing,
+                        lastUpdatedAt: store.nebulaLastUpdatedAt)
+
+                    Label(L(.nebulaCredentialsHint), systemImage: "key")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+
+                    Label(L(.nebulaBrowserHint), systemImage: "safari")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Section(L(.sectionActions)) {
+                    Button {
+                        store.reimportNebulaBrowserSession()
+                    } label: {
+                        Label(
+                            store.nebulaIsRefreshing
+                                ? L(.refreshingStatus)
+                                : L(.reimportNebulaBrowserSession),
+                            systemImage: "person.crop.circle.badge.arrow.trianglehead.counterclockwise")
+                    }
+                    .disabled(store.nebulaIsRefreshing)
+
+                    Button {
+                        store.refresh(tab: .nebula)
+                    } label: {
+                        Label(
+                            store.nebulaIsRefreshing ? L(.refreshing) : L(.refreshNebula),
+                            systemImage: "arrow.clockwise")
+                    }
+
+                    Button {
+                        NSWorkspace.shared.open(URL(string: "https://apinebula.ai/zh/console/topup")!)
+                    } label: {
+                        Label(L(.openNebulaConsole), systemImage: "safari")
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        }
+    }
+
+    private func saveAPIKey() {
+        settings.setNebulaAPIKey(apiKeyField)
+    }
+}
+
+private struct ZaiPreferencesPane: View {
+    @ObservedObject var settings: AppSettings
+    @ObservedObject var store: UsageStore
+    @State private var apiKeyField: String
+
+    init(settings: AppSettings, store: UsageStore) {
+        self.settings = settings
+        self.store = store
+        _apiKeyField = State(initialValue: settings.zaiAPIKey)
+    }
+
+    var body: some View {
+        PreferencesPaneContainer(title: L(.settingsZai)) {
+            Form {
+                Section(L(.sectionDisplay)) {
+                    Toggle(L(.showProvider), isOn: Binding(
+                        get: { settings.showZai },
+                        set: { settings.setVisible(.zai, $0) }))
+                        .toggleStyle(.switch)
+                }
+
+                Section(L(.sectionConnection)) {
+                    Picker(L(.zaiRegionLabel), selection: $settings.zaiRegion) {
+                        ForEach(ZaiAPIRegion.allCases, id: \.self) { region in
+                            Text(region.displayName).tag(region)
+                        }
+                    }
+
+                    SecureField(L(.zaiAPIKeyLabel), text: $apiKeyField)
+                        .onSubmit(saveAPIKey)
+                    Button(L(.saveCredential), action: saveAPIKey)
+
+                    ProviderStatusRows(
+                        status: store.zaiStatus,
+                        isRefreshing: store.zaiIsRefreshing,
+                        lastUpdatedAt: store.zaiLastUpdatedAt)
+
+                    Label(L(.zaiCredentialsHint), systemImage: "key")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+
+                Section(L(.sectionActions)) {
+                    Button {
+                        store.refresh(tab: .zai)
+                    } label: {
+                        Label(
+                            store.zaiIsRefreshing ? L(.refreshing) : L(.refreshZai),
+                            systemImage: "arrow.clockwise")
+                    }
+                    Button {
+                        NSWorkspace.shared.open(settings.zaiRegion.dashboardURL)
+                    } label: {
+                        Label(L(.openZaiConsole), systemImage: "safari")
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        }
+    }
+
+    private func saveAPIKey() {
+        settings.setZaiAPIKey(apiKeyField)
     }
 }
 
@@ -558,8 +870,16 @@ private func runTerminal(_ command: String) {
             do script "\(escaped)"
         end tell
         """
-    var error: NSDictionary?
-    NSAppleScript(source: script)?.executeAndReturnError(&error)
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+    process.arguments = ["-e", script]
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    do {
+        try process.run()
+    } catch {
+        UsageStore.log("runTerminal failed: \(error.localizedDescription)")
+    }
 }
 
 private func openArkConsole() {

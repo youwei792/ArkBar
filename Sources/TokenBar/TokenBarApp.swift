@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @main
-struct ArkBarApp: App {
+struct TokenBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
@@ -21,7 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // No Dock icon; pure menu-bar accessory.
-        let visualQA = ProcessInfo.processInfo.environment["ARKBAR_SHOW_SETTINGS"] == "1"
+        let visualQA = ProcessInfo.processInfo.environment["TOKENBAR_SHOW_SETTINGS"] == "1"
         NSApp.setActivationPolicy(visualQA ? .regular : .accessory)
         OpenCodeGoBrowserSession.configureKeychainPrompt()
 

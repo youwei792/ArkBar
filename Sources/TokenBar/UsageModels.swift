@@ -20,7 +20,7 @@ struct UsageWindow: Sendable, Equatable {
     /// Canonical sort rank so session < 5h < weekly < monthly regardless of locale.
     var sortRank: Int {
         switch self.label.lowercased() {
-        case "session", "5h", "5-hour", "five_hour": 0
+        case "session", "5h", "5-hour", "five_hour", "balance": 0
         case "weekly", "week": 1
         case "monthly", "month": 2
         default: 3
@@ -28,6 +28,58 @@ struct UsageWindow: Sendable, Equatable {
     }
 
     var displayName: String { L10n.shared.windowName(label) }
+}
+
+/// DeepSeek balance + usage breakdown shown on the DeepSeek card. Mirrors the
+/// fields CodexBar exposes for the DeepSeek platform (API-key balance plus
+/// platform-session today/month token/cost/request counts).
+struct DeepSeekSummary: Sendable, Equatable {
+    let currency: String
+    let totalBalance: Double
+    let grantedBalance: Double
+    let toppedUpBalance: Double
+    let todayTokens: Int
+    let currentMonthTokens: Int
+    let todayCost: Double?
+    let currentMonthCost: Double?
+    let requestCount: Int
+    let currentMonthRequestCount: Int
+    let topModel: String?
+    /// Current-month token split by category (cache hit / cache miss / output).
+    let promptCacheHitTokens: Int
+    let promptCacheMissTokens: Int
+    let responseTokens: Int
+    /// True when a platform session supplied today/monthly usage; false when
+    /// only the API-key balance is available.
+    let usageAvailable: Bool
+}
+
+/// Nebula (new-api relay) balance + usage breakdown. Balance and total spend
+/// come from `/api/user/self`; today/month numbers are aggregated from the
+/// consumption log (`/api/log/self`) using the API key as an access token.
+struct NebulaSummary: Sendable, Equatable {
+    /// Currency code of the relay (CNY by default).
+    let currency: String
+    /// Quota units per one unit of currency (new-api `quota_per_unit`).
+    let quotaPerUnit: Double
+    /// Remaining balance in currency units.
+    let balance: Double
+    /// Cumulative spend in currency units.
+    let usedTotal: Double
+    let todayCost: Double?
+    let currentMonthCost: Double?
+    let todayTokens: Int
+    let currentMonthTokens: Int
+    let requestCount: Int
+    let currentMonthRequestCount: Int
+    let topModel: String?
+    /// Current-month input (prompt) and output (completion) tokens.
+    let promptTokens: Int
+    let completionTokens: Int
+    /// Current-month cache-hit input tokens.
+    let cacheTokens: Int
+    /// True when the consumption log was available for today/month numbers.
+    let usageAvailable: Bool
 }
 
 /// One subscribed product (e.g. personal Coding Plan, team Agent Plan).
@@ -38,6 +90,8 @@ struct PlanSnapshot: Sendable, Equatable, Identifiable {
         case codingPlanTeam = "coding-plan-team"
         case agentPlanTeam = "agent-plan-team"
         case openCodeGo = "opencode-go"
+        case deepseek = "deepseek"
+        case nebula = "nebula"
 
         var displayName: String {
             L10n.shared.productName(self)
@@ -47,7 +101,7 @@ struct PlanSnapshot: Sendable, Equatable, Identifiable {
         var isTeam: Bool {
             switch self {
             case .codingPlanTeam, .agentPlanTeam: true
-            case .codingPlan, .agentPlan, .openCodeGo: false
+            case .codingPlan, .agentPlan, .openCodeGo, .deepseek, .nebula: false
             }
         }
     }
@@ -63,6 +117,10 @@ struct PlanSnapshot: Sendable, Equatable, Identifiable {
     let expiryDate: Date?
     /// Per-bucket error message from arkcli (e.g. "no seat bound to caller").
     let errorMessage: String?
+    /// DeepSeek-specific balance/usage breakdown (nil for every other provider).
+    var deepseek: DeepSeekSummary? = nil
+    /// Nebula (new-api relay) balance/usage breakdown (nil for other providers).
+    var nebula: NebulaSummary? = nil
 
     /// The tightest window (highest used percent) — what the bar icon reflects.
     var tightestWindow: UsageWindow? {
@@ -137,6 +195,13 @@ enum UsageError: LocalizedError, Sendable {
     case openCodeCookieMissing
     case openCodeCookieInvalid
     case openCodeBrowserSessionMissing(String)
+    case deepSeekMissingCredentials
+    case deepSeekInvalidPlatformToken
+    case nebulaMissingCredentials
+    case nebulaInvalidToken
+    case nebulaBrowserSessionMissing(String)
+    case zaiMissingCredentials
+    case zaiInvalidToken
 
     var errorDescription: String? {
         switch self {
@@ -168,6 +233,20 @@ enum UsageError: LocalizedError, Sendable {
             L(.errorOpenCodeCookieInvalid)
         case let .openCodeBrowserSessionMissing(message):
             message
+        case .deepSeekMissingCredentials:
+            L(.errorDeepSeekMissingCredentials)
+        case .deepSeekInvalidPlatformToken:
+            L(.errorDeepSeekInvalidPlatformToken)
+        case .nebulaMissingCredentials:
+            L(.errorNebulaMissingCredentials)
+        case .nebulaInvalidToken:
+            L(.errorNebulaInvalidToken)
+        case let .nebulaBrowserSessionMissing(message):
+            message
+        case .zaiMissingCredentials:
+            L(.errorZaiMissingCredentials)
+        case .zaiInvalidToken:
+            L(.errorZaiInvalidToken)
         }
     }
 }

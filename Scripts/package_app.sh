@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Build ArkBar as a signed .app bundle and install it to /Applications.
+# Build TokenBar as a signed .app bundle and install it to /Applications.
 # Usage: ./Scripts/package_app.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-APP_NAME="ArkBar"
-BUNDLE_ID="com.wwwsidequest.arkbar"
+APP_NAME="TokenBar"
+BUNDLE_ID="com.wwwsidequest.tokenbar"
 VERSION="0.1.0"
 BUILD="1"
 
@@ -42,6 +42,16 @@ cp "$ROOT/Resources/Info.plist" "$CONTENTS/Info.plist"
 
 # Icon.
 cp "$ROOT/Resources/AppIcon.icns" "$RESOURCES/AppIcon.icns"
+
+# SwiftPM resource bundle (provider logos). swift build places it under .build/
+# with the package's module name; copy it into the app so Bundle.module stays
+# resolvable from the installed bundle.
+RESOURCE_BUNDLE=$(find "$BUILD_DIR" -name "TokenBar_TokenBar.bundle" -maxdepth 4 2>/dev/null | head -1)
+if [[ -n "$RESOURCE_BUNDLE" ]]; then
+    cp -R "$RESOURCE_BUNDLE" "$RESOURCES/"
+else
+    echo "WARN: TokenBar_TokenBar.bundle not found; provider logos will be missing." >&2
+fi
 
 # License notices travel with the installed binary as well as the source.
 cp "$ROOT/LICENSE" "$RESOURCES/LICENSE.txt"

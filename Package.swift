@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "ArkBar",
+    name: "TokenBar",
     platforms: [
         .macOS(.v14),
     ],
@@ -11,14 +11,17 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "ArkBar",
+            name: "TokenBar",
             dependencies: [
                 .product(name: "SweetCookieKit", package: "SweetCookieKit"),
             ],
-            path: "Sources/ArkBar"),
+            path: "Sources/TokenBar",
+            resources: [
+                .process("Resources"),
+            ]),
         .testTarget(
-            name: "ArkBarTests",
-            dependencies: ["ArkBar"],
-            path: "Tests/ArkBarTests"),
+            name: "TokenBarTests",
+            dependencies: ["TokenBar"],
+            path: "Tests/TokenBarTests"),
     ]
 )
