@@ -1503,3 +1503,90 @@ struct KimiProviderTests {
         #expect(Int(snapshot.weekly.limit) == 2048)
     }
 }
+
+@Suite("KimiProvider web session & shared pool")
+struct KimiProviderWebTests {
+    @Test("Subscription stats decode shared pool and Code 7-day (real shape)")
+    func decodesSubscriptionStats() throws {
+        let json = #"""
+        {
+          "ratelimitCode5h": {"ratio": 0.4689, "enabled": true, "resetTime": "2026-07-02T11:56:36.876796734Z"},
+          "ratelimitCode7d": {"ratio": 0.0946, "enabled": true, "resetTime": "2026-07-09T06:56:36.876796734Z"},
+          "subscriptionBalance": {
+            "id": "19eee1de-9092-8315-8000-0000e4e34d79",
+            "feature": "FEATURE_OMNI",
+            "type": "SUBSCRIPTION",
+            "unit": "UNIT_CREDIT",
+            "amountUsedRatio": 1,
+            "kimiCodeUsedRatio": 0.2854,
+            "expireTime": "2026-07-23T00:00:00Z"
+          },
+          "giftBalances": [
+            {"id": "19efdb95-e082-804c-9ecd-978b7ab37d36", "feature": "FEATURE_OMNI",
+             "type": "GIFT", "unit": "UNIT_CREDIT", "amountUsedRatio": 1,
+             "kimiCodeUsedRatio": 1, "expireTime": "2026-07-31T15:59:59Z"}
+          ]
+        }
+        """#
+        let response = try JSONDecoder().decode(
+            KimiSubscriptionStatsResponse.self, from: json.data(using: .utf8)!)
+        #expect(response.subscriptionBalance?.feature == "FEATURE_OMNI")
+        #expect(response.subscriptionBalance?.type == "SUBSCRIPTION")
+        #expect(response.subscriptionBalance?.amountUsedRatio == 1)
+        #expect(response.subscriptionBalance?.kimiCodeUsedRatio == 0.2854)
+        #expect(response.ratelimitCode7d?.ratio == 0.0946)
+        #expect(response.ratelimitCode7d?.enabled == true)
+    }
+
+    @Test("Shared pool maps to monthly ring, Code weekly to weekly, rate limit to session")
+    func mapsSharedPoolToRings() throws {
+        let snapshot = KimiUsageSnapshot(
+            weekly: KimiUsageDetail(limit: "2048", used: "214", remaining: "1834", resetTime: nil),
+            rateLimit: KimiUsageDetail(limit: "200", used: "139", remaining: "61", resetTime: nil),
+            sharedPool: KimiSubscriptionBalance(
+                feature: "FEATURE_OMNI", type: "SUBSCRIPTION",
+                amountUsedRatio: 1, kimiCodeUsedRatio: 0.2854, expireTime: "2026-07-23T00:00:00Z"),
+            codeWeeklyLimit: KimiSubscriptionRateLimit(
+                ratio: 0.0946, enabled: true, resetTime: "2026-07-09T06:56:36Z"))
+
+        let windows = KimiProvider.makeWindows(from: snapshot)
+        func find(_ label: String) -> UsageWindow? {
+            windows.first { $0.label.lowercased() == label.lowercased() }
+        }
+        // 5-hour rate limit -> session ring (139/200 used).
+        let session = try #require(find("5-hour"))
+        #expect(session.usedPercent == 69.5)
+        // Code weekly quota -> weekly ring (214/2048 used).
+        let weekly = try #require(find("Weekly"))
+        #expect(weekly.usedPercent == 214.0 / 2048.0 * 100)
+        // Shared pool -> monthly ring (100% used), the Work + Code pool.
+        let monthly = try #require(find("Monthly"))
+        #expect(monthly.usedPercent == 100)
+        #expect(monthly.total == 100)
+    }
+
+    @Test("No web data falls back to Code-only weekly window")
+    func fallsBackToCodeOnly() {
+        let snapshot = KimiUsageSnapshot(
+            weekly: KimiUsageDetail(limit: "2048", used: "214", remaining: "1834", resetTime: nil),
+            rateLimit: nil,
+            sharedPool: nil,
+            codeWeeklyLimit: nil)
+        let windows = KimiProvider.makeWindows(from: snapshot)
+        #expect(windows.count == 1)
+        #expect(windows.first?.label.lowercased() == "weekly")
+        #expect(windows.first?.usedPercent == 214.0 / 2048.0 * 100)
+    }
+
+    @Test("Without a shared pool the monthly ring is omitted")
+    func omitsMonthlyWithoutPool() {
+        let snapshot = KimiUsageSnapshot(
+            weekly: KimiUsageDetail(limit: "2048", used: "214", remaining: "1834", resetTime: nil),
+            rateLimit: nil,
+            sharedPool: nil,
+            codeWeeklyLimit: nil)
+        let windows = KimiProvider.makeWindows(from: snapshot)
+        #expect(windows.count == 1)
+        #expect(windows.first?.label.lowercased() == "weekly")
+    }
+}

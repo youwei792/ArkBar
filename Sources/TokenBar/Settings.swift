@@ -194,6 +194,8 @@ final class AppSettings: ObservableObject {
     /// Kimi (Kimi For Coding) API key (Keychain mirror, never persisted to
     /// UserDefaults).
     @Published private(set) var kimiAPIKey: String
+    /// Kimi web `kimi-auth` JWT (imported from the browser; Keychain mirror).
+    @Published private(set) var kimiAuthToken: String
 
     var deepseekApiKeyHasValue: Bool { !deepseekApiKey.isEmpty }
     var deepseekPlatformTokenHasValue: Bool { !deepseekPlatformToken.isEmpty }
@@ -327,5 +329,6 @@ final class AppSettings: ObservableObject {
         self.zaiRegion = ZaiAPIRegion(rawValue: zaiRegionRaw) ?? .bigmodelCN
         self.zaiAPIKey = CookieKeychainStore.load(provider: "zai-token") ?? ""
         self.kimiAPIKey = CookieKeychainStore.load(provider: "kimi-key") ?? ""
+        self.kimiAuthToken = CookieKeychainStore.load(provider: "kimi-auth") ?? ""
     }
 }
