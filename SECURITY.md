@@ -14,10 +14,10 @@ cookie in the local macOS Keychain. Browser import is user initiated; routine
 refreshes reuse the cached credential and must not trigger a new browser-cookie
 read. Credentials must never be written to UserDefaults, source files, or logs.
 
-DeepSeek and Z.ai (Zhipu GLM) API keys entered in Settings follow the same
-policy as OpenCode credentials: stored in the local Keychain and mirrored to the
-app-support credential file cache, never written to UserDefaults, source files,
-or logs.
+DeepSeek, Z.ai (Zhipu GLM), and Kimi For Coding API keys entered in Settings
+follow the same policy as OpenCode credentials: stored in the local Keychain and
+mirrored to the app-support credential file cache, never written to UserDefaults,
+source files, or logs.
 
 If you believe a provider, subprocess, browser import, Keychain, redirect, or
 log path can expose a secret, report it as a security issue.

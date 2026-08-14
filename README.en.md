@@ -2,7 +2,7 @@
 
 [简体中文](README.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
 
-TokenBar is a native macOS menu-bar app for Volcengine Ark Coding/Agent Plan, OpenCode Go, DeepSeek, APINebula relay, and Z.ai (Zhipu GLM) Coding Plan usage. It keeps the quota you have **left** visible without a Dock icon.
+TokenBar is a native macOS menu-bar app for Volcengine Ark Coding/Agent Plan, OpenCode Go, DeepSeek, APINebula relay, Z.ai (Zhipu GLM), and Kimi For Coding usage. It keeps the quota you have **left** visible without a Dock icon.
 
 ## Highlights
 
@@ -14,7 +14,7 @@ TokenBar is a native macOS menu-bar app for Volcengine Ark Coding/Agent Plan, Op
 - DeepSeek credentials come from three sources: settings fields (stored in Keychain), environment variables, or the **signed-in DeepSeek Platform session in Chrome** (no key needed at all).
 - APINebula (new-api relay) monitoring: a balance ring (cumulative spend ÷ spend + balance), today/monthly cost, token counts, request counts, and a cache-read/uncached/output split aggregated from the console usage log.
 - APINebula balance and usage logs are console APIs: credentials come from the browser sign-in session (imported explicitly in Settings and cached in Keychain), with an optional API key fallback.
-- Instant Ark/OpenCode Go/DeepSeek/APINebula/Z.ai switching with isolated refresh and error state.
+- Instant Ark/OpenCode Go/DeepSeek/APINebula/Z.ai/Kimi switching with isolated refresh and error state.
 - An **Overview** tab lists every visible provider's remaining percent with a teal→blue capsule meter; click a row to open that provider's full card. Toggle it in **Settings → General**.
 - Each provider can be independently shown/hidden from its own settings pane; hidden providers leave the switcher and stop refreshing.
 - Menu-bar styles: meter bar, bar + percent, percent only, logo only, logo + percent, and logo + bar. Logo glyphs are 16pt and percent text uses the system font size, matching CodexBar's menu-bar scale.
@@ -71,6 +71,7 @@ In **Auto** mode, TokenBar prefers explicitly configured credentials, then falls
 | DeepSeek | Any of: API Key / Platform Token entered in Settings (stored in Keychain), environment variables `DEEPSEEK_API_KEY` / `DEEPSEEK_PLATFORM_TOKEN`, or simply signing in to platform.deepseek.com in Chrome | Balance from `api.deepseek.com/user/balance` (or the platform wallets); today/monthly cost, tokens, request counts, and the category breakdown from the platform `usage/amount` + `usage/cost` endpoints. Credential precedence: settings > environment > Chrome session. |
 | APINebula (relay) | Explicitly choose **Re-import Browser Sign-in** in **Settings → APINebula Relay** (console session cached in Keychain); optional API key | Balance/cumulative spend from the console `api/user/self`; today/monthly cost, tokens, request counts, and the cache-read/uncached/output split from the `api/log/self` usage log (cache tokens live in the log's `other` field). Balance and logs are console APIs; API keys only guarantee `/v1` model calls. |
 | Z.ai (Zhipu GLM) | API key entered in **Settings → Z.ai Coding Plan** (stored in Keychain + file cache); optional `Z_AI_API_KEY` environment fallback; API region Global (`api.z.ai`) or BigModel CN (`open.bigmodel.cn`, default) | Reads the Coding Plan quota windows from `api/monitor/usage/quota/limit`: a 5-hour + weekly pair (session/weekly rings), plus a monthly MCP time window (monthly ring) on some plans. Credential precedence: settings > environment. |
+| Kimi For Coding | API key entered in **Settings → Kimi For Coding** (stored in Keychain + file cache); optional `KIMI_CODE_API_KEY` environment fallback | Reads the membership quota from `api.kimi.com/coding/v1/usages`: total weekly quota (weekly ring) plus a 5-hour rate-limit window (session ring). Credential precedence: settings > environment. |
 
 See the official [Ark CLI installation guide](https://github.com/volcengine/ark-cli) for the current CLI setup.
 
@@ -80,6 +81,7 @@ Never commit credentials. Set them in your shell environment before launching To
 export VOLCENGINE_ACCESS_KEY_ID='...'
 export VOLCENGINE_SECRET_ACCESS_KEY='...'
 export Z_AI_API_KEY='...'
+export KIMI_CODE_API_KEY='...'
 .build/debug/TokenBar
 ```
 
@@ -93,6 +95,7 @@ export Z_AI_API_KEY='...'
 - The DeepSeek tab uses a single balance ring: used share = this month's cost ÷ (cost + balance). Topping up raises the balance, so the ring recalculates on the next refresh. Below the ring, the cache hit/miss/output breakdown and the top model are shown.
 - The APINebula tab uses a single balance ring: used share = cumulative spend ÷ (spend + balance). Below the ring, the cache-read/uncached/output breakdown and the top model are shown.
 - The Z.ai (Zhipu GLM) tab shows Coding Plan quota rings: the 5-hour window drives the session ring, the weekly window the weekly ring, and an optional monthly MCP time window (monthly ring) on some plans. Rings and legend rows fill from their **remaining** values.
+- The Kimi For Coding tab shows membership quota rings: the total weekly quota drives the weekly ring and the 5-hour rate-limit window the session ring. Rings and legend rows fill from their **remaining** values.
 - A refresh failure preserves the last confirmed data and marks it stale.
 - By default, data refreshes only on the interval selected in **Settings → Refresh**. Enable **Refresh when opening the menu bar item** to also refresh whenever the status item is opened; overlapping triggers are coalesced into one request.
 - Manual **Refresh** keeps the panel open, shows a live refreshing state, then reports “Updated just now” / a relative update time or a failure reason.
@@ -112,9 +115,10 @@ Quota reset time is not subscription expiry. TokenBar displays a plan-expiry bad
 - Browser-session import (OpenCode/APINebula) is an explicit settings action; background and startup refreshes never read browser cookie stores or prompt for Keychain passwords.
 - API Keys / Platform Tokens entered in the DeepSeek settings pane are stored only in the local Keychain + file cache, never UserDefaults, source files, or logs.
 - The Z.ai API key entered in Settings is likewise stored only in the local Keychain + file cache, never UserDefaults, source files, or logs; the region preference is plain UserDefaults and holds no credentials.
+- The Kimi API key entered in Settings is likewise stored only in the local Keychain + file cache, never UserDefaults, source files, or logs.
 - `arkcli` keeps ownership of its SSO session; TokenBar only runs `arkcli usage plan --format json` and parses its output.
 - AK/SK and Ark API keys are read from the launch environment and are never written to disk by TokenBar.
-- Network requests go only to the required Volcengine Ark endpoints, `opencode.ai`, `platform.deepseek.com`, or the Z.ai quota endpoint (`open.bigmodel.cn` / `api.z.ai`).
+- Network requests go only to the required Volcengine Ark endpoints, `opencode.ai`, `platform.deepseek.com`, the Z.ai quota endpoint (`open.bigmodel.cn` / `api.z.ai`), or the Kimi quota endpoint (`api.kimi.com`).
 
 ## Development
 
@@ -122,7 +126,7 @@ Quota reset time is not subscription expiry. TokenBar displays a plan-expiry bad
 swift test
 ```
 
-The test suite covers Ark CLI, OpenAPI, OpenCode Go, DeepSeek, and Z.ai decoding, DeepSeek balance/usage aggregation, browser-session token extraction, time formatting, icon rendering, refresh interaction, and menu-card layout regressions. GitHub Actions runs the same test command for pull requests and pushes to `main`.
+The test suite covers Ark CLI, OpenAPI, OpenCode Go, DeepSeek, Z.ai, and Kimi decoding, DeepSeek balance/usage aggregation, browser-session token extraction, time formatting, icon rendering, refresh interaction, and menu-card layout regressions. GitHub Actions runs the same test command for pull requests and pushes to `main`.
 
 ## Project structure
 
@@ -140,7 +144,8 @@ Sources/TokenBar/
   NebulaBrowserSession.swift explicit console cookie + user-id importer
   NebulaCardView.swift single balance-ring menu card
   ZaiProvider.swift    Z.ai (Zhipu GLM) Coding Plan quota provider
-  ProviderLogo.swift     provider brand icons (doubao/opencode/deepseek/apinebula/zai)
+  KimiProvider.swift   Kimi For Coding membership quota provider
+  ProviderLogo.swift     provider brand icons (doubao/opencode/deepseek/apinebula/zai/kimi)
   CookieKeychainStore.swift Keychain + file-cache credential store
   CredentialFileCache.swift on-disk credential mirror (mode 0600)
   MenuBuilder.swift      menu construction incl. SummaryRowView overview rows

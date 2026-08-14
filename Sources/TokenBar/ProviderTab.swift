@@ -1,14 +1,15 @@
 import Foundation
 
 /// The menu can display Ark, OpenCode Go, DeepSeek, a Nebula (new-api
-/// relay) account, or a Z.ai (智谱 GLM) Coding Plan without mixing their data,
-/// refresh state, or error messages.
+/// relay) account, a Z.ai (智谱 GLM) Coding Plan, or a Kimi (Kimi For Coding)
+/// membership without mixing their data, refresh state, or error messages.
 enum ProviderTab: String, CaseIterable, Sendable {
     case ark
     case opencode
     case deepseek
     case nebula
     case zai
+    case kimi
 
     var displayName: String {
         switch self {
@@ -17,6 +18,7 @@ enum ProviderTab: String, CaseIterable, Sendable {
         case .deepseek: L(.tabDeepSeek)
         case .nebula: L(.tabNebula)
         case .zai: L(.tabZai)
+        case .kimi: L(.tabKimi)
         }
     }
 }

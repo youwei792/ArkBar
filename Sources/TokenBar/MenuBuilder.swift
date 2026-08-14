@@ -90,6 +90,10 @@ enum MenuBuilder {
                 menu.addItem(actionItem(L(.openZaiConsole), action: {
                     NSWorkspace.shared.open(AppSettings.shared.zaiRegion.dashboardURL)
                 }))
+            case .kimi:
+                menu.addItem(actionItem(L(.openKimiConsole), action: {
+                    NSWorkspace.shared.open(URL(string: "https://www.kimi.com/code/console")!)
+                }))
             }
         }
         menu.addItem(actionItem(L(.settings), action: state.onSettings))

@@ -27,16 +27,19 @@ final class UsageStore: ObservableObject {
     @Published private(set) var deepseekStatus: LoadStatus = .never
     @Published private(set) var nebulaStatus: LoadStatus = .never
     @Published private(set) var zaiStatus: LoadStatus = .never
+    @Published private(set) var kimiStatus: LoadStatus = .never
     @Published private(set) var arkLastUpdatedAt: Date?
     @Published private(set) var opencodeLastUpdatedAt: Date?
     @Published private(set) var deepseekLastUpdatedAt: Date?
     @Published private(set) var nebulaLastUpdatedAt: Date?
     @Published private(set) var zaiLastUpdatedAt: Date?
+    @Published private(set) var kimiLastUpdatedAt: Date?
     @Published private(set) var arkIsRefreshing = false
     @Published private(set) var opencodeIsRefreshing = false
     @Published private(set) var deepseekIsRefreshing = false
     @Published private(set) var nebulaIsRefreshing = false
     @Published private(set) var zaiIsRefreshing = false
+    @Published private(set) var kimiIsRefreshing = false
 
     /// Convenience for the status item: in summary mode, pick the tightest
     /// (lowest remaining percent) provider.
@@ -65,7 +68,8 @@ final class UsageStore: ObservableObject {
     /// All statuses, keyed by provider tab, for the summary view.
     var allStatuses: [ProviderTab: LoadStatus] {
         [.ark: arkStatus, .opencode: opencodeStatus,
-         .deepseek: deepseekStatus, .nebula: nebulaStatus, .zai: zaiStatus]
+         .deepseek: deepseekStatus, .nebula: nebulaStatus, .zai: zaiStatus,
+         .kimi: kimiStatus]
     }
 
     /// The "tightest" (lowest remaining percent, most urgent) provider.
@@ -101,12 +105,14 @@ final class UsageStore: ObservableObject {
     private var deepSeekProvider: DeepSeekProvider?
     private var nebulaProvider: NebulaProvider?
     private var zaiProvider: ZaiProvider?
+    private var kimiProvider: KimiProvider?
     private var timer: Timer?
     private var lastSuccessfulArkSnapshot: ProviderSnapshot?
     private var lastSuccessfulOpenCodeSnapshot: ProviderSnapshot?
     private var lastSuccessfulDeepSeekSnapshot: ProviderSnapshot?
     private var lastSuccessfulNebulaSnapshot: ProviderSnapshot?
     private var lastSuccessfulZaiSnapshot: ProviderSnapshot?
+    private var lastSuccessfulKimiSnapshot: ProviderSnapshot?
     private var cancellables = Set<AnyCancellable>()
 
     init(settings: AppSettings = .shared) {
@@ -157,6 +163,10 @@ final class UsageStore: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in self?.refresh(tab: .zai) }
             .store(in: &cancellables)
+        settings.$kimiAPIKey
+            .dropFirst()
+            .sink { [weak self] _ in self?.refresh(tab: .kimi) }
+            .store(in: &cancellables)
         // When the selection switches to a provider with no data, refresh it.
         settings.$selectedMenu
             .dropFirst()
@@ -176,6 +186,7 @@ final class UsageStore: ObservableObject {
             case .deepseek: publisher = settings.$showDeepSeek.eraseToAnyPublisher()
             case .nebula: publisher = settings.$showNebula.eraseToAnyPublisher()
             case .zai: publisher = settings.$showZai.eraseToAnyPublisher()
+            case .kimi: publisher = settings.$showKimi.eraseToAnyPublisher()
             }
             publisher
                 .dropFirst()
@@ -216,6 +227,7 @@ final class UsageStore: ObservableObject {
         deepSeekProvider = DeepSeekProvider(settings: settings)
         nebulaProvider = NebulaProvider(settings: settings)
         zaiProvider = ZaiProvider(settings: settings)
+        kimiProvider = KimiProvider(settings: settings)
     }
 
     func start() {
@@ -238,6 +250,7 @@ final class UsageStore: ObservableObject {
         case .deepseek: refreshDeepSeek()
         case .nebula: refreshNebula()
         case .zai: refreshZai()
+        case .kimi: refreshKimi()
         }
     }
 
@@ -551,6 +564,48 @@ final class UsageStore: ObservableObject {
         }
     }
 
+    private func refreshKimi() {
+        guard !kimiIsRefreshing else { return }
+        guard let provider = kimiProvider else { return }
+        kimiIsRefreshing = true
+        switch kimiStatus {
+        case .ok, .stale: break
+        case .never, .loading, .error: kimiStatus = .loading
+        }
+        let environment = ProcessInfo.processInfo.environment
+        Task { [weak self] in
+            await self?.runKimiProvider(provider, environment: environment)
+        }
+    }
+
+    private func runKimiProvider(_ provider: KimiProvider, environment: [String: String]) async {
+        do {
+            let snapshot = try await provider.fetch(environment: environment)
+            Self.log("✓ \(provider.displayName): \(snapshot.plans.count) plan(s)")
+            kimiLastUpdatedAt = Date()
+            lastSuccessfulKimiSnapshot = snapshot
+            kimiStatus = .ok(snapshot: snapshot)
+            finishKimiRefresh()
+        } catch let error as UsageError {
+            Self.log("✗ \(provider.displayName): \(error.errorDescription ?? "Unknown error")")
+            finishKimiRefresh(error: error.errorDescription ?? "Unknown error")
+        } catch {
+            Self.log("✗ \(provider.displayName): \(error.localizedDescription)")
+            finishKimiRefresh(error: error.localizedDescription)
+        }
+    }
+
+    private func finishKimiRefresh(error: String? = nil) {
+        kimiIsRefreshing = false
+        if let error {
+            if let snapshot = lastSuccessfulKimiSnapshot {
+                kimiStatus = .stale(snapshot: snapshot, message: error)
+            } else {
+                kimiStatus = .error(message: error)
+            }
+        }
+    }
+
     func status(for tab: ProviderTab) -> LoadStatus {
         switch tab {
         case .ark: return arkStatus
@@ -558,6 +613,7 @@ final class UsageStore: ObservableObject {
         case .deepseek: return deepseekStatus
         case .nebula: return nebulaStatus
         case .zai: return zaiStatus
+        case .kimi: return kimiStatus
         }
     }
 
@@ -568,6 +624,7 @@ final class UsageStore: ObservableObject {
         case .deepseek: return deepseekLastUpdatedAt
         case .nebula: return nebulaLastUpdatedAt
         case .zai: return zaiLastUpdatedAt
+        case .kimi: return kimiLastUpdatedAt
         }
     }
 
@@ -578,6 +635,7 @@ final class UsageStore: ObservableObject {
         case .deepseek: return deepseekIsRefreshing
         case .nebula: return nebulaIsRefreshing
         case .zai: return zaiIsRefreshing
+        case .kimi: return kimiIsRefreshing
         }
     }
 
