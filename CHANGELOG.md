@@ -4,6 +4,8 @@ All notable public changes to TokenBar are documented here.
 
 ## Unreleased
 
+- Added a Z.ai (Zhipu GLM) Coding Plan tab: quota windows from `api/monitor/usage/quota/limit` (5-hour session + weekly rings, plus a monthly MCP time window on some plans), with Global / BigModel CN region selection and an API key stored in Keychain + file cache (or the `Z_AI_API_KEY` environment fallback).
+- `CREDIT_LIMIT` windows (the type newer BigModel CN plans return instead of `TOKENS_LIMIT`) are treated as token/credit windows and drive the 5-hour and weekly rings; the plan tier is read from the response's `level` field.
 - Added a multi-provider **Overview** tab that lists every visible provider with remaining percent and a teal→blue capsule meter; click a row to open that provider's full card. Toggle it in **Settings → General**.
 - Status-item logo glyphs are 16×16pt and percent text uses the system font size, matching CodexBar's menu-bar scale.
 - Credentials are mirrored to a local file cache (`~/Library/Application Support/TokenBar/credentials.json`, mode 0600) so warm restarts never need Keychain UI; Keychain remains the canonical store and backfills the file on first silent read.
