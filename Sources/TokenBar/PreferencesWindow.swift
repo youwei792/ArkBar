@@ -705,6 +705,14 @@ private struct KimiPreferencesPane: View {
                         .onSubmit(saveAPIKey)
                     Button(L(.saveCredential), action: saveAPIKey)
 
+                    if let source = KimiBrowserSession.cachedSourceLabel() {
+                        Label(String(format: L(.kimiBrowserSession), source), systemImage: "globe")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+
                     ProviderStatusRows(
                         status: store.kimiStatus,
                         isRefreshing: store.kimiIsRefreshing,
@@ -715,9 +723,25 @@ private struct KimiPreferencesPane: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
+
+                    Label(L(.kimiBrowserHint), systemImage: "safari")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Section(L(.sectionActions)) {
+                    Button {
+                        store.reimportKimiBrowserSession()
+                    } label: {
+                        Label(
+                            store.kimiIsRefreshing
+                                ? L(.refreshingStatus)
+                                : L(.reimportKimiBrowserSession),
+                            systemImage: "person.crop.circle.badge.arrow.trianglehead.counterclockwise")
+                    }
+                    .disabled(store.kimiIsRefreshing)
+
                     Button {
                         store.refresh(tab: .kimi)
                     } label: {

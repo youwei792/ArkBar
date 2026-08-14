@@ -318,6 +318,37 @@ final class UsageStore: ObservableObject {
         }
     }
 
+    func reimportKimiBrowserSession() {
+        guard !kimiIsRefreshing else { return }
+        guard let provider = kimiProvider else {
+            if lastSuccessfulKimiSnapshot == nil {
+                kimiStatus = .error(message: L(.errorKimiBrowserAuthorizationRequired))
+            }
+            return
+        }
+
+        kimiIsRefreshing = true
+        switch kimiStatus {
+        case .ok, .stale: break
+        case .never, .loading, .error: kimiStatus = .loading
+        }
+
+        let environment = ProcessInfo.processInfo.environment
+        let browser = KimiBrowserSession.browserForInteractiveImport()
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try KimiBrowserSession.importSessionInteractively(from: browser)
+                }.value
+                await self.runKimiProvider(provider, environment: environment)
+            } catch {
+                Self.log("✗ Kimi browser import: \(error.localizedDescription)")
+                self.finishKimiRefresh(error: error.localizedDescription)
+            }
+        }
+    }
+
     private func refreshAllConfigured() {
         for tab in settings.visibleTabs {
             refresh(tab: tab)

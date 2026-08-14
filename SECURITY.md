@@ -19,5 +19,9 @@ follow the same policy as OpenCode credentials: stored in the local Keychain and
 mirrored to the app-support credential file cache, never written to UserDefaults,
 source files, or logs.
 
+Kimi browser import reads only the `kimi-auth` cookie (JWT) from `www.kimi.com`
+and stores it in the same Keychain + file cache; it is used only to call the
+membership console usage endpoints.
+
 If you believe a provider, subprocess, browser import, Keychain, redirect, or
 log path can expose a secret, report it as a security issue.

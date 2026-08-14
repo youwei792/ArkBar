@@ -205,6 +205,9 @@ enum LKey: String {
     case zaiCredentialsHint = "zai.credentialsHint"
     case kimiAPIKeyLabel = "kimi.apiKeyLabel"
     case kimiCredentialsHint = "kimi.credentialsHint"
+    case kimiBrowserSession = "kimi.browserSession"
+    case kimiBrowserHint = "kimi.browserHint"
+    case reimportKimiBrowserSession = "settings.reimportKimiBrowserSession"
     case errorArkcliNotFound = "error.arkcliNotFound"
     case errorArkcliNotAuthenticated = "error.arkcliNotAuthenticated"
     case errorArkcliTimedOut = "error.arkcliTimedOut"
@@ -228,6 +231,8 @@ enum LKey: String {
     case errorZaiInvalidToken = "error.zaiInvalidToken"
     case errorKimiMissingCredentials = "error.kimiMissingCredentials"
     case errorKimiInvalidToken = "error.kimiInvalidToken"
+    case errorKimiBrowserSessionMissing = "error.kimiBrowserSessionMissing"
+    case errorKimiBrowserAuthorizationRequired = "error.kimiBrowserAuthorizationRequired"
     case errorProbeModels = "error.probeModels"
     case apiKeyNoHeaders = "apiKey.noHeaders"
     case apiKeyNoWindow = "apiKey.noWindow"
@@ -508,7 +513,10 @@ final class L10n: ObservableObject {
         add(.zaiRegionLabel, "API 区域", "API region")
         add(.zaiCredentialsHint, "在 bigmodel.cn 用户中心创建 API Key 并填入；也可设置环境变量 Z_AI_API_KEY。国内用户选 BigModel CN 区域。", "Create an API key at bigmodel.cn and paste it here, or set the Z_AI_API_KEY environment variable. China-mainland users should pick BigModel CN.")
         add(.kimiAPIKeyLabel, "API Key", "API Key")
-        add(.kimiCredentialsHint, "在 kimi.com/code/console 创建 API Key 并填入；也可设置环境变量 KIMI_CODE_API_KEY。", "Create an API key at kimi.com/code/console and paste it here, or set the KIMI_CODE_API_KEY environment variable.")
+        add(.kimiCredentialsHint, "API Key 可选（在 kimi.com/code/console 创建）；也可设置环境变量 KIMI_CODE_API_KEY。填 API Key 可看到 Code 自己的配额环；导入浏览器登录后可额外看到共享总池与 Code 7 天环。", "An API key is optional (create it at kimi.com/code/console); KIMI_CODE_API_KEY also works. With an API key you see Code's own quota rings; importing the browser sign-in additionally shows the shared pool and the Code 7-day ring.")
+        add(.kimiBrowserSession, "浏览器会话：%@", "Browser session: %@")
+        add(.kimiBrowserHint, "请先在浏览器登录 www.kimi.com/code，再点“重新读取浏览器登录”。浏览器会话能读取共享总池（Kimi Code + Kimi Work 合并计量）与 Code 7 天限流。常规刷新只使用已缓存会话，不会反复弹钥匙串。", "Sign in at www.kimi.com/code in your browser, then click “Re-import Browser Sign-in”. The browser session exposes the shared pool (Kimi Code + Kimi Work billed together) and the Code 7-day limit. Routine refreshes only use the cached session and will not re-prompt Keychain.")
+        add(.reimportKimiBrowserSession, "重新读取浏览器登录", "Re-import Browser Sign-in")
         add(.errorArkcliNotFound, "未找到 arkcli。请安装后执行 `arkcli auth login volc-sso`。", "arkcli was not found. Install it, then run `arkcli auth login volc-sso`.")
         add(.errorArkcliNotAuthenticated, "arkcli 尚未登录。请执行 `arkcli auth login volc-sso` 后刷新。", "arkcli is not signed in. Run `arkcli auth login volc-sso`, then refresh.")
         add(.errorArkcliTimedOut, "arkcli 查询超时。请检查登录状态后重试。", "arkcli usage timed out. Check authentication and try again.")
@@ -532,6 +540,8 @@ final class L10n: ObservableObject {
         add(.errorZaiInvalidToken, "智谱 API Key 无效或已过期。请检查区域与 Key 是否匹配（BigModel CN / Global）。", "The Z.ai API key is invalid or expired. Check that the region and key match (BigModel CN / Global).")
         add(.errorKimiMissingCredentials, "未找到 Kimi API Key。请在 Kimi For Coding 设置中填写，或设置环境变量 KIMI_CODE_API_KEY。", "No Kimi API key found. Enter one in the Kimi For Coding settings, or set KIMI_CODE_API_KEY.")
         add(.errorKimiInvalidToken, "Kimi API Key 无效或已过期。请到 kimi.com/code/console 重新创建。", "The Kimi API key is invalid or expired. Create a new one at kimi.com/code/console.")
+        add(.errorKimiBrowserSessionMissing, "没有在浏览器中找到 www.kimi.com 的登录会话（kimi-auth cookie）。请先在浏览器登录 Kimi。", "No www.kimi.com sign-in session (kimi-auth cookie) was found. Sign in to Kimi in a browser first.")
+        add(.errorKimiBrowserAuthorizationRequired, "TokenBar 尚未缓存 Kimi 浏览器登录。请在 Kimi For Coding 设置中点“重新读取浏览器登录”。", "TokenBar has no cached Kimi browser sign-in. Click “Re-import Browser Sign-in” in Kimi For Coding settings.")
         add(.errorProbeModels, "所有探测模型均不可用", "All probe models failed")
         add(.apiKeyNoHeaders, "API Key 有效，但响应未返回请求限额头。", "API key is valid, but no request-limit headers were returned.")
         add(.apiKeyNoWindow, "API Key 有效，但未返回用量窗口。", "API key is valid, but no usage window was returned.")
