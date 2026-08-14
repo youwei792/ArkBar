@@ -197,6 +197,21 @@ final class KimiProvider: UsageProvider {
     /// Credentials are resolved inside `fetch` (settings/Keychain -> environment).
     func isAvailable(environment: [String: String]) -> Bool { true }
 
+    /// Whether the last web-session call (GetUsages / GetSubscriptionStats) was
+    /// rejected with 401. Persisted so the settings pane can show a clear hint.
+    static var webSessionInvalid: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.webSessionInvalidKey) }
+        set {
+            if newValue {
+                UserDefaults.standard.set(true, forKey: Self.webSessionInvalidKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Self.webSessionInvalidKey)
+            }
+        }
+    }
+
+    private static let webSessionInvalidKey = "tokenbar.kimiWebSessionInvalid"
+
     func fetch(environment: [String: String]) async throws -> ProviderSnapshot {
         let apiKey = await MainActor.run { Self.trimmed(self.settings.kimiAPIKey) }
             ?? KimiCredentialResolver.apiKey(environment: environment)
@@ -330,11 +345,13 @@ final class KimiProvider: UsageProvider {
         let response = try await transport.response(for: request)
         guard response.statusCode == 200 else {
             if response.statusCode == 401 || response.statusCode == 403 {
+                Self.webSessionInvalid = true
                 throw UsageError.kimiInvalidToken
             }
             let body = String(data: response.data, encoding: .utf8) ?? ""
             throw UsageError.apiError(statusCode: response.statusCode, message: "Kimi web usage: \(body)")
         }
+        Self.webSessionInvalid = false
         let usageResponse = try JSONDecoder().decode(KimiUsageResponse.self, from: response.data)
         guard let codingUsage = usageResponse.usages.first(where: { $0.scope == "FEATURE_CODING" }) else {
             throw UsageError.parseFailed("FEATURE_CODING scope not found in Kimi usage response")
@@ -347,9 +364,14 @@ final class KimiProvider: UsageProvider {
         request.httpBody = Data("{}".utf8)
         let response = try await transport.response(for: request)
         guard response.statusCode == 200 else {
+            if response.statusCode == 401 || response.statusCode == 403 {
+                Self.webSessionInvalid = true
+                throw UsageError.kimiInvalidToken
+            }
             let body = String(data: response.data, encoding: .utf8) ?? ""
             throw UsageError.apiError(statusCode: response.statusCode, message: "Kimi subscription stats: \(body)")
         }
+        Self.webSessionInvalid = false
         return try JSONDecoder().decode(KimiSubscriptionStatsResponse.self, from: response.data)
     }
 

@@ -683,6 +683,7 @@ private struct KimiPreferencesPane: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var store: UsageStore
     @State private var apiKeyField: String
+    @State private var webSessionInvalid = false
 
     init(settings: AppSettings, store: UsageStore) {
         self.settings = settings
@@ -713,6 +714,14 @@ private struct KimiPreferencesPane: View {
                             .textSelection(.enabled)
                     }
 
+                    if webSessionInvalid {
+                        Label(L(.kimiWebSessionInvalidHint), systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+
                     ProviderStatusRows(
                         status: store.kimiStatus,
                         isRefreshing: store.kimiIsRefreshing,
@@ -733,6 +742,7 @@ private struct KimiPreferencesPane: View {
                 Section(L(.sectionActions)) {
                     Button {
                         store.reimportKimiBrowserSession()
+                        refreshWebSessionFlag()
                     } label: {
                         Label(
                             store.kimiIsRefreshing
@@ -744,6 +754,7 @@ private struct KimiPreferencesPane: View {
 
                     Button {
                         store.refresh(tab: .kimi)
+                        refreshWebSessionFlag()
                     } label: {
                         Label(
                             store.kimiIsRefreshing ? L(.refreshing) : L(.refreshKimi),
@@ -758,6 +769,14 @@ private struct KimiPreferencesPane: View {
             }
             .formStyle(.grouped)
         }
+        .onAppear(perform: refreshWebSessionFlag)
+        .onReceive(store.objectWillChange) { _ in
+            refreshWebSessionFlag()
+        }
+    }
+
+    private func refreshWebSessionFlag() {
+        webSessionInvalid = KimiProvider.webSessionInvalid
     }
 
     private func saveAPIKey() {

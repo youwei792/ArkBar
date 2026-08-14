@@ -207,6 +207,7 @@ enum LKey: String {
     case kimiCredentialsHint = "kimi.credentialsHint"
     case kimiBrowserSession = "kimi.browserSession"
     case kimiBrowserHint = "kimi.browserHint"
+    case kimiWebSessionInvalidHint = "kimi.webSessionInvalidHint"
     case reimportKimiBrowserSession = "settings.reimportKimiBrowserSession"
     case errorArkcliNotFound = "error.arkcliNotFound"
     case errorArkcliNotAuthenticated = "error.arkcliNotAuthenticated"
@@ -516,6 +517,7 @@ final class L10n: ObservableObject {
         add(.kimiCredentialsHint, "API Key 可选（在 kimi.com/code/console 创建）；也可设置环境变量 KIMI_CODE_API_KEY。填 API Key 可看到 Code 自己的配额环；导入浏览器登录后可额外看到共享总池与 Code 7 天环。", "An API key is optional (create it at kimi.com/code/console); KIMI_CODE_API_KEY also works. With an API key you see Code's own quota rings; importing the browser sign-in additionally shows the shared pool and the Code 7-day ring.")
         add(.kimiBrowserSession, "浏览器会话：%@", "Browser session: %@")
         add(.kimiBrowserHint, "请先在浏览器登录 www.kimi.com/code，再点“重新读取浏览器登录”。浏览器会话能读取共享总池（Kimi Code + Kimi Work 合并计量）与 Code 7 天限流。常规刷新只使用已缓存会话，不会反复弹钥匙串。", "Sign in at www.kimi.com/code in your browser, then click “Re-import Browser Sign-in”. The browser session exposes the shared pool (Kimi Code + Kimi Work billed together) and the Code 7-day limit. Routine refreshes only use the cached session and will not re-prompt Keychain.")
+        add(.kimiWebSessionInvalidHint, "浏览器会话无效或已过期：共享总池不可用。请在浏览器打开 www.kimi.com/code 确认已登录，然后重新读取浏览器登录。注意：Kimi Work 桌面端的登录不能用于 Coding Plan 控制台接口。", "The browser session is invalid or expired, so the shared pool is unavailable. Open www.kimi.com/code in your browser, confirm you are signed in to the Coding Plan console, then re-import the browser sign-in. Note: signing in to the Kimi Work desktop app does not authenticate the Coding Plan console.")
         add(.reimportKimiBrowserSession, "重新读取浏览器登录", "Re-import Browser Sign-in")
         add(.errorArkcliNotFound, "未找到 arkcli。请安装后执行 `arkcli auth login volc-sso`。", "arkcli was not found. Install it, then run `arkcli auth login volc-sso`.")
         add(.errorArkcliNotAuthenticated, "arkcli 尚未登录。请执行 `arkcli auth login volc-sso` 后刷新。", "arkcli is not signed in. Run `arkcli auth login volc-sso`, then refresh.")
