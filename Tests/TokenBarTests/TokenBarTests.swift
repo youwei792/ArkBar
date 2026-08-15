@@ -1420,17 +1420,33 @@ struct NebulaConsoleAuthErrorTests {
 
 @Suite("GrokPoolProvider decode")
 struct GrokPoolProviderTests {
-    @Test("Parses admin login envelope into a token")
+    @Test("Parses the real login envelope: tokens nested under data.tokens")
     func decodesLogin() throws {
         let json = #"""
         {"data": {
-          "accessToken": "jwt-token-abc",
-          "accessTokenExpiresAt": "2026-08-15T10:00:00.000Z"
+          "admin": {"id": 1, "username": "admin"},
+          "tokens": {
+            "accessToken": "jwt-token-abc",
+            "accessTokenExpiresAt": "2026-08-15T10:00:00.000Z",
+            "refreshTokenExpiresAt": "2026-09-14T10:00:00.000Z"
+          }
         }}
         """#
         let login = try GrokPoolProvider.decodeLogin(data: json.data(using: .utf8)!)
         #expect(login.token == "jwt-token-abc")
         #expect(login.expiresAt != nil)
+    }
+
+    @Test("Flat accessToken shape still decodes (fallback)")
+    func decodesFlatLogin() throws {
+        let json = #"""
+        {"data": {
+          "accessToken": "flat-token",
+          "accessTokenExpiresAt": "2026-08-15T10:00:00Z"
+        }}
+        """#
+        let login = try GrokPoolProvider.decodeLogin(data: json.data(using: .utf8)!)
+        #expect(login.token == "flat-token")
     }
 
     @Test("Login without a token throws")

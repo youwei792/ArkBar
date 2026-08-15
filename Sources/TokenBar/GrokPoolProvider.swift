@@ -19,6 +19,23 @@ struct GrokPoolErrorBody: Decodable {
 struct GrokPoolLoginResponse: Decodable {
     let accessToken: String?
     let accessTokenExpiresAt: String?
+    /// grok2api nests the tokens under `data.tokens`; the flat shape is a
+    /// fallback for older deployments.
+    let tokens: GrokPoolTokenPair?
+
+    enum CodingKeys: String, CodingKey {
+        case accessToken
+        case accessTokenExpiresAt
+        case tokens
+    }
+
+    var token: String? { accessToken ?? tokens?.accessToken }
+    var expiry: String? { accessTokenExpiresAt ?? tokens?.accessTokenExpiresAt }
+}
+
+struct GrokPoolTokenPair: Decodable {
+    let accessToken: String?
+    let accessTokenExpiresAt: String?
 
     enum CodingKeys: String, CodingKey {
         case accessToken
@@ -301,12 +318,12 @@ final class GrokPoolProvider: UsageProvider {
         if let errorBody = envelope.error {
             throw Self.error(from: errorBody)
         }
-        guard let token = envelope.data?.accessToken, !token.isEmpty else {
+        guard let token = envelope.data?.token, !token.isEmpty else {
             throw UsageError.parseFailed("Missing GrokPool login access token")
         }
         return GrokPoolLogin(
             token: token,
-            expiresAt: parseExpiry(envelope.data?.accessTokenExpiresAt))
+            expiresAt: parseExpiry(envelope.data?.expiry))
     }
 
     static func decodeDashboard(data: Data) throws -> GrokPoolDashboardDTO {
