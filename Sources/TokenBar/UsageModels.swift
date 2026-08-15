@@ -20,7 +20,7 @@ struct UsageWindow: Sendable, Equatable {
     /// Canonical sort rank so session < 5h < weekly < monthly regardless of locale.
     var sortRank: Int {
         switch self.label.lowercased() {
-        case "session", "5h", "5-hour", "five_hour", "balance": 0
+        case "session", "5h", "5-hour", "five_hour", "balance", "24h": 0
         case "weekly", "week": 1
         case "monthly", "month": 2
         default: 3

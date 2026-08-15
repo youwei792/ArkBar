@@ -719,9 +719,8 @@ private struct GrokPoolPreferencesPane: View {
                         set: { settings.setVisible(.grokPool, $0) }))
                         .toggleStyle(.switch)
                     Picker(L(.menuBarValue), selection: $settings.grokPoolValueDisplay) {
-                        ForEach(AppSettings.BalanceDisplay.allCases, id: \.self) { value in
-                            Text(value.displayName).tag(value)
-                        }
+                        Text(L(.grokPoolValuePercent)).tag(AppSettings.BalanceDisplay.percent)
+                        Text(L(.grokPoolValueCost)).tag(AppSettings.BalanceDisplay.balance)
                     }
                     .pickerStyle(.radioGroup)
                 }

@@ -219,6 +219,8 @@ enum LKey: String {
     case grokPoolUsernameLabel = "grokPool.usernameLabel"
     case grokPoolPasswordLabel = "grokPool.passwordLabel"
     case grokPoolCredentialsHint = "grokPool.credentialsHint"
+    case grokPoolValuePercent = "grokPool.valuePercent"
+    case grokPoolValueCost = "grokPool.valueCost"
     case grokPoolSuccessRate = "grokPool.successRate"
     case grokPoolRequests = "grokPool.requests"
     case grokPoolRequestDetail = "grokPool.requestDetail"
@@ -552,6 +554,8 @@ final class L10n: ObservableObject {
         add(.grokPoolUsernameLabel, "管理员账号", "Administrator username")
         add(.grokPoolPasswordLabel, "管理员密码", "Administrator password")
         add(.grokPoolCredentialsHint, "使用 Grok2API 控制台的管理员账号密码登录（POST /api/admin/v1/auth/login），用短期访问令牌读取 24h 运营看板（GET /api/admin/v1/dashboard?period=24h）。凭据与令牌只存本机 Keychain；令牌每 15 分钟自动重新获取。", "Sign in with the Grok2API console administrator account (POST /api/admin/v1/auth/login) and read the 24-hour dashboard (GET /api/admin/v1/dashboard?period=24h) with the short-lived access token. Credentials and tokens stay in the local Keychain; the token re-fetches automatically every 15 minutes.")
+        add(.grokPoolValuePercent, "成功率百分比", "Success percent")
+        add(.grokPoolValueCost, "24h 费用（$）", "24h cost ($)")
         add(.grokPoolSuccessRate, "成功率", "Success rate")
         add(.grokPoolRequests, "24h 请求数", "Requests (24h)")
         add(.grokPoolRequestDetail, "成功 %@ · 失败 %@", "OK %@ · Failed %@")
