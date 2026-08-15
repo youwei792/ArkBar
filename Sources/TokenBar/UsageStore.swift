@@ -28,18 +28,21 @@ final class UsageStore: ObservableObject {
     @Published private(set) var nebulaStatus: LoadStatus = .never
     @Published private(set) var zaiStatus: LoadStatus = .never
     @Published private(set) var kimiStatus: LoadStatus = .never
+    @Published private(set) var grokPoolStatus: LoadStatus = .never
     @Published private(set) var arkLastUpdatedAt: Date?
     @Published private(set) var opencodeLastUpdatedAt: Date?
     @Published private(set) var deepseekLastUpdatedAt: Date?
     @Published private(set) var nebulaLastUpdatedAt: Date?
     @Published private(set) var zaiLastUpdatedAt: Date?
     @Published private(set) var kimiLastUpdatedAt: Date?
+    @Published private(set) var grokPoolLastUpdatedAt: Date?
     @Published private(set) var arkIsRefreshing = false
     @Published private(set) var opencodeIsRefreshing = false
     @Published private(set) var deepseekIsRefreshing = false
     @Published private(set) var nebulaIsRefreshing = false
     @Published private(set) var zaiIsRefreshing = false
     @Published private(set) var kimiIsRefreshing = false
+    @Published private(set) var grokPoolIsRefreshing = false
 
     /// Convenience for the status item: in summary mode, pick the tightest
     /// (lowest remaining percent) provider.
@@ -69,7 +72,7 @@ final class UsageStore: ObservableObject {
     var allStatuses: [ProviderTab: LoadStatus] {
         [.ark: arkStatus, .opencode: opencodeStatus,
          .deepseek: deepseekStatus, .nebula: nebulaStatus, .zai: zaiStatus,
-         .kimi: kimiStatus]
+         .kimi: kimiStatus, .grokPool: grokPoolStatus]
     }
 
     /// The "tightest" (lowest remaining percent, most urgent) provider.
@@ -106,6 +109,7 @@ final class UsageStore: ObservableObject {
     private var nebulaProvider: NebulaProvider?
     private var zaiProvider: ZaiProvider?
     private var kimiProvider: KimiProvider?
+    private var grokPoolProvider: GrokPoolProvider?
     private var timer: Timer?
     private var lastSuccessfulArkSnapshot: ProviderSnapshot?
     private var lastSuccessfulOpenCodeSnapshot: ProviderSnapshot?
@@ -113,6 +117,7 @@ final class UsageStore: ObservableObject {
     private var lastSuccessfulNebulaSnapshot: ProviderSnapshot?
     private var lastSuccessfulZaiSnapshot: ProviderSnapshot?
     private var lastSuccessfulKimiSnapshot: ProviderSnapshot?
+    private var lastSuccessfulGrokPoolSnapshot: ProviderSnapshot?
     private var cancellables = Set<AnyCancellable>()
 
     init(settings: AppSettings = .shared) {
@@ -167,6 +172,12 @@ final class UsageStore: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in self?.refresh(tab: .kimi) }
             .store(in: &cancellables)
+        Publishers.MergeMany(
+            settings.$grokPoolAPIKey.map { _ in },
+            settings.$grokPoolBaseURL.map { _ in })
+            .dropFirst()
+            .sink { [weak self] _ in self?.refresh(tab: .grokPool) }
+            .store(in: &cancellables)
         // When the selection switches to a provider with no data, refresh it.
         settings.$selectedMenu
             .dropFirst()
@@ -187,6 +198,7 @@ final class UsageStore: ObservableObject {
             case .nebula: publisher = settings.$showNebula.eraseToAnyPublisher()
             case .zai: publisher = settings.$showZai.eraseToAnyPublisher()
             case .kimi: publisher = settings.$showKimi.eraseToAnyPublisher()
+            case .grokPool: publisher = settings.$showGrokPool.eraseToAnyPublisher()
             }
             publisher
                 .dropFirst()
@@ -228,6 +240,7 @@ final class UsageStore: ObservableObject {
         nebulaProvider = NebulaProvider(settings: settings)
         zaiProvider = ZaiProvider(settings: settings)
         kimiProvider = KimiProvider(settings: settings)
+        grokPoolProvider = GrokPoolProvider(settings: settings)
     }
 
     func start() {
@@ -251,6 +264,7 @@ final class UsageStore: ObservableObject {
         case .nebula: refreshNebula()
         case .zai: refreshZai()
         case .kimi: refreshKimi()
+        case .grokPool: refreshGrokPool()
         }
     }
 
@@ -637,6 +651,48 @@ final class UsageStore: ObservableObject {
         }
     }
 
+    private func refreshGrokPool() {
+        guard !grokPoolIsRefreshing else { return }
+        guard let provider = grokPoolProvider else { return }
+        grokPoolIsRefreshing = true
+        switch grokPoolStatus {
+        case .ok, .stale: break
+        case .never, .loading, .error: grokPoolStatus = .loading
+        }
+        let environment = ProcessInfo.processInfo.environment
+        Task { [weak self] in
+            await self?.runGrokPoolProvider(provider, environment: environment)
+        }
+    }
+
+    private func runGrokPoolProvider(_ provider: GrokPoolProvider, environment: [String: String]) async {
+        do {
+            let snapshot = try await provider.fetch(environment: environment)
+            Self.log("✓ \(provider.displayName): balance + usage")
+            grokPoolLastUpdatedAt = Date()
+            lastSuccessfulGrokPoolSnapshot = snapshot
+            grokPoolStatus = .ok(snapshot: snapshot)
+            finishGrokPoolRefresh()
+        } catch let error as UsageError {
+            Self.log("✗ \(provider.displayName): \(error.errorDescription ?? "Unknown error")")
+            finishGrokPoolRefresh(error: error.errorDescription ?? "Unknown error")
+        } catch {
+            Self.log("✗ \(provider.displayName): \(error.localizedDescription)")
+            finishGrokPoolRefresh(error: error.localizedDescription)
+        }
+    }
+
+    private func finishGrokPoolRefresh(error: String? = nil) {
+        grokPoolIsRefreshing = false
+        if let error {
+            if let snapshot = lastSuccessfulGrokPoolSnapshot {
+                grokPoolStatus = .stale(snapshot: snapshot, message: error)
+            } else {
+                grokPoolStatus = .error(message: error)
+            }
+        }
+    }
+
     func status(for tab: ProviderTab) -> LoadStatus {
         switch tab {
         case .ark: return arkStatus
@@ -645,6 +701,7 @@ final class UsageStore: ObservableObject {
         case .nebula: return nebulaStatus
         case .zai: return zaiStatus
         case .kimi: return kimiStatus
+        case .grokPool: return grokPoolStatus
         }
     }
 
@@ -656,6 +713,7 @@ final class UsageStore: ObservableObject {
         case .nebula: return nebulaLastUpdatedAt
         case .zai: return zaiLastUpdatedAt
         case .kimi: return kimiLastUpdatedAt
+        case .grokPool: return grokPoolLastUpdatedAt
         }
     }
 
@@ -667,6 +725,7 @@ final class UsageStore: ObservableObject {
         case .nebula: return nebulaIsRefreshing
         case .zai: return zaiIsRefreshing
         case .kimi: return kimiIsRefreshing
+        case .grokPool: return grokPoolIsRefreshing
         }
     }
 

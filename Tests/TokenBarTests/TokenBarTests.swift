@@ -1036,7 +1036,7 @@ struct ProviderVisibilityTests {
     @Test("Hidden providers drop out of the switcher list")
     func visibleTabsFilters() {
         let settings = AppSettings.shared
-        let original = (settings.showArk, settings.showOpenCode, settings.showDeepSeek, settings.showNebula, settings.showZai, settings.showKimi)
+        let original = (settings.showArk, settings.showOpenCode, settings.showDeepSeek, settings.showNebula, settings.showZai, settings.showKimi, settings.showGrokPool)
         defer {
             settings.showArk = original.0
             settings.showOpenCode = original.1
@@ -1044,6 +1044,7 @@ struct ProviderVisibilityTests {
             settings.showNebula = original.3
             settings.showZai = original.4
             settings.showKimi = original.5
+            settings.showGrokPool = original.6
         }
         settings.showArk = false
         settings.showOpenCode = true
@@ -1051,10 +1052,14 @@ struct ProviderVisibilityTests {
         settings.showNebula = false
         settings.showZai = false
         settings.showKimi = false
+        settings.showGrokPool = false
         #expect(settings.visibleTabs == [.opencode, .deepseek])
         #expect(settings.isVisible(.ark) == false)
+        #expect(settings.isVisible(.grokPool) == false)
         settings.showOpenCode = false
         #expect(settings.visibleTabs == [.deepseek])
+        settings.showGrokPool = true
+        #expect(settings.visibleTabs == [.deepseek, .grokPool])
     }
 
     @Test("Hiding the selected tab moves the selection to the first visible tab")
@@ -1410,6 +1415,214 @@ struct NebulaConsoleAuthErrorTests {
         } catch {
             Issue.record("unexpected non-UsageError \(error)")
         }
+    }
+}
+
+@Suite("GrokPoolProvider decode")
+struct GrokPoolProviderTests {
+    @Test("Parses user/self quota into USD units")
+    func decodesUserSelf() throws {
+        let json = #"""
+        {"success": true, "message": "", "data": {
+          "id": 1, "username": "alice", "quota": 123456789, "used_quota": 9876543
+        }}
+        """#
+        let user = try GrokPoolProvider.decodeUserSelf(data: json.data(using: .utf8)!)
+        #expect(user.quota == 123_456_789)
+        #expect(user.usedQuota == 9_876_543)
+        // 500000 quota = 1 unit (new-api default).
+        #expect(user.quotaPerUnit == 500_000)
+    }
+
+    @Test("Cache-hit tokens come from the other JSON blob (real response shape)")
+    func cacheTokensFromOtherBlob() throws {
+        let json = #"""
+        {"success": true, "message": "", "data": {"page": 1, "page_size": 1, "total": 64, "items": [
+          {"id": 1, "user_id": 12345, "created_at": 1785851253, "type": 2,
+           "username": "alice", "token_name": "MyToken", "model_name": "grok-4",
+           "quota": 53972, "prompt_tokens": 388822, "completion_tokens": 358,
+           "use_time": 20, "is_stream": true,
+           "other": "{\"billing_source\":\"wallet\",\"cache_ratio\":0.25,\"cache_tokens\":375936,\"completion_ratio\":3,\"group_ratio\":0.5,\"model_ratio\":1,\"request_path\":\"/v1/chat/completions\"}"}
+        ]}}
+        """#
+        let items = try GrokPoolProvider.decodeLogPage(data: json.data(using: .utf8)!)
+        #expect(items.count == 1)
+        let item = try #require(items.first)
+        #expect(item.modelName == "grok-4")
+        #expect(item.promptTokens == 388_822)
+        #expect(item.completionTokens == 358)
+        #expect(item.quota == 53_972)
+        #expect(item.cacheTokens() == 375_936)
+    }
+
+    @Test("Aggregates today and month cost, tokens, and requests")
+    func aggregatesLogs() {
+        let calendar = Calendar.current
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 8
+        components.day = 2
+        components.hour = 12
+        let now = calendar.date(from: components)!
+
+        func item(_ day: Int, tokens: Int, quota: Int, model: String = "grok-4", cache: Int? = nil) -> GrokPoolLogItem {
+            var dayComponents = DateComponents()
+            dayComponents.year = 2026
+            dayComponents.month = 8
+            dayComponents.day = day
+            dayComponents.hour = 10
+            var other: String?
+            if let cache {
+                other = #"{"cache_tokens":\#(cache)}"#
+            }
+            return GrokPoolLogItem(
+                modelName: model,
+                promptTokens: tokens,
+                completionTokens: tokens / 2,
+                quota: quota,
+                createdAt: calendar.date(from: dayComponents)?.timeIntervalSince1970 ?? 0,
+                other: other)
+        }
+
+        let items = [
+            item(2, tokens: 600, quota: 75_000, cache: 500),  // today: 900 tokens, $0.15
+            item(1, tokens: 900, quota: 25_000, model: "grok-4-fast", cache: 400), // this month, not today
+            item(0, tokens: 100, quota: 10_000, cache: 50),   // July 31 -> outside this month
+        ]
+        let stats = GrokPoolProvider.aggregate(items: items, now: now, calendar: calendar)
+        #expect(stats.todayTokens == 900) // 600 + 300
+        #expect(stats.requestCount == 1)
+        #expect(abs((stats.todayCost ?? 0) - 0.15) < 0.0001)
+        #expect(stats.currentMonthTokens == 2250)
+        #expect(stats.currentMonthRequestCount == 2)
+        #expect(abs((stats.currentMonthCost ?? 0) - 0.20) < 0.0001)
+        #expect(stats.topModel == "grok-4-fast") // 1350 tokens vs 900
+        #expect(stats.promptTokens == 1500)
+        #expect(stats.completionTokens == 750)
+        #expect(stats.cacheTokens == 900) // 500 + 400 (July item excluded)
+    }
+
+    @Test("Ring used percent = cumulative spend / (spend + balance)")
+    func ringUsedPercent() {
+        // $100 balance, $50 spent -> 33.3% used.
+        #expect(abs(GrokPoolProvider.ringUsedPercent(balance: 100, usedTotal: 50) - (50.0 / 150.0 * 100)) < 0.001)
+        // Zero balance: fully used.
+        #expect(GrokPoolProvider.ringUsedPercent(balance: 0, usedTotal: 50) == 100)
+        // Top-up raises balance -> used share shrinks.
+        let before = GrokPoolProvider.ringUsedPercent(balance: 100, usedTotal: 50)
+        let after = GrokPoolProvider.ringUsedPercent(balance: 500, usedTotal: 50)
+        #expect(after < before)
+    }
+
+    @Test("Base URL normalization strips /v1 and trailing slashes")
+    func normalizesBaseURL() {
+        #expect(GrokPoolProvider.normalizedBaseURL("https://grok.axonlume.com") == "https://grok.axonlume.com")
+        #expect(GrokPoolProvider.normalizedBaseURL("https://grok.axonlume.com/") == "https://grok.axonlume.com")
+        #expect(GrokPoolProvider.normalizedBaseURL("https://grok.axonlume.com/v1") == "https://grok.axonlume.com")
+        #expect(GrokPoolProvider.normalizedBaseURL("") == nil)
+    }
+
+    @Test("user/self unauthorized body maps to invalid token")
+    func userSelfUnauthorized() {
+        let json = #"{"success":false,"message":"Unauthorized, invalid access token"}"#
+        do {
+            _ = try GrokPoolProvider.decodeUserSelf(data: json.data(using: .utf8)!)
+            Issue.record("expected throw")
+        } catch let error as UsageError {
+            if case .grokPoolInvalidToken = error {
+                // ok
+            } else {
+                Issue.record("unexpected \(error)")
+            }
+        } catch {
+            Issue.record("unexpected non-UsageError \(error)")
+        }
+    }
+
+    @Test("Reads gateway credentials from environment aliases")
+    func readsEnvironment() {
+        #expect(GrokPoolCredentialResolver.apiKey(environment: ["GROKPOOL_API_KEY": "sk-abc"]) == "sk-abc")
+        #expect(GrokPoolCredentialResolver.apiKey(environment: ["GROK_POOL_API_KEY": "sk-abc"]) == "sk-abc")
+        #expect(GrokPoolCredentialResolver.apiKey(environment: [:]) == nil)
+        #expect(GrokPoolCredentialResolver.apiKey(environment: ["GROKPOOL_API_KEY": "\"sk-abc\""]) == "sk-abc")
+        #expect(GrokPoolCredentialResolver.baseURL(environment: ["GROKPOOL_BASE_URL": "https://grok.example"]) == "https://grok.example")
+    }
+}
+
+@Suite("GrokPool card")
+@MainActor
+struct GrokPoolCardTests {
+    @Test("Renders balance ring and legend rows in USD")
+    func rendersCard() throws {
+        let summary = NebulaSummary(
+            currency: "USD",
+            quotaPerUnit: 500_000,
+            balance: 246.91,
+            usedTotal: 19.75,
+            todayCost: 0.15,
+            currentMonthCost: 1.23,
+            todayTokens: 600,
+            currentMonthTokens: 12_345,
+            requestCount: 3,
+            currentMonthRequestCount: 87,
+            topModel: "grok-4",
+            promptTokens: 8_100,
+            completionTokens: 4_245,
+            cacheTokens: 3_000,
+            usageAvailable: true)
+        let plan = PlanSnapshot(
+            id: "grokpool",
+            product: .grokPool,
+            edition: nil,
+            tier: nil,
+            seatID: nil,
+            subscribed: true,
+            windows: [UsageWindow(label: "balance", usedPercent: 7.4, used: nil, total: nil, resetsAt: nil)],
+            expiryDate: nil,
+            errorMessage: nil,
+            deepseek: nil,
+            nebula: nil,
+            grokPool: summary)
+        #expect(plan.grokPool?.balance == 246.91)
+        let view = NebulaCardView(plan: plan, now: Date(), width: 340)
+        view.updateTrackingAreas()
+        #expect(view.subviews.allSatisfy {
+            $0.frame.minX >= 0 && $0.frame.maxX <= view.bounds.maxX
+        })
+        let labels = view.subviews.compactMap { $0 as? NSTextField }.map(\.stringValue)
+        #expect(labels.contains(L(.windowBalance)))
+        #expect(labels.contains("$246.91"))
+        #expect(!labels.contains("¥246.91"))
+
+        // Render for visual inspection on a dark material approximation.
+        let card = NebulaCardView(plan: plan, now: Date(), width: 340)
+        let header = HeaderCardView(
+            snapshot: ProviderSnapshot(
+                providerName: "GrokPool",
+                authMethod: "apikey",
+                plans: [plan],
+                updatedAt: Date(),
+                errorMessage: nil),
+            width: 340)
+        let switcher = ProviderSwitcherView(tabs: ProviderTab.allCases, selected: .provider(.grokPool), showSummary: false, width: 340, onSelect: { _ in })
+        let totalHeight = switcher.bounds.height + header.bounds.height + card.bounds.height
+        let dashboard = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: totalHeight))
+        dashboard.wantsLayer = true
+        dashboard.layer?.backgroundColor = NSColor(calibratedWhite: 0.30, alpha: 1).cgColor
+        card.frame.origin = .zero
+        header.frame.origin = NSPoint(x: 0, y: card.bounds.height)
+        switcher.frame.origin = NSPoint(x: 0, y: card.bounds.height + header.bounds.height)
+        dashboard.addSubview(card)
+        dashboard.addSubview(header)
+        dashboard.addSubview(switcher)
+        dashboard.layoutSubtreeIfNeeded()
+
+        let dashboardRep = try #require(dashboard.bitmapImageRepForCachingDisplay(in: dashboard.bounds))
+        dashboard.cacheDisplay(in: dashboard.bounds, to: dashboardRep)
+        let dashboardPNG = try #require(
+            dashboardRep.representation(using: .png, properties: [:]))
+        try dashboardPNG.write(to: URL(fileURLWithPath: "/tmp/tokenbar_grokpool_dashboard.png"))
+        #expect(FileManager.default.fileExists(atPath: "/tmp/tokenbar_grokpool_dashboard.png"))
     }
 }
 

@@ -92,6 +92,7 @@ struct PlanSnapshot: Sendable, Equatable, Identifiable {
         case openCodeGo = "opencode-go"
         case deepseek = "deepseek"
         case nebula = "nebula"
+        case grokPool = "grok-pool"
 
         var displayName: String {
             L10n.shared.productName(self)
@@ -101,7 +102,7 @@ struct PlanSnapshot: Sendable, Equatable, Identifiable {
         var isTeam: Bool {
             switch self {
             case .codingPlanTeam, .agentPlanTeam: true
-            case .codingPlan, .agentPlan, .openCodeGo, .deepseek, .nebula: false
+            case .codingPlan, .agentPlan, .openCodeGo, .deepseek, .nebula, .grokPool: false
             }
         }
     }
@@ -121,6 +122,9 @@ struct PlanSnapshot: Sendable, Equatable, Identifiable {
     var deepseek: DeepSeekSummary? = nil
     /// Nebula (new-api relay) balance/usage breakdown (nil for other providers).
     var nebula: NebulaSummary? = nil
+    /// GrokPool (grok-farm new-api gateway) balance/usage breakdown (nil for
+    /// other providers). Fully isolated from the Nebula tab's data.
+    var grokPool: NebulaSummary? = nil
 
     /// The tightest window (highest used percent) — what the bar icon reflects.
     var tightestWindow: UsageWindow? {
@@ -204,6 +208,8 @@ enum UsageError: LocalizedError, Sendable {
     case zaiInvalidToken
     case kimiMissingCredentials
     case kimiInvalidToken
+    case grokPoolMissingCredentials
+    case grokPoolInvalidToken
 
     var errorDescription: String? {
         switch self {
@@ -253,6 +259,10 @@ enum UsageError: LocalizedError, Sendable {
             L(.errorKimiMissingCredentials)
         case .kimiInvalidToken:
             L(.errorKimiInvalidToken)
+        case .grokPoolMissingCredentials:
+            L(.errorGrokPoolMissingCredentials)
+        case .grokPoolInvalidToken:
+            L(.errorGrokPoolInvalidToken)
         }
     }
 }

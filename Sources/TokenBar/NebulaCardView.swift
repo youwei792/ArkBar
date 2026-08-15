@@ -2,7 +2,8 @@ import AppKit
 
 /// Nebula (new-api relay) plan card: one balance ring (cumulative spend vs
 /// spend + balance) with three legend rows (Balance / Today / This month),
-/// mirroring the DeepSeek card layout.
+/// mirroring the DeepSeek card layout. Also renders GrokPool plans, which
+/// share the new-api balance/usage shape but keep their own data and logo.
 final class NebulaCardView: NSView {
     private let plan: PlanSnapshot
     private let summary: NebulaSummary
@@ -14,7 +15,7 @@ final class NebulaCardView: NSView {
 
     init(plan: PlanSnapshot, now: Date, width: CGFloat) {
         self.plan = plan
-        self.summary = plan.nebula ?? NebulaSummary(
+        self.summary = plan.nebula ?? plan.grokPool ?? NebulaSummary(
             currency: "CNY", quotaPerUnit: NebulaProvider.defaultQuotaPerUnit,
             balance: 0, usedTotal: 0,
             todayCost: nil, currentMonthCost: nil,
@@ -45,7 +46,7 @@ final class NebulaCardView: NSView {
     // MARK: - Title row
 
     private func buildTitleRow(atY y: inout CGFloat) {
-        let logo = ProviderLogo.image(for: .nebula)
+        let logo = ProviderLogo.image(for: plan.grokPool != nil ? .grokPool : .nebula)
         var titleX = horizontalPadding
         if let logo {
             let logoView = NSImageView(frame: NSRect(x: horizontalPadding, y: y - 16, width: 14, height: 14))
@@ -86,7 +87,9 @@ final class NebulaCardView: NSView {
         imageView.wantsLayer = true
         addSubview(imageView)
 
-        let symbol = "¥"
+        // Nebula relays bill in CNY; the GrokPool gateway follows the new-api
+        // default and reports USD.
+        let symbol = DeepSeekCardView.currencySymbol(summary.currency)
         var rows: [(label: String, value: String, detail: String)] = []
         rows.append((
             label: L(.windowBalance),

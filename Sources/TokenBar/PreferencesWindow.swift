@@ -49,6 +49,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
     case nebula
     case zai
     case kimi
+    case grokPool
     case diagnostics
 
     var id: Self { self }
@@ -62,6 +63,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .nebula: L(.settingsNebula)
         case .zai: L(.settingsZai)
         case .kimi: L(.settingsKimi)
+        case .grokPool: L(.settingsGrokPool)
         case .diagnostics: L(.settingsDiagnostics)
         }
     }
@@ -75,6 +77,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .nebula: "cloud"
         case .zai: "sparkles"
         case .kimi: "sparkles"
+        case .grokPool: "bolt"
         case .diagnostics: "stethoscope"
         }
     }
@@ -89,6 +92,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .nebula: .nebula
         case .zai: .zai
         case .kimi: .kimi
+        case .grokPool: .grokPool
         case .general, .diagnostics: nil
         }
     }
@@ -175,6 +179,8 @@ private struct PreferencesRootView: View {
             ZaiPreferencesPane(settings: settings, store: store)
         case .kimi:
             KimiPreferencesPane(settings: settings, store: store)
+        case .grokPool:
+            GrokPoolPreferencesPane(settings: settings, store: store)
         case .diagnostics:
             DiagnosticsPreferencesPane()
         }
@@ -688,6 +694,81 @@ private struct ZaiPreferencesPane: View {
 
     private func saveAPIKey() {
         settings.setZaiAPIKey(apiKeyField)
+    }
+}
+
+private struct GrokPoolPreferencesPane: View {
+    @ObservedObject var settings: AppSettings
+    @ObservedObject var store: UsageStore
+    @State private var apiKeyField: String
+
+    init(settings: AppSettings, store: UsageStore) {
+        self.settings = settings
+        self.store = store
+        _apiKeyField = State(initialValue: settings.grokPoolAPIKey)
+    }
+
+    var body: some View {
+        PreferencesPaneContainer(title: L(.settingsGrokPool)) {
+            Form {
+                Section(L(.sectionDisplay)) {
+                    Toggle(L(.showProvider), isOn: Binding(
+                        get: { settings.showGrokPool },
+                        set: { settings.setVisible(.grokPool, $0) }))
+                        .toggleStyle(.switch)
+                    Picker(L(.menuBarValue), selection: $settings.grokPoolValueDisplay) {
+                        ForEach(AppSettings.BalanceDisplay.allCases, id: \.self) { value in
+                            Text(value.displayName).tag(value)
+                        }
+                    }
+                    .pickerStyle(.radioGroup)
+                }
+
+                Section(L(.sectionConnection)) {
+                    TextField(L(.grokPoolBaseURLLabel), text: $settings.grokPoolBaseURL,
+                              prompt: Text(GrokPoolProvider.defaultBaseURL))
+                    Text(L(.grokPoolBaseURLHint))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    SecureField(L(.grokPoolAPIKeyLabel), text: $apiKeyField)
+                        .onSubmit(saveAPIKey)
+                    Button(L(.saveCredential), action: saveAPIKey)
+
+                    ProviderStatusRows(
+                        status: store.grokPoolStatus,
+                        isRefreshing: store.grokPoolIsRefreshing,
+                        lastUpdatedAt: store.grokPoolLastUpdatedAt)
+
+                    Label(L(.grokPoolCredentialsHint), systemImage: "key")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+
+                Section(L(.sectionActions)) {
+                    Button {
+                        store.refresh(tab: .grokPool)
+                    } label: {
+                        Label(
+                            store.grokPoolIsRefreshing ? L(.refreshing) : L(.refreshGrokPool),
+                            systemImage: "arrow.clockwise")
+                    }
+
+                    Button {
+                        NSWorkspace.shared.open(URL(string: "https://grok.axonlume.com/console")!)
+                    } label: {
+                        Label(L(.openGrokPoolConsole), systemImage: "safari")
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        }
+    }
+
+    private func saveAPIKey() {
+        settings.setGrokPoolAPIKey(apiKeyField)
     }
 }
 

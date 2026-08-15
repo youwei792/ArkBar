@@ -108,6 +108,7 @@ enum LKey: String {
     case tabNebula = "tab.nebula"
     case tabZai = "tab.zai"
     case tabKimi = "tab.kimi"
+    case tabGrokPool = "tab.grokPool"
     case tabSummary = "tab.summary"
     case showProvider = "settings.showProvider"
     case showSummary = "settings.showSummary"
@@ -126,6 +127,7 @@ enum LKey: String {
     case settingsNebula = "settings.nebula"
     case settingsZai = "settings.zai"
     case settingsKimi = "settings.kimi"
+    case settingsGrokPool = "settings.grokPool"
     case settingsDiagnostics = "settings.diagnostics"
     case sectionAppearance = "settings.sectionAppearance"
     case sectionBehavior = "settings.sectionBehavior"
@@ -139,10 +141,12 @@ enum LKey: String {
     case refreshNebula = "settings.refreshNebula"
     case refreshZai = "settings.refreshZai"
     case refreshKimi = "settings.refreshKimi"
+    case refreshGrokPool = "settings.refreshGrokPool"
     case openDeepSeekPlatform = "menu.openDeepSeekPlatform"
     case openNebulaConsole = "menu.openNebulaConsole"
     case openZaiConsole = "menu.openZaiConsole"
     case openKimiConsole = "menu.openKimiConsole"
+    case openGrokPoolConsole = "menu.openGrokPoolConsole"
     case openCodeCookieSource = "settings.openCodeCookieSource"
     case openCodeCookieAutomatic = "settings.openCodeCookieAutomatic"
     case openCodeCookieManual = "settings.openCodeCookieManual"
@@ -171,6 +175,7 @@ enum LKey: String {
     case productOpenCodeGo = "product.openCodeGo"
     case productDeepSeek = "product.deepseek"
     case productNebula = "product.nebula"
+    case productGrokPool = "product.grokPool"
     case windowSession = "window.session"
     case window5Hour = "window.5hour"
     case windowWeekly = "window.weekly"
@@ -209,6 +214,10 @@ enum LKey: String {
     case kimiBrowserHint = "kimi.browserHint"
     case kimiWebSessionInvalidHint = "kimi.webSessionInvalidHint"
     case reimportKimiBrowserSession = "settings.reimportKimiBrowserSession"
+    case grokPoolBaseURLLabel = "grokPool.baseURLLabel"
+    case grokPoolBaseURLHint = "grokPool.baseURLHint"
+    case grokPoolAPIKeyLabel = "grokPool.apiKeyLabel"
+    case grokPoolCredentialsHint = "grokPool.credentialsHint"
     case errorArkcliNotFound = "error.arkcliNotFound"
     case errorArkcliNotAuthenticated = "error.arkcliNotAuthenticated"
     case errorArkcliTimedOut = "error.arkcliTimedOut"
@@ -234,6 +243,8 @@ enum LKey: String {
     case errorKimiInvalidToken = "error.kimiInvalidToken"
     case errorKimiBrowserSessionMissing = "error.kimiBrowserSessionMissing"
     case errorKimiBrowserAuthorizationRequired = "error.kimiBrowserAuthorizationRequired"
+    case errorGrokPoolMissingCredentials = "error.grokPoolMissingCredentials"
+    case errorGrokPoolInvalidToken = "error.grokPoolInvalidToken"
     case errorProbeModels = "error.probeModels"
     case apiKeyNoHeaders = "apiKey.noHeaders"
     case apiKeyNoWindow = "apiKey.noWindow"
@@ -308,6 +319,7 @@ final class L10n: ObservableObject {
         case .openCodeGo: t(.productOpenCodeGo)
         case .deepseek: t(.productDeepSeek)
         case .nebula: t(.productNebula)
+        case .grokPool: t(.productGrokPool)
         }
     }
 
@@ -421,6 +433,7 @@ final class L10n: ObservableObject {
         add(.tabNebula, "APINebula", "APINebula")
         add(.tabZai, "智谱", "Z.ai")
         add(.tabKimi, "Kimi", "Kimi")
+        add(.tabGrokPool, "GrokPool", "GrokPool")
         add(.tabSummary, "概览", "Overview")
         add(.showSummary, "在菜单栏显示概览", "Show overview in menu bar")
         add(.showProvider, "在菜单栏显示", "Show in menu bar")
@@ -439,6 +452,7 @@ final class L10n: ObservableObject {
         add(.settingsNebula, "APINebula 中转", "APINebula Relay")
         add(.settingsZai, "智谱 Coding Plan", "Z.ai Coding Plan")
         add(.settingsKimi, "Kimi For Coding", "Kimi For Coding")
+        add(.settingsGrokPool, "GrokPool 网关", "GrokPool Gateway")
         add(.settingsDiagnostics, "诊断", "Diagnostics")
         add(.sectionAppearance, "外观", "Appearance")
         add(.sectionBehavior, "行为", "Behavior")
@@ -452,10 +466,12 @@ final class L10n: ObservableObject {
         add(.refreshNebula, "刷新 APINebula", "Refresh APINebula")
         add(.refreshZai, "刷新智谱", "Refresh Z.ai")
         add(.refreshKimi, "刷新 Kimi", "Refresh Kimi")
+        add(.refreshGrokPool, "刷新 GrokPool", "Refresh GrokPool")
         add(.openDeepSeekPlatform, "打开 DeepSeek 平台", "Open DeepSeek Platform")
         add(.openNebulaConsole, "打开 APINebula 控制台", "Open APINebula Console")
         add(.openZaiConsole, "打开智谱用量页", "Open Z.ai Usage")
         add(.openKimiConsole, "打开 Kimi Code 控制台", "Open Kimi Code Console")
+        add(.openGrokPoolConsole, "打开 GrokPool 控制台", "Open GrokPool Console")
         add(.openCodeCookieSource, "Cookie 来源", "Cookie source")
         add(.openCodeCookieAutomatic, "自动读取浏览器", "Automatic from browser")
         add(.openCodeCookieManual, "手动 Cookie", "Manual Cookie")
@@ -484,6 +500,7 @@ final class L10n: ObservableObject {
         add(.productOpenCodeGo, "OpenCode Go", "OpenCode Go")
         add(.productDeepSeek, "DeepSeek", "DeepSeek")
         add(.productNebula, "APINebula", "APINebula")
+        add(.productGrokPool, "GrokPool", "GrokPool")
         add(.windowSession, "会话", "Session")
         add(.window5Hour, "5 小时", "5-hour")
         add(.windowWeekly, "每周", "Weekly")
@@ -522,6 +539,10 @@ final class L10n: ObservableObject {
         add(.kimiBrowserHint, "共享总池来自 www.kimi.com 的 access_token（不是 kimi-auth cookie）。TokenBar 会静默读取已登录的 Kimi.app；也可点“重新读取浏览器登录”从浏览器 Local Storage 导入。", "The shared pool uses the www.kimi.com access_token (not the kimi-auth cookie). TokenBar silently reads a signed-in Kimi.app, or import the browser Local Storage token with “Re-import Browser Sign-in”.")
         add(.kimiWebSessionInvalidHint, "共享总池会话无效。请先打开并登录本机 Kimi.app，或在浏览器打开 www.kimi.com 后重新读取浏览器登录。kimi-auth cookie 不够，需要 Local Storage 里的 access_token。", "The shared-pool session is invalid. Sign in to the Kimi.app desktop client, or open www.kimi.com in a browser and re-import. The kimi-auth cookie is not enough; the Local Storage access_token is required.")
         add(.reimportKimiBrowserSession, "重新读取浏览器登录", "Re-import Browser Sign-in")
+        add(.grokPoolBaseURLLabel, "API 地址", "API base URL")
+        add(.grokPoolBaseURLHint, "网关地址，默认 https://grok.axonlume.com（不要填 /v1）", "Gateway base URL, default https://grok.axonlume.com (do not append /v1)")
+        add(.grokPoolAPIKeyLabel, "网关 API Key", "Gateway API key")
+        add(.grokPoolCredentialsHint, "使用 new-api 控制台创建的令牌（与调用 /v1 模型接口的网关 key 相同）。余额来自 /api/user/self，用量来自 /api/log/self，按 500000 quota = $1 换算。", "Use the token created in the new-api console (the same gateway key as /v1 model calls). Balance comes from /api/user/self and usage from /api/log/self, converted at 500000 quota = $1.")
         add(.errorArkcliNotFound, "未找到 arkcli。请安装后执行 `arkcli auth login volc-sso`。", "arkcli was not found. Install it, then run `arkcli auth login volc-sso`.")
         add(.errorArkcliNotAuthenticated, "arkcli 尚未登录。请执行 `arkcli auth login volc-sso` 后刷新。", "arkcli is not signed in. Run `arkcli auth login volc-sso`, then refresh.")
         add(.errorArkcliTimedOut, "arkcli 查询超时。请检查登录状态后重试。", "arkcli usage timed out. Check authentication and try again.")
@@ -547,6 +568,8 @@ final class L10n: ObservableObject {
         add(.errorKimiInvalidToken, "Kimi API Key 无效或已过期。请到 kimi.com/code/console 重新创建。", "The Kimi API key is invalid or expired. Create a new one at kimi.com/code/console.")
         add(.errorKimiBrowserSessionMissing, "没有在浏览器中找到 www.kimi.com 的登录会话（kimi-auth cookie）。请先在浏览器登录 Kimi。", "No www.kimi.com sign-in session (kimi-auth cookie) was found. Sign in to Kimi in a browser first.")
         add(.errorKimiBrowserAuthorizationRequired, "TokenBar 尚未缓存 Kimi 浏览器登录。请在 Kimi For Coding 设置中点“重新读取浏览器登录”。", "TokenBar has no cached Kimi browser sign-in. Click “Re-import Browser Sign-in” in Kimi For Coding settings.")
+        add(.errorGrokPoolMissingCredentials, "未配置 GrokPool 网关 API Key。请在 GrokPool 设置中填写，或设置环境变量 GROKPOOL_API_KEY。", "No GrokPool gateway API key is configured. Enter one in the GrokPool settings, or set GROKPOOL_API_KEY.")
+        add(.errorGrokPoolInvalidToken, "GrokPool 网关 API Key 无效或已过期。请到 new-api 控制台重新获取令牌。", "The GrokPool gateway API key is invalid or expired. Get a new token from the new-api console.")
         add(.errorProbeModels, "所有探测模型均不可用", "All probe models failed")
         add(.apiKeyNoHeaders, "API Key 有效，但响应未返回请求限额头。", "API key is valid, but no request-limit headers were returned.")
         add(.apiKeyNoWindow, "API Key 有效，但未返回用量窗口。", "API key is valid, but no usage window was returned.")

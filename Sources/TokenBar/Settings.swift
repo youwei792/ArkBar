@@ -141,6 +141,9 @@ final class AppSettings: ObservableObject {
     @Published var showKimi: Bool {
         didSet { UserDefaults.standard.set(showKimi, forKey: Keys.showKimi) }
     }
+    @Published var showGrokPool: Bool {
+        didSet { UserDefaults.standard.set(showGrokPool, forKey: Keys.showGrokPool) }
+    }
     /// Whether the menu bar shows the remaining percent or the money balance
     /// for balance-based providers (DeepSeek, Nebula).
     @Published var deepseekValueDisplay: BalanceDisplay {
@@ -148,6 +151,9 @@ final class AppSettings: ObservableObject {
     }
     @Published var nebulaValueDisplay: BalanceDisplay {
         didSet { UserDefaults.standard.set(nebulaValueDisplay.rawValue, forKey: Keys.nebulaValueDisplay) }
+    }
+    @Published var grokPoolValueDisplay: BalanceDisplay {
+        didSet { UserDefaults.standard.set(grokPoolValueDisplay.rawValue, forKey: Keys.grokPoolValueDisplay) }
     }
     /// Providers the switcher offers, in canonical order, minus hidden ones.
     /// When `showSummary` is true, the summary button is always the first item.
@@ -163,6 +169,7 @@ final class AppSettings: ObservableObject {
         case .nebula: showNebula
         case .zai: showZai
         case .kimi: showKimi
+        case .grokPool: showGrokPool
         }
     }
 
@@ -173,6 +180,7 @@ final class AppSettings: ObservableObject {
         switch tab {
         case .deepseek: deepseekValueDisplay == .balance
         case .nebula: nebulaValueDisplay == .balance
+        case .grokPool: grokPoolValueDisplay == .balance
         case .ark, .opencode, .zai, .kimi: false
         }
     }
@@ -187,6 +195,7 @@ final class AppSettings: ObservableObject {
         case .nebula: showNebula = visible
         case .zai: showZai = visible
         case .kimi: showKimi = visible
+        case .grokPool: showGrokPool = visible
         }
         if !visible, case .provider(tab) = selectedMenu {
             if showSummary {
@@ -227,6 +236,15 @@ final class AppSettings: ObservableObject {
     }
     @Published private(set) var zaiAPIKey: String
 
+    /// GrokPool (grok-farm new-api gateway) base URL (a harmless UI
+    /// preference, so it lives in UserDefaults) and its API key (Keychain
+    /// mirror, never persisted there). Isolated from the Nebula relay's
+    /// settings.
+    @Published var grokPoolBaseURL: String {
+        didSet { UserDefaults.standard.set(grokPoolBaseURL, forKey: Keys.grokPoolBaseURL) }
+    }
+    @Published private(set) var grokPoolAPIKey: String
+
     /// Kimi (Kimi For Coding) API key (Keychain mirror, never persisted to
     /// UserDefaults).
     @Published private(set) var kimiAPIKey: String
@@ -238,6 +256,7 @@ final class AppSettings: ObservableObject {
     var nebulaAPIKeyHasValue: Bool { !nebulaAPIKey.isEmpty }
     var zaiAPIKeyHasValue: Bool { !zaiAPIKey.isEmpty }
     var kimiAPIKeyHasValue: Bool { !kimiAPIKey.isEmpty }
+    var grokPoolAPIKeyHasValue: Bool { !grokPoolAPIKey.isEmpty }
 
     func setZaiAPIKey(_ value: String?) {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -275,6 +294,17 @@ final class AppSettings: ObservableObject {
 
     func loadNebulaFromKeychain() {
         nebulaAPIKey = CookieKeychainStore.load(provider: "nebula-key") ?? ""
+    }
+
+    func setGrokPoolAPIKey(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: key, provider: "grokpool-key")
+        grokPoolAPIKey = persisted ? (key ?? "") : (CookieKeychainStore.load(provider: "grokpool-key") ?? "")
+    }
+
+    func loadGrokPoolFromKeychain() {
+        grokPoolAPIKey = CookieKeychainStore.load(provider: "grokpool-key") ?? ""
     }
 
     func setDeepSeekAPIKey(_ value: String?) {
@@ -326,10 +356,13 @@ final class AppSettings: ObservableObject {
         static let showNebula = "tokenbar.showNebula"
         static let showZai = "tokenbar.showZai"
         static let showKimi = "tokenbar.showKimi"
+        static let showGrokPool = "tokenbar.showGrokPool"
         static let deepseekValueDisplay = "tokenbar.deepseekValueDisplay"
         static let nebulaValueDisplay = "tokenbar.nebulaValueDisplay"
+        static let grokPoolValueDisplay = "tokenbar.grokPoolValueDisplay"
         static let zaiRegion = "tokenbar.zaiRegion"
         static let nebulaBaseURL = "tokenbar.nebulaBaseURL"
+        static let grokPoolBaseURL = "tokenbar.grokPoolBaseURL"
         static let opencodeWorkspaceID = "tokenbar.opencodeWorkspaceID"
         static let opencodeCookieSource = "tokenbar.opencodeCookieSource"
     }
@@ -358,12 +391,16 @@ final class AppSettings: ObservableObject {
         self.showNebula = defaults.object(forKey: Keys.showNebula) as? Bool ?? true
         self.showZai = defaults.object(forKey: Keys.showZai) as? Bool ?? true
         self.showKimi = defaults.object(forKey: Keys.showKimi) as? Bool ?? true
+        self.showGrokPool = defaults.object(forKey: Keys.showGrokPool) as? Bool ?? true
         let deepseekValueRaw = defaults.string(forKey: Keys.deepseekValueDisplay)
             ?? BalanceDisplay.percent.rawValue
         self.deepseekValueDisplay = BalanceDisplay(rawValue: deepseekValueRaw) ?? .percent
         let nebulaValueRaw = defaults.string(forKey: Keys.nebulaValueDisplay)
             ?? BalanceDisplay.percent.rawValue
         self.nebulaValueDisplay = BalanceDisplay(rawValue: nebulaValueRaw) ?? .percent
+        let grokPoolValueRaw = defaults.string(forKey: Keys.grokPoolValueDisplay)
+            ?? BalanceDisplay.percent.rawValue
+        self.grokPoolValueDisplay = BalanceDisplay(rawValue: grokPoolValueRaw) ?? .percent
         self.opencodeWorkspaceID = defaults.string(forKey: Keys.opencodeWorkspaceID) ?? ""
         let cookieSourceRaw = defaults.string(forKey: Keys.opencodeCookieSource)
             ?? OpenCodeCookieSource.automatic.rawValue
@@ -374,6 +411,9 @@ final class AppSettings: ObservableObject {
         self.nebulaBaseURL = defaults.string(forKey: Keys.nebulaBaseURL)
             ?? NebulaProvider.defaultBaseURL
         self.nebulaAPIKey = CookieKeychainStore.load(provider: "nebula-key") ?? ""
+        self.grokPoolBaseURL = defaults.string(forKey: Keys.grokPoolBaseURL)
+            ?? GrokPoolProvider.defaultBaseURL
+        self.grokPoolAPIKey = CookieKeychainStore.load(provider: "grokpool-key") ?? ""
         let zaiRegionRaw = defaults.string(forKey: Keys.zaiRegion) ?? ZaiAPIRegion.bigmodelCN.rawValue
         self.zaiRegion = ZaiAPIRegion(rawValue: zaiRegionRaw) ?? .bigmodelCN
         self.zaiAPIKey = CookieKeychainStore.load(provider: "zai-token") ?? ""
