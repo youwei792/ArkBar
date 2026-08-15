@@ -1,11 +1,11 @@
 import AppKit
 
-/// Nebula (new-api relay) plan card: one balance ring (cumulative spend vs
-/// spend + balance) with three legend rows (Balance / Today / This month),
-/// mirroring the DeepSeek card layout.
-final class NebulaCardView: NSView {
+/// GrokPool (grok2api admin gateway) card: a 24-hour request-success ring with
+/// three legend rows (Requests / Billed cost / Success rate), plus the token
+/// split, account health, and top model below the ring.
+final class GrokPoolCardView: NSView {
     private let plan: PlanSnapshot
-    private let summary: NebulaSummary
+    private let summary: GrokPoolSummary
     private let now: Date
 
     private let horizontalPadding: CGFloat = 14
@@ -14,14 +14,15 @@ final class NebulaCardView: NSView {
 
     init(plan: PlanSnapshot, now: Date, width: CGFloat) {
         self.plan = plan
-        self.summary = plan.nebula ?? NebulaSummary(
-            currency: "CNY", quotaPerUnit: NebulaProvider.defaultQuotaPerUnit,
-            balance: 0, usedTotal: 0,
-            todayCost: nil, currentMonthCost: nil,
-            todayTokens: 0, currentMonthTokens: 0,
-            requestCount: 0, currentMonthRequestCount: 0,
-            topModel: nil, promptTokens: 0, completionTokens: 0, cacheTokens: 0,
-            usageAvailable: false)
+        self.summary = plan.grokPool ?? GrokPoolSummary(
+            period: "24h",
+            requests: 0, successfulRequests: 0, failedRequests: 0,
+            successRate: 0,
+            inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0,
+            tokens: 0,
+            costUSD: 0,
+            activeAccounts: 0, totalAccounts: 0,
+            topModel: nil)
         self.now = now
         let height = Self.computeHeight()
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: height))
@@ -31,8 +32,7 @@ final class NebulaCardView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     nonisolated static func computeHeight() -> CGFloat {
-        // Title (20) + gap (8) + ring (132) + total row (15+13) + model row (5+12) + paddings.
-        12 + 20 + 8 + 132 + 15 + 13 + 5 + 12 + 12
+        12 + 20 + 8 + 132 + 15 + 13 + 13 + 13 + 12
     }
 
     private func build() {
@@ -45,7 +45,7 @@ final class NebulaCardView: NSView {
     // MARK: - Title row
 
     private func buildTitleRow(atY y: inout CGFloat) {
-        let logo = ProviderLogo.image(for: .nebula)
+        let logo = ProviderLogo.image(for: .grokPool)
         var titleX = horizontalPadding
         if let logo {
             let logoView = NSImageView(frame: NSRect(x: horizontalPadding, y: y - 16, width: 14, height: 14))
@@ -67,16 +67,15 @@ final class NebulaCardView: NSView {
     // MARK: - Ring + legend
 
     private func buildRingAndLegend(atY y: inout CGFloat) {
-        let primaryWindow = plan.windows.first
-        let remaining = primaryWindow?.remainingPercent ?? 0
+        let successRate = min(100, max(0, summary.successRate))
         let ringImage = RingRenderer.makeImage(
             rings: [RingRenderer.Ring(
-                id: "balance",
-                label: L(.windowBalance),
-                remainingPercent: remaining,
+                id: "success",
+                label: L(.grokPoolSuccessRate),
+                remainingPercent: successRate,
                 tone: .balance)],
-            primaryRemaining: remaining,
-            primaryLabel: L(.windowBalance),
+            primaryRemaining: successRate,
+            primaryLabel: L(.grokPoolSuccessRate),
             size: ringSize)
         let imageView = NSImageView(frame: NSRect(x: horizontalPadding, y: y - ringSize,
                                                   width: ringSize, height: ringSize))
@@ -86,36 +85,31 @@ final class NebulaCardView: NSView {
         imageView.wantsLayer = true
         addSubview(imageView)
 
-        let symbol = "¥"
+        let symbol = "$"
         var rows: [(label: String, value: String, detail: String)] = []
         rows.append((
-            label: L(.windowBalance),
-            value: Self.money(summary.balance, symbol: symbol),
-            detail: String(format: L(.nebulaUsedTotal),
-                           Self.money(summary.usedTotal, symbol: symbol))))
-        if summary.usageAvailable {
-            rows.append((
-                label: L(.deepseekToday),
-                value: summary.todayCost.map { Self.money($0, symbol: symbol) } ?? "—",
-                detail: Self.usageDetail(tokens: summary.todayTokens, requests: summary.requestCount)))
-            rows.append((
-                label: L(.deepseekMonthly),
-                value: summary.currentMonthCost.map { Self.money($0, symbol: symbol) } ?? "—",
-                detail: Self.usageDetail(tokens: summary.currentMonthTokens,
-                                         requests: summary.currentMonthRequestCount)))
-        } else {
-            rows.append((label: L(.deepseekToday), value: "—", detail: L(.nebulaUsageUnavailable)))
-            rows.append((label: L(.deepseekMonthly), value: "—", detail: ""))
-        }
+            label: L(.grokPoolRequests),
+            value: DeepSeekCardView.grouped(summary.requests),
+            detail: String(format: L(.grokPoolRequestDetail),
+                           DeepSeekCardView.grouped(summary.successfulRequests),
+                           DeepSeekCardView.grouped(summary.failedRequests))))
+        rows.append((
+            label: L(.grokPoolCost),
+            value: Self.money(summary.costUSD, symbol: symbol),
+            detail: String(format: L(.grokPoolTokenTotal), DeepSeekCardView.compactTokens(summary.tokens))))
+        rows.append((
+            label: L(.grokPoolSuccessRate),
+            value: String(format: "%.1f%%", successRate),
+            detail: ""))
 
         let legendX = horizontalPadding + ringSize + 14
         let legendWidth = bounds.width - legendX - horizontalPadding
-        let valueWidth: CGFloat = 78
+        let valueWidth: CGFloat = 84
         for (index, row) in rows.enumerated() {
             let legendY = y - 8 - CGFloat(index) * 42
             let dot = NSView(frame: NSRect(x: legendX, y: legendY - 12, width: 8, height: 8))
             dot.wantsLayer = true
-            dot.layer?.backgroundColor = NSColor.systemTeal.withAlphaComponent(0.85).cgColor
+            dot.layer?.backgroundColor = NSColor.systemGreen.withAlphaComponent(0.85).cgColor
             dot.layer?.cornerRadius = 4
             addSubview(dot)
 
@@ -142,21 +136,31 @@ final class NebulaCardView: NSView {
             }
         }
 
-        // Below the ring: cache-read / uncached / output split (this month).
-        if summary.usageAvailable {
-            let tokensField = label(
-                String(format: L(.nebulaTokenDetail),
-                       Self.compactTokens(summary.cacheTokens),
-                       Self.compactTokens(max(0, summary.promptTokens - summary.cacheTokens)),
-                       Self.compactTokens(summary.completionTokens)),
-                font: .systemFont(ofSize: 10),
-                color: .secondaryLabelColor)
-            tokensField.lineBreakMode = .byTruncatingTail
-            tokensField.toolTip = tokensField.stringValue
-            tokensField.frame = NSRect(x: horizontalPadding, y: y - ringSize - 15,
-                                       width: bounds.width - horizontalPadding * 2, height: 13)
-            addSubview(tokensField)
-        }
+        // Below the ring: token split, account health, and the top model.
+        let tokenField = label(
+            String(format: L(.grokPoolTokenDetail),
+                   Self.compactTokens(summary.inputTokens),
+                   Self.compactTokens(summary.cachedInputTokens),
+                   Self.compactTokens(summary.outputTokens),
+                   Self.compactTokens(summary.reasoningTokens)),
+            font: .systemFont(ofSize: 10),
+            color: .secondaryLabelColor)
+        tokenField.lineBreakMode = .byTruncatingTail
+        tokenField.toolTip = tokenField.stringValue
+        tokenField.frame = NSRect(x: horizontalPadding, y: y - ringSize - 15,
+                                  width: bounds.width - horizontalPadding * 2, height: 13)
+        addSubview(tokenField)
+
+        let accountField = label(
+            String(format: L(.grokPoolAccounts),
+                   DeepSeekCardView.grouped(summary.activeAccounts),
+                   DeepSeekCardView.grouped(summary.totalAccounts)),
+            font: .systemFont(ofSize: 10),
+            color: .secondaryLabelColor)
+        accountField.lineBreakMode = .byTruncatingTail
+        accountField.frame = NSRect(x: horizontalPadding, y: y - ringSize - 28,
+                                    width: bounds.width - horizontalPadding * 2, height: 13)
+        addSubview(accountField)
 
         if let topModel = summary.topModel, !topModel.isEmpty {
             let modelField = label(
@@ -165,11 +169,13 @@ final class NebulaCardView: NSView {
                 color: .tertiaryLabelColor)
             modelField.lineBreakMode = .byTruncatingTail
             modelField.toolTip = modelField.stringValue
-            modelField.frame = NSRect(x: horizontalPadding, y: y - ringSize - 33,
+            modelField.frame = NSRect(x: horizontalPadding, y: y - ringSize - 41,
                                       width: bounds.width - horizontalPadding * 2, height: 12)
             addSubview(modelField)
         }
     }
+
+
 
     // MARK: - Formatting (static for tests)
 
@@ -179,12 +185,6 @@ final class NebulaCardView: NSView {
 
     static func money(_ amount: Double, symbol: String) -> String {
         String(format: "%@%.2f", symbol, amount)
-    }
-
-    static func usageDetail(tokens: Int, requests: Int) -> String {
-        String(format: L(.deepseekUsageDetail),
-               DeepSeekCardView.compactTokens(tokens),
-               DeepSeekCardView.grouped(requests))
     }
 
     // MARK: - Helpers

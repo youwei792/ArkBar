@@ -173,7 +173,8 @@ final class UsageStore: ObservableObject {
             .sink { [weak self] _ in self?.refresh(tab: .kimi) }
             .store(in: &cancellables)
         Publishers.MergeMany(
-            settings.$grokPoolAPIKey.map { _ in },
+            settings.$grokPoolUsername.map { _ in },
+            settings.$grokPoolPassword.map { _ in },
             settings.$grokPoolBaseURL.map { _ in })
             .dropFirst()
             .sink { [weak self] _ in self?.refresh(tab: .grokPool) }

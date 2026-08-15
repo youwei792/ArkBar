@@ -1420,113 +1420,128 @@ struct NebulaConsoleAuthErrorTests {
 
 @Suite("GrokPoolProvider decode")
 struct GrokPoolProviderTests {
-    @Test("Parses user/self quota into USD units")
-    func decodesUserSelf() throws {
+    @Test("Parses admin login envelope into a token")
+    func decodesLogin() throws {
         let json = #"""
-        {"success": true, "message": "", "data": {
-          "id": 1, "username": "alice", "quota": 123456789, "used_quota": 9876543
+        {"data": {
+          "accessToken": "jwt-token-abc",
+          "accessTokenExpiresAt": "2026-08-15T10:00:00.000Z"
         }}
         """#
-        let user = try GrokPoolProvider.decodeUserSelf(data: json.data(using: .utf8)!)
-        #expect(user.quota == 123_456_789)
-        #expect(user.usedQuota == 9_876_543)
-        // 500000 quota = 1 unit (new-api default).
-        #expect(user.quotaPerUnit == 500_000)
+        let login = try GrokPoolProvider.decodeLogin(data: json.data(using: .utf8)!)
+        #expect(login.token == "jwt-token-abc")
+        #expect(login.expiresAt != nil)
     }
 
-    @Test("Cache-hit tokens come from the other JSON blob (real response shape)")
-    func cacheTokensFromOtherBlob() throws {
-        let json = #"""
-        {"success": true, "message": "", "data": {"page": 1, "page_size": 1, "total": 64, "items": [
-          {"id": 1, "user_id": 12345, "created_at": 1785851253, "type": 2,
-           "username": "alice", "token_name": "MyToken", "model_name": "grok-4",
-           "quota": 53972, "prompt_tokens": 388822, "completion_tokens": 358,
-           "use_time": 20, "is_stream": true,
-           "other": "{\"billing_source\":\"wallet\",\"cache_ratio\":0.25,\"cache_tokens\":375936,\"completion_ratio\":3,\"group_ratio\":0.5,\"model_ratio\":1,\"request_path\":\"/v1/chat/completions\"}"}
-        ]}}
-        """#
-        let items = try GrokPoolProvider.decodeLogPage(data: json.data(using: .utf8)!)
-        #expect(items.count == 1)
-        let item = try #require(items.first)
-        #expect(item.modelName == "grok-4")
-        #expect(item.promptTokens == 388_822)
-        #expect(item.completionTokens == 358)
-        #expect(item.quota == 53_972)
-        #expect(item.cacheTokens() == 375_936)
-    }
-
-    @Test("Aggregates today and month cost, tokens, and requests")
-    func aggregatesLogs() {
-        let calendar = Calendar.current
-        var components = DateComponents()
-        components.year = 2026
-        components.month = 8
-        components.day = 2
-        components.hour = 12
-        let now = calendar.date(from: components)!
-
-        func item(_ day: Int, tokens: Int, quota: Int, model: String = "grok-4", cache: Int? = nil) -> GrokPoolLogItem {
-            var dayComponents = DateComponents()
-            dayComponents.year = 2026
-            dayComponents.month = 8
-            dayComponents.day = day
-            dayComponents.hour = 10
-            var other: String?
-            if let cache {
-                other = #"{"cache_tokens":\#(cache)}"#
-            }
-            return GrokPoolLogItem(
-                modelName: model,
-                promptTokens: tokens,
-                completionTokens: tokens / 2,
-                quota: quota,
-                createdAt: calendar.date(from: dayComponents)?.timeIntervalSince1970 ?? 0,
-                other: other)
-        }
-
-        let items = [
-            item(2, tokens: 600, quota: 75_000, cache: 500),  // today: 900 tokens, $0.15
-            item(1, tokens: 900, quota: 25_000, model: "grok-4-fast", cache: 400), // this month, not today
-            item(0, tokens: 100, quota: 10_000, cache: 50),   // July 31 -> outside this month
-        ]
-        let stats = GrokPoolProvider.aggregate(items: items, now: now, calendar: calendar)
-        #expect(stats.todayTokens == 900) // 600 + 300
-        #expect(stats.requestCount == 1)
-        #expect(abs((stats.todayCost ?? 0) - 0.15) < 0.0001)
-        #expect(stats.currentMonthTokens == 2250)
-        #expect(stats.currentMonthRequestCount == 2)
-        #expect(abs((stats.currentMonthCost ?? 0) - 0.20) < 0.0001)
-        #expect(stats.topModel == "grok-4-fast") // 1350 tokens vs 900
-        #expect(stats.promptTokens == 1500)
-        #expect(stats.completionTokens == 750)
-        #expect(stats.cacheTokens == 900) // 500 + 400 (July item excluded)
-    }
-
-    @Test("Ring used percent = cumulative spend / (spend + balance)")
-    func ringUsedPercent() {
-        // $100 balance, $50 spent -> 33.3% used.
-        #expect(abs(GrokPoolProvider.ringUsedPercent(balance: 100, usedTotal: 50) - (50.0 / 150.0 * 100)) < 0.001)
-        // Zero balance: fully used.
-        #expect(GrokPoolProvider.ringUsedPercent(balance: 0, usedTotal: 50) == 100)
-        // Top-up raises balance -> used share shrinks.
-        let before = GrokPoolProvider.ringUsedPercent(balance: 100, usedTotal: 50)
-        let after = GrokPoolProvider.ringUsedPercent(balance: 500, usedTotal: 50)
-        #expect(after < before)
-    }
-
-    @Test("Base URL normalization strips /v1 and trailing slashes")
-    func normalizesBaseURL() {
-        #expect(GrokPoolProvider.normalizedBaseURL("https://grok.axonlume.com") == "https://grok.axonlume.com")
-        #expect(GrokPoolProvider.normalizedBaseURL("https://grok.axonlume.com/") == "https://grok.axonlume.com")
-        #expect(GrokPoolProvider.normalizedBaseURL("https://grok.axonlume.com/v1") == "https://grok.axonlume.com")
-        #expect(GrokPoolProvider.normalizedBaseURL("") == nil)
-    }
-
-    @Test("user/self unauthorized body maps to invalid token")
-    func userSelfUnauthorized() {
-        let json = #"{"success":false,"message":"Unauthorized, invalid access token"}"#
+    @Test("Login without a token throws")
+    func loginWithoutToken() {
+        let json = #"{"data": {}}"#
         do {
-            _ = try GrokPoolProvider.decodeUserSelf(data: json.data(using: .utf8)!)
+            _ = try GrokPoolProvider.decodeLogin(data: json.data(using: .utf8)!)
+            Issue.record("expected throw")
+        } catch let error as UsageError {
+            if case .parseFailed = error {
+                // ok
+            } else {
+                Issue.record("unexpected \(error)")
+            }
+        } catch {
+            Issue.record("unexpected non-UsageError \(error)")
+        }
+    }
+
+    @Test("Parses the 24h dashboard envelope (real grok2api shape)")
+    func decodesDashboard() throws {
+        let json = #"""
+        {"data": {
+          "period": "24h",
+          "range": {"start": "2026-08-14T12:00:00Z", "end": "2026-08-15T12:00:00Z"},
+          "resources": {"activeAccounts": 23, "totalAccounts": 24, "buildAccounts": 10,
+                        "webAccounts": 8, "consoleAccounts": 5, "enabledModels": 14,
+                        "totalModels": 16, "activeClientKeys": 3, "totalClientKeys": 5},
+          "usage": {"requests": 12345, "successfulRequests": 12000, "failedRequests": 345,
+                    "inputTokens": 1150000, "cachedInputTokens": 1150000,
+                    "outputTokens": 420000, "reasoningTokens": 180000,
+                    "tokens": 2900000, "billedCostUsdTicks": 152000000000,
+                    "successRate": 97.2, "averageFirstTokenMs": 850,
+                    "outputTokensPerSecond": 18.5, "firstTokenSamples": 100, "throughputSamples": 100},
+          "topModels": [{"model": "grok-4", "requests": 8000, "tokens": 2000000,
+                         "inputTokens": 800000, "cachedInputTokens": 800000,
+                         "outputTokens": 300000, "reasoningTokens": 100000,
+                         "billedCostUsdTicks": 100000000000}]
+        }}
+        """#
+        let dashboard = try GrokPoolProvider.decodeDashboard(data: json.data(using: .utf8)!)
+        #expect(dashboard.period == "24h")
+        #expect(dashboard.resources?.activeAccounts == 23)
+        #expect(dashboard.resources?.totalAccounts == 24)
+        let usage = try #require(dashboard.usage)
+        #expect(usage.requests == 12_345)
+        #expect(usage.cachedInputTokens == 1_150_000)
+        #expect(usage.billedCostUsdTicks == 152_000_000_000)
+        #expect(usage.successRate == 97.2)
+        #expect(dashboard.topModels?.first?.model == "grok-4")
+    }
+
+    @Test("USD ticks convert at 10^10 per dollar")
+    func usdTicks() {
+        // 152000000000 ticks = $15.20.
+        #expect(abs(GrokPoolProvider.usdTicksToValue(152_000_000_000) - 15.20) < 0.0001)
+        #expect(GrokPoolProvider.usdTicksToValue(0) == 0)
+        #expect(GrokPoolProvider.usdTicksPerDollar == 10_000_000_000)
+    }
+
+    @Test("makeSummary maps dashboard usage into the display summary")
+    func makeSummary() throws {
+        let dashboard = try GrokPoolProvider.decodeDashboard(data: """
+        {"data": {
+          "period": "24h",
+          "resources": {"activeAccounts": 23, "totalAccounts": 24},
+          "usage": {"requests": 12345, "successfulRequests": 12000, "failedRequests": 345,
+                    "inputTokens": 1150000, "cachedInputTokens": 1150000,
+                    "outputTokens": 420000, "reasoningTokens": 180000,
+                    "tokens": 2900000, "billedCostUsdTicks": 152000000000,
+                    "successRate": 97.2},
+          "topModels": [
+            {"model": "grok-4", "tokens": 2000000},
+            {"model": "grok-4-fast", "tokens": 900000}
+          ]
+        }}
+        """.data(using: .utf8)!)
+        let summary = GrokPoolProvider.makeSummary(dashboard)
+        #expect(summary.period == "24h")
+        #expect(summary.requests == 12_345)
+        #expect(summary.successfulRequests == 12_000)
+        #expect(summary.failedRequests == 345)
+        #expect(summary.successRate == 97.2)
+        #expect(summary.inputTokens == 1_150_000)
+        #expect(summary.cachedInputTokens == 1_150_000)
+        #expect(summary.outputTokens == 420_000)
+        #expect(summary.reasoningTokens == 180_000)
+        #expect(summary.tokens == 2_900_000)
+        #expect(abs(summary.costUSD - 15.20) < 0.0001)
+        #expect(summary.activeAccounts == 23)
+        #expect(summary.totalAccounts == 24)
+        #expect(summary.topModel == "grok-4")
+    }
+
+    @Test("Success rate falls back to successful/requests ratio")
+    func successRateFallback() throws {
+        let dashboard = try GrokPoolProvider.decodeDashboard(data: """
+        {"data": {"period": "24h", "usage": {"requests": 10, "successfulRequests": 7, "failedRequests": 3}}}
+        """.data(using: .utf8)!)
+        let summary = GrokPoolProvider.makeSummary(dashboard)
+        #expect(summary.successRate == 70)
+        // Zero requests -> 0% success (empty ring).
+        let empty = try GrokPoolProvider.decodeDashboard(data: #"{"data": {"period": "24h"}}"#.data(using: .utf8)!)
+        #expect(GrokPoolProvider.makeSummary(empty).successRate == 0)
+    }
+
+    @Test("Admin unauthorized envelope maps to invalid token")
+    func adminUnauthorized() {
+        let json = #"{"error": {"code": "adminUnauthorized", "message": "管理员登录已失效", "requestId": "xyz"}}"#
+        do {
+            _ = try GrokPoolProvider.decodeDashboard(data: json.data(using: .utf8)!)
             Issue.record("expected throw")
         } catch let error as UsageError {
             if case .grokPoolInvalidToken = error {
@@ -1539,12 +1554,21 @@ struct GrokPoolProviderTests {
         }
     }
 
-    @Test("Reads gateway credentials from environment aliases")
+    @Test("Base URL normalization strips /v1 and trailing slashes")
+    func normalizesBaseURL() {
+        #expect(GrokPoolProvider.normalizedBaseURL("https://grok.axonlume.com") == "https://grok.axonlume.com")
+        #expect(GrokPoolProvider.normalizedBaseURL("https://grok.axonlume.com/") == "https://grok.axonlume.com")
+        #expect(GrokPoolProvider.normalizedBaseURL("https://grok.axonlume.com/v1") == "https://grok.axonlume.com")
+        #expect(GrokPoolProvider.normalizedBaseURL("") == nil)
+    }
+
+    @Test("Reads administrator credentials from environment aliases")
     func readsEnvironment() {
-        #expect(GrokPoolCredentialResolver.apiKey(environment: ["GROKPOOL_API_KEY": "sk-abc"]) == "sk-abc")
-        #expect(GrokPoolCredentialResolver.apiKey(environment: ["GROK_POOL_API_KEY": "sk-abc"]) == "sk-abc")
-        #expect(GrokPoolCredentialResolver.apiKey(environment: [:]) == nil)
-        #expect(GrokPoolCredentialResolver.apiKey(environment: ["GROKPOOL_API_KEY": "\"sk-abc\""]) == "sk-abc")
+        #expect(GrokPoolCredentialResolver.username(environment: ["GROKPOOL_USERNAME": "admin"]) == "admin")
+        #expect(GrokPoolCredentialResolver.username(environment: ["GROK_POOL_USERNAME": "admin"]) == "admin")
+        #expect(GrokPoolCredentialResolver.password(environment: ["GROKPOOL_PASSWORD": "s3cret"]) == "s3cret")
+        #expect(GrokPoolCredentialResolver.username(environment: [:]) == nil)
+        #expect(GrokPoolCredentialResolver.username(environment: ["GROKPOOL_USERNAME": "\"admin\""]) == "admin")
         #expect(GrokPoolCredentialResolver.baseURL(environment: ["GROKPOOL_BASE_URL": "https://grok.example"]) == "https://grok.example")
     }
 }
@@ -1552,24 +1576,23 @@ struct GrokPoolProviderTests {
 @Suite("GrokPool card")
 @MainActor
 struct GrokPoolCardTests {
-    @Test("Renders balance ring and legend rows in USD")
+    @Test("Renders success-rate ring and 24h legend rows in USD")
     func rendersCard() throws {
-        let summary = NebulaSummary(
-            currency: "USD",
-            quotaPerUnit: 500_000,
-            balance: 246.91,
-            usedTotal: 19.75,
-            todayCost: 0.15,
-            currentMonthCost: 1.23,
-            todayTokens: 600,
-            currentMonthTokens: 12_345,
-            requestCount: 3,
-            currentMonthRequestCount: 87,
-            topModel: "grok-4",
-            promptTokens: 8_100,
-            completionTokens: 4_245,
-            cacheTokens: 3_000,
-            usageAvailable: true)
+        let summary = GrokPoolSummary(
+            period: "24h",
+            requests: 12_345,
+            successfulRequests: 12_000,
+            failedRequests: 345,
+            successRate: 97.2,
+            inputTokens: 1_150_000,
+            cachedInputTokens: 1_150_000,
+            outputTokens: 420_000,
+            reasoningTokens: 180_000,
+            tokens: 2_900_000,
+            costUSD: 15.20,
+            activeAccounts: 23,
+            totalAccounts: 24,
+            topModel: "grok-4")
         let plan = PlanSnapshot(
             id: "grokpool",
             product: .grokPool,
@@ -1577,29 +1600,31 @@ struct GrokPoolCardTests {
             tier: nil,
             seatID: nil,
             subscribed: true,
-            windows: [UsageWindow(label: "balance", usedPercent: 7.4, used: nil, total: nil, resetsAt: nil)],
+            windows: [UsageWindow(label: "24h", usedPercent: 2.8, used: nil, total: nil, resetsAt: nil)],
             expiryDate: nil,
             errorMessage: nil,
             deepseek: nil,
             nebula: nil,
             grokPool: summary)
-        #expect(plan.grokPool?.balance == 246.91)
-        let view = NebulaCardView(plan: plan, now: Date(), width: 340)
+        #expect(plan.grokPool?.costUSD == 15.20)
+        let view = GrokPoolCardView(plan: plan, now: Date(), width: 340)
         view.updateTrackingAreas()
         #expect(view.subviews.allSatisfy {
             $0.frame.minX >= 0 && $0.frame.maxX <= view.bounds.maxX
         })
         let labels = view.subviews.compactMap { $0 as? NSTextField }.map(\.stringValue)
-        #expect(labels.contains(L(.windowBalance)))
-        #expect(labels.contains("$246.91"))
-        #expect(!labels.contains("¥246.91"))
+        #expect(labels.contains(L(.grokPoolRequests)))
+        #expect(labels.contains(L(.grokPoolCost)))
+        #expect(labels.contains(L(.grokPoolSuccessRate)))
+        #expect(labels.contains("$15.20"))
+        #expect(labels.contains("97.2%"))
 
         // Render for visual inspection on a dark material approximation.
-        let card = NebulaCardView(plan: plan, now: Date(), width: 340)
+        let card = GrokPoolCardView(plan: plan, now: Date(), width: 340)
         let header = HeaderCardView(
             snapshot: ProviderSnapshot(
                 providerName: "GrokPool",
-                authMethod: "apikey",
+                authMethod: "admin",
                 plans: [plan],
                 updatedAt: Date(),
                 errorMessage: nil),
@@ -1961,6 +1986,7 @@ struct KimiBrowserSessionTokenTests {
         }
     }
 }
+
 
 // MARK: - Test helpers
 

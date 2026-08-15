@@ -216,8 +216,16 @@ enum LKey: String {
     case reimportKimiBrowserSession = "settings.reimportKimiBrowserSession"
     case grokPoolBaseURLLabel = "grokPool.baseURLLabel"
     case grokPoolBaseURLHint = "grokPool.baseURLHint"
-    case grokPoolAPIKeyLabel = "grokPool.apiKeyLabel"
+    case grokPoolUsernameLabel = "grokPool.usernameLabel"
+    case grokPoolPasswordLabel = "grokPool.passwordLabel"
     case grokPoolCredentialsHint = "grokPool.credentialsHint"
+    case grokPoolSuccessRate = "grokPool.successRate"
+    case grokPoolRequests = "grokPool.requests"
+    case grokPoolRequestDetail = "grokPool.requestDetail"
+    case grokPoolCost = "grokPool.cost"
+    case grokPoolTokenTotal = "grokPool.tokenTotal"
+    case grokPoolTokenDetail = "grokPool.tokenDetail"
+    case grokPoolAccounts = "grokPool.accounts"
     case errorArkcliNotFound = "error.arkcliNotFound"
     case errorArkcliNotAuthenticated = "error.arkcliNotAuthenticated"
     case errorArkcliTimedOut = "error.arkcliTimedOut"
@@ -541,8 +549,16 @@ final class L10n: ObservableObject {
         add(.reimportKimiBrowserSession, "重新读取浏览器登录", "Re-import Browser Sign-in")
         add(.grokPoolBaseURLLabel, "API 地址", "API base URL")
         add(.grokPoolBaseURLHint, "网关地址，默认 https://grok.axonlume.com（不要填 /v1）", "Gateway base URL, default https://grok.axonlume.com (do not append /v1)")
-        add(.grokPoolAPIKeyLabel, "网关 API Key", "Gateway API key")
-        add(.grokPoolCredentialsHint, "使用 new-api 控制台创建的令牌（与调用 /v1 模型接口的网关 key 相同）。余额来自 /api/user/self，用量来自 /api/log/self，按 500000 quota = $1 换算。", "Use the token created in the new-api console (the same gateway key as /v1 model calls). Balance comes from /api/user/self and usage from /api/log/self, converted at 500000 quota = $1.")
+        add(.grokPoolUsernameLabel, "管理员账号", "Administrator username")
+        add(.grokPoolPasswordLabel, "管理员密码", "Administrator password")
+        add(.grokPoolCredentialsHint, "使用 Grok2API 控制台的管理员账号密码登录（POST /api/admin/v1/auth/login），用短期访问令牌读取 24h 运营看板（GET /api/admin/v1/dashboard?period=24h）。凭据与令牌只存本机 Keychain；令牌每 15 分钟自动重新获取。", "Sign in with the Grok2API console administrator account (POST /api/admin/v1/auth/login) and read the 24-hour dashboard (GET /api/admin/v1/dashboard?period=24h) with the short-lived access token. Credentials and tokens stay in the local Keychain; the token re-fetches automatically every 15 minutes.")
+        add(.grokPoolSuccessRate, "成功率", "Success rate")
+        add(.grokPoolRequests, "24h 请求数", "Requests (24h)")
+        add(.grokPoolRequestDetail, "成功 %@ · 失败 %@", "OK %@ · Failed %@")
+        add(.grokPoolCost, "24h 费用", "Billed (24h)")
+        add(.grokPoolTokenTotal, "总 Token %@", "%@ tokens")
+        add(.grokPoolTokenDetail, "输入 %@ · 缓存 %@ · 输出 %@ · 推理 %@", "Input %@ · Cached %@ · Output %@ · Reasoning %@")
+        add(.grokPoolAccounts, "活跃账号 %@/%@", "Active accounts %@/%@")
         add(.errorArkcliNotFound, "未找到 arkcli。请安装后执行 `arkcli auth login volc-sso`。", "arkcli was not found. Install it, then run `arkcli auth login volc-sso`.")
         add(.errorArkcliNotAuthenticated, "arkcli 尚未登录。请执行 `arkcli auth login volc-sso` 后刷新。", "arkcli is not signed in. Run `arkcli auth login volc-sso`, then refresh.")
         add(.errorArkcliTimedOut, "arkcli 查询超时。请检查登录状态后重试。", "arkcli usage timed out. Check authentication and try again.")
@@ -568,8 +584,8 @@ final class L10n: ObservableObject {
         add(.errorKimiInvalidToken, "Kimi API Key 无效或已过期。请到 kimi.com/code/console 重新创建。", "The Kimi API key is invalid or expired. Create a new one at kimi.com/code/console.")
         add(.errorKimiBrowserSessionMissing, "没有在浏览器中找到 www.kimi.com 的登录会话（kimi-auth cookie）。请先在浏览器登录 Kimi。", "No www.kimi.com sign-in session (kimi-auth cookie) was found. Sign in to Kimi in a browser first.")
         add(.errorKimiBrowserAuthorizationRequired, "TokenBar 尚未缓存 Kimi 浏览器登录。请在 Kimi For Coding 设置中点“重新读取浏览器登录”。", "TokenBar has no cached Kimi browser sign-in. Click “Re-import Browser Sign-in” in Kimi For Coding settings.")
-        add(.errorGrokPoolMissingCredentials, "未配置 GrokPool 网关 API Key。请在 GrokPool 设置中填写，或设置环境变量 GROKPOOL_API_KEY。", "No GrokPool gateway API key is configured. Enter one in the GrokPool settings, or set GROKPOOL_API_KEY.")
-        add(.errorGrokPoolInvalidToken, "GrokPool 网关 API Key 无效或已过期。请到 new-api 控制台重新获取令牌。", "The GrokPool gateway API key is invalid or expired. Get a new token from the new-api console.")
+        add(.errorGrokPoolMissingCredentials, "未配置 GrokPool 管理员账号。请在 GrokPool 设置中填写账号密码，或设置环境变量 GROKPOOL_USERNAME / GROKPOOL_PASSWORD。", "No GrokPool administrator account is configured. Enter the username and password in the GrokPool settings, or set GROKPOOL_USERNAME / GROKPOOL_PASSWORD.")
+        add(.errorGrokPoolInvalidToken, "GrokPool 管理员登录失败或会话已过期。请检查账号密码，或在 Grok2API 控制台重新登录。", "GrokPool administrator login failed or the session expired. Check the username and password, or sign in again in the Grok2API console.")
         add(.errorProbeModels, "所有探测模型均不可用", "All probe models failed")
         add(.apiKeyNoHeaders, "API Key 有效，但响应未返回请求限额头。", "API key is valid, but no request-limit headers were returned.")
         add(.apiKeyNoWindow, "API Key 有效，但未返回用量窗口。", "API key is valid, but no usage window was returned.")

@@ -700,12 +700,14 @@ private struct ZaiPreferencesPane: View {
 private struct GrokPoolPreferencesPane: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var store: UsageStore
-    @State private var apiKeyField: String
+    @State private var usernameField: String
+    @State private var passwordField: String
 
     init(settings: AppSettings, store: UsageStore) {
         self.settings = settings
         self.store = store
-        _apiKeyField = State(initialValue: settings.grokPoolAPIKey)
+        _usernameField = State(initialValue: settings.grokPoolUsername)
+        _passwordField = State(initialValue: settings.grokPoolPassword)
     }
 
     var body: some View {
@@ -731,9 +733,11 @@ private struct GrokPoolPreferencesPane: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    SecureField(L(.grokPoolAPIKeyLabel), text: $apiKeyField)
-                        .onSubmit(saveAPIKey)
-                    Button(L(.saveCredential), action: saveAPIKey)
+                    TextField(L(.grokPoolUsernameLabel), text: $usernameField)
+                        .onSubmit(saveUsername)
+                    SecureField(L(.grokPoolPasswordLabel), text: $passwordField)
+                        .onSubmit(savePassword)
+                    Button(L(.saveCredential), action: saveCredentials)
 
                     ProviderStatusRows(
                         status: store.grokPoolStatus,
@@ -767,8 +771,17 @@ private struct GrokPoolPreferencesPane: View {
         }
     }
 
-    private func saveAPIKey() {
-        settings.setGrokPoolAPIKey(apiKeyField)
+    private func saveCredentials() {
+        settings.setGrokPoolUsername(usernameField)
+        settings.setGrokPoolPassword(passwordField)
+    }
+
+    private func saveUsername() {
+        settings.setGrokPoolUsername(usernameField)
+    }
+
+    private func savePassword() {
+        settings.setGrokPoolPassword(passwordField)
     }
 }
 

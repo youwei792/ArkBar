@@ -301,8 +301,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             return NebulaCardView.money(summary.balance, symbol: "¥")
         case .grokPool:
             guard let summary = snapshot.plans.first?.grokPool else { return nil }
-            return NebulaCardView.money(
-                summary.balance, symbol: DeepSeekCardView.currencySymbol(summary.currency))
+            return GrokPoolCardView.money(summary.costUSD, symbol: "$")
         case .ark, .opencode, .zai, .kimi:
             return nil
         }

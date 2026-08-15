@@ -1,0 +1,52 @@
+import Foundation
+import AppKit
+import TokenBar
+
+func log(_ s: String) { FileHandle.standardError.write(Data(s + "\n".utf8)) }
+
+@MainActor
+func run() {
+    log("1: build summary")
+    let summary = GrokPoolSummary(
+        period: "24h", requests: 12_345, successfulRequests: 12_000, failedRequests: 345,
+        successRate: 97.2, inputTokens: 1_150_000, cachedInputTokens: 1_150_000,
+        outputTokens: 420_000, reasoningTokens: 180_000, tokens: 2_900_000,
+        costUSD: 15.20, activeAccounts: 23, totalAccounts: 24, topModel: "grok-4")
+    log("2: build plan")
+    let plan = PlanSnapshot(
+        id: "grokpool", product: .grokPool, edition: nil, tier: nil, seatID: nil,
+        subscribed: true,
+        windows: [UsageWindow(label: "24h", usedPercent: 2.8, used: nil, total: nil, resetsAt: nil)],
+        expiryDate: nil, errorMessage: nil, deepseek: nil, nebula: nil, grokPool: summary)
+    log("3: product displayName = " + plan.product.displayName)
+    log("4: build card view")
+    let view = GrokPoolCardView(plan: plan, now: Date(), width: 340)
+    log("5: card built bounds=\(view.bounds) subviews=\(view.subviews.count)")
+    log("6: label strings: " + view.subviews.compactMap { $0 as? NSTextField }.map(\.stringValue).joined(separator: " | "))
+    log("7: render dashboard")
+    let header = HeaderCardView(
+        snapshot: ProviderSnapshot(providerName: "GrokPool", authMethod: "admin", plans: [plan], updatedAt: Date(), errorMessage: nil),
+        width: 340)
+    log("8: header built")
+    let switcher = ProviderSwitcherView(tabs: ProviderTab.allCases, selected: .provider(.grokPool), showSummary: false, width: 340, onSelect: { _ in })
+    log("9: switcher built")
+    let totalHeight = switcher.bounds.height + header.bounds.height + view.bounds.height
+    let dashboard = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: totalHeight))
+    dashboard.wantsLayer = true
+    dashboard.layer?.backgroundColor = NSColor(calibratedWhite: 0.30, alpha: 1).cgColor
+    view.frame.origin = .zero
+    header.frame.origin = NSPoint(x: 0, y: view.bounds.height)
+    switcher.frame.origin = NSPoint(x: 0, y: view.bounds.height + header.bounds.height)
+    dashboard.addSubview(view)
+    dashboard.addSubview(header)
+    dashboard.addSubview(switcher)
+    dashboard.layoutSubtreeIfNeeded()
+    log("10: layout done, caching")
+    let rep = dashboard.bitmapImageRepForCachingDisplay(in: dashboard.bounds)
+    dashboard.cacheDisplay(in: dashboard.bounds, to: rep!)
+    log("11: png")
+    let png = rep!.representation(using: .png, properties: [:])!
+    try! png.write(to: URL(fileURLWithPath: "/tmp/tokenbar_grokpool_probe.png"))
+    log("12: done")
+}
+MainActor.assumeIsolated(run)

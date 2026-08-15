@@ -82,6 +82,30 @@ struct NebulaSummary: Sendable, Equatable {
     let usageAvailable: Bool
 }
 
+/// GrokPool (grok2api admin gateway) 24-hour operational summary. Unlike the
+/// balance-based relays there is no money balance: the ring reflects the
+/// request success rate and the status item can show the billed cost.
+struct GrokPoolSummary: Sendable, Equatable {
+    /// Dashboard period, always "24h" for now.
+    let period: String
+    let requests: Int
+    let successfulRequests: Int
+    let failedRequests: Int
+    /// Request success rate as a 0–100 percentage.
+    let successRate: Double
+    let inputTokens: Int
+    let cachedInputTokens: Int
+    let outputTokens: Int
+    let reasoningTokens: Int
+    /// Total tokens (input + cached input + output + reasoning).
+    let tokens: Int
+    /// Billed cost in USD over the window.
+    let costUSD: Double
+    let activeAccounts: Int
+    let totalAccounts: Int
+    let topModel: String?
+}
+
 /// One subscribed product (e.g. personal Coding Plan, team Agent Plan).
 struct PlanSnapshot: Sendable, Equatable, Identifiable {
     enum Product: String, Sendable, Equatable {
@@ -122,9 +146,9 @@ struct PlanSnapshot: Sendable, Equatable, Identifiable {
     var deepseek: DeepSeekSummary? = nil
     /// Nebula (new-api relay) balance/usage breakdown (nil for other providers).
     var nebula: NebulaSummary? = nil
-    /// GrokPool (grok-farm new-api gateway) balance/usage breakdown (nil for
-    /// other providers). Fully isolated from the Nebula tab's data.
-    var grokPool: NebulaSummary? = nil
+    /// GrokPool (grok2api admin gateway) operational summary (nil for other
+    /// providers). Fully isolated from the Nebula tab's data.
+    var grokPool: GrokPoolSummary? = nil
 
     /// The tightest window (highest used percent) — what the bar icon reflects.
     var tightestWindow: UsageWindow? {

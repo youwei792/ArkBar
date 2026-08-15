@@ -2,119 +2,102 @@ import Foundation
 
 // MARK: - API response types
 
-private struct GrokPoolUserSelfResponse: Decodable {
-    let success: Bool?
+/// grok2api admin envelope: `{"data": ...}` on success, `{"error": {...}}`
+/// on failure (stable `code` strings like `adminUnauthorized`).
+struct GrokPoolEnvelope<T: Decodable>: Decodable {
+    let data: T?
+    let error: GrokPoolErrorBody?
+
+    enum CodingKeys: String, CodingKey { case data, error }
+}
+
+struct GrokPoolErrorBody: Decodable {
+    let code: String?
     let message: String?
-    let data: GrokPoolUserSelfData?
+}
+
+struct GrokPoolLoginResponse: Decodable {
+    let accessToken: String?
+    let accessTokenExpiresAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case success, message, data
+        case accessToken
+        case accessTokenExpiresAt
     }
 }
 
-private struct GrokPoolUserSelfData: Decodable {
-    let quota: Int?
-    let usedQuota: Int?
-    let username: String?
+struct GrokPoolDashboardDTO: Decodable {
+    let period: String?
+    let resources: GrokPoolResourcesDTO?
+    let usage: GrokPoolUsageDTO?
+    let topModels: [GrokPoolModelUsageDTO]?
+}
+
+struct GrokPoolResourcesDTO: Decodable {
+    let activeAccounts: Int?
+    let totalAccounts: Int?
 
     enum CodingKeys: String, CodingKey {
-        case quota
-        case usedQuota = "used_quota"
-        case username
+        case activeAccounts
+        case totalAccounts
     }
 }
 
-private struct GrokPoolLogResponse: Decodable {
-    let success: Bool?
-    let message: String?
-    let data: GrokPoolLogData?
+struct GrokPoolUsageDTO: Decodable {
+    let requests: Int?
+    let successfulRequests: Int?
+    let failedRequests: Int?
+    let inputTokens: Int?
+    let cachedInputTokens: Int?
+    let outputTokens: Int?
+    let reasoningTokens: Int?
+    let tokens: Int?
+    /// Billed cost in 10^-10 USD ticks (1 USD = 10^10 ticks).
+    let billedCostUsdTicks: Int64?
+    /// Success rate as a 0–100 percentage.
+    let successRate: Double?
 
     enum CodingKeys: String, CodingKey {
-        case success, message, data
+        case requests
+        case successfulRequests
+        case failedRequests
+        case inputTokens
+        case cachedInputTokens
+        case outputTokens
+        case reasoningTokens
+        case tokens
+        case billedCostUsdTicks = "billedCostUsdTicks"
+        case successRate
     }
 }
 
-private struct GrokPoolLogData: Decodable {
-    let items: [GrokPoolLogItem]?
-    let total: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case items, total
-    }
-}
-
-struct GrokPoolLogItem: Decodable {
-    let modelName: String?
-    let promptTokens: Int?
-    let completionTokens: Int?
-    /// Consumed quota for this request (raw quota units).
-    let quota: Int?
-    /// Unix seconds.
-    let createdAt: TimeInterval?
-    /// JSON blob; cache-hit tokens live under `cache_tokens`.
-    let other: String?
-
-    enum CodingKeys: String, CodingKey {
-        case modelName = "model_name"
-        case promptTokens = "prompt_tokens"
-        case completionTokens = "completion_tokens"
-        case quota
-        case createdAt = "created_at"
-        case other
-    }
-
-    init(
-        modelName: String?,
-        promptTokens: Int?,
-        completionTokens: Int?,
-        quota: Int?,
-        createdAt: TimeInterval?,
-        other: String? = nil)
-    {
-        self.modelName = modelName
-        self.promptTokens = promptTokens
-        self.completionTokens = completionTokens
-        self.quota = quota
-        self.createdAt = createdAt
-        self.other = other
-    }
-
-    /// Cache-hit input tokens, from the `other` JSON blob (`cache_tokens`).
-    func cacheTokens() -> Int {
-        guard let other,
-              let data = other.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let value = object["cache_tokens"] as? Int
-        else {
-            return 0
-        }
-        return value
-    }
+struct GrokPoolModelUsageDTO: Decodable {
+    let model: String?
+    let tokens: Int?
 }
 
 // MARK: - Provider
 
-/// GrokPool (grok-farm gateway, new-api based) balance + consumption
-/// monitoring.
+/// GrokPool (grok2api admin gateway) monitoring.
 ///
-/// The gateway fronts new-api with a key-checked proxy: every endpoint —
-/// including the console APIs — takes the same gateway key as
-/// `Authorization: Bearer <key>` that /v1 model calls use. Unlike the
-/// APINebula tab there is no browser-session path; settings/env supply the
-/// key, and state is fully isolated from every other provider tab.
+/// The gateway migrated off the new-api console API. Balance/usage now comes
+/// from the grok2api admin panel: log in with the administrator username and
+/// password (`POST /api/admin/v1/auth/login`), then read the 24-hour dashboard
+/// (`GET /api/admin/v1/dashboard?period=24h`) with the short-lived Bearer
+/// access token. There is no money balance — the ring shows the request
+/// success rate and the status item can show the 24h billed cost.
 final class GrokPoolProvider: UsageProvider {
     let displayName = "GrokPool"
 
-    /// new-api default conversion: 500000 quota = 1 currency unit (USD).
-    static let defaultQuotaPerUnit: Double = 500_000
     static let defaultBaseURL = "https://grok.axonlume.com"
-
-    private static let pageSize = 100
-    private static let maxPages = 20
+    /// grok2api reports billed cost in 10^-10 USD ticks.
+    static let usdTicksPerDollar: Double = 10_000_000_000
+    private static let accessTokenRefreshMargin: TimeInterval = 60
     private static let timeoutSeconds: TimeInterval = 15
 
     private let settings: AppSettings
     private let transport: any HTTPTransport
+    private let tokenCache = GrokPoolTokenCache()
 
     init(settings: AppSettings, transport: any HTTPTransport = defaultHTTPTransport()) {
         self.settings = settings
@@ -131,49 +114,83 @@ final class GrokPoolProvider: UsageProvider {
             Self.normalizedBaseURL(self.settings.grokPoolBaseURL)
         } ?? GrokPoolCredentialResolver.baseURL(environment: environment)
             ?? Self.defaultBaseURL
-        let apiKey = await MainActor.run {
-            Self.trimmed(self.settings.grokPoolAPIKey)
-        } ?? GrokPoolCredentialResolver.apiKey(environment: environment)
-        guard let apiKey else {
+        let username = await MainActor.run {
+            Self.trimmed(self.settings.grokPoolUsername)
+        } ?? GrokPoolCredentialResolver.username(environment: environment)
+        let password = await MainActor.run {
+            Self.trimmed(self.settings.grokPoolPassword)
+        } ?? GrokPoolCredentialResolver.password(environment: environment)
+        guard let username, let password else {
             throw UsageError.grokPoolMissingCredentials
         }
 
-        let user = try await fetchUserSelf(baseURL: baseURL, apiKey: apiKey)
-
-        let quotaPerUnit = user.quotaPerUnit
-        let balance = Double(user.quota) / quotaPerUnit
-        let usedTotal = Double(user.usedQuota) / quotaPerUnit
-
-        // Consumption log is optional: paging can be slow or rejected, and the
-        // balance card must still render.
-        var stats: GrokPoolUsageStats?
+        let token = try await ensureAccessToken(baseURL: baseURL, username: username, password: password)
         do {
-            stats = try await fetchMonthlyLogs(baseURL: baseURL, apiKey: apiKey)
-        } catch {
-            UsageStore.log("✗ GrokPool consumption log unavailable: \(error.localizedDescription)")
+            return try await loadDashboard(baseURL: baseURL, accessToken: token, username: username, password: password)
+        } catch UsageError.grokPoolInvalidToken {
+            // Access token was revoked or the session rotated; re-login once.
+            invalidateTokenCache()
+            let freshToken = try await login(baseURL: baseURL, username: username, password: password)
+            return try await loadDashboard(baseURL: baseURL, accessToken: freshToken.token, username: username, password: password)
         }
+    }
 
-        let summary = NebulaSummary(
-            currency: "USD",
-            quotaPerUnit: quotaPerUnit,
-            balance: balance,
-            usedTotal: usedTotal,
-            todayCost: stats?.todayCost,
-            currentMonthCost: stats?.currentMonthCost,
-            todayTokens: stats?.todayTokens ?? 0,
-            currentMonthTokens: stats?.currentMonthTokens ?? 0,
-            requestCount: stats?.requestCount ?? 0,
-            currentMonthRequestCount: stats?.currentMonthRequestCount ?? 0,
-            topModel: stats?.topModel,
-            promptTokens: stats?.promptTokens ?? 0,
-            completionTokens: stats?.completionTokens ?? 0,
-            cacheTokens: stats?.cacheTokens ?? 0,
-            usageAvailable: stats != nil)
+    // MARK: - Auth
 
-        // Ring: cumulative spend vs (spend + balance) — the gateway's own numbers.
-        let usedPercent = Self.ringUsedPercent(balance: balance, usedTotal: usedTotal)
-        let window = UsageWindow(label: "balance", usedPercent: usedPercent,
-                                 used: nil, total: nil, resetsAt: nil)
+    private func ensureAccessToken(baseURL: String, username: String, password: String) async throws -> String {
+        if let token = tokenCache.validToken(margin: Self.accessTokenRefreshMargin) {
+            return token
+        }
+        let login = try await login(baseURL: baseURL, username: username, password: password)
+        tokenCache.store(token: login.token, expiresAt: login.expiresAt)
+        return login.token
+    }
+
+    private func invalidateTokenCache() {
+        tokenCache.invalidate()
+    }
+
+    /// Logs in as the gateway administrator and returns the Bearer access token.
+    func login(baseURL: String, username: String, password: String) async throws -> GrokPoolLogin {
+        let endpoint = try Self.endpoint(baseURL: baseURL, path: "/api/admin/v1/auth/login")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = Self.timeoutSeconds
+        let body = try JSONSerialization.data(withJSONObject: [
+            "username": username,
+            "password": password,
+        ])
+        request.httpBody = body
+
+        let response = try await transport.response(for: request)
+        if let error = Self.envelopeError(from: response) {
+            throw error
+        }
+        guard response.statusCode == 200 else {
+            if response.statusCode == 401 || response.statusCode == 403 {
+                throw UsageError.grokPoolInvalidToken
+            }
+            throw UsageError.apiError(statusCode: response.statusCode, message: "GrokPool admin login")
+        }
+        return try Self.decodeLogin(data: response.data)
+    }
+
+    // MARK: - Dashboard
+
+    private func loadDashboard(
+        baseURL: String, accessToken: String,
+        username: String, password: String) async throws -> ProviderSnapshot
+    {
+        let dashboard = try await fetchDashboard(baseURL: baseURL, accessToken: accessToken)
+        let summary = Self.makeSummary(dashboard)
+        // The ring reflects request success: 0% used means everything
+        // succeeded, so the remaining percent is the success rate itself.
+        let window = UsageWindow(
+            label: "24h",
+            usedPercent: max(0, min(100, 100 - summary.successRate)),
+            used: nil, total: nil, resetsAt: nil)
         let plan = PlanSnapshot(
             id: "grokpool",
             product: .grokPool,
@@ -189,129 +206,70 @@ final class GrokPoolProvider: UsageProvider {
             grokPool: summary)
         return ProviderSnapshot(
             providerName: displayName,
-            authMethod: "apikey",
+            authMethod: "admin",
             plans: [plan],
             updatedAt: Date(),
             errorMessage: nil)
     }
 
-    /// Used share of the ring from the gateway's cumulative numbers.
-    static func ringUsedPercent(balance: Double, usedTotal: Double) -> Double {
-        guard balance > 0 else { return 100 }
-        let total = usedTotal + balance
-        guard total > 0 else { return 100 }
-        return min(100, max(0, usedTotal / total * 100))
-    }
-
-    // MARK: - Endpoints
-
-    private func fetchUserSelf(baseURL: String, apiKey: String) async throws -> GrokPoolUserSelf {
-        var request = URLRequest(url: try Self.endpoint(baseURL: baseURL, path: "/api/user/self"))
-        request.httpMethod = "GET"
-        Self.apply(apiKey: apiKey, to: &request)
-        request.timeoutInterval = Self.timeoutSeconds
-
-        let response = try await transport.response(for: request)
-        if let bodyError = Self.consoleAPIError(from: response) {
-            throw bodyError
-        }
-        guard response.statusCode == 200 else {
-            // The gateway proxy rejects bad keys with a plain HTML 401 before
-            // new-api ever sees the request.
-            if response.statusCode == 401 || response.statusCode == 403 {
-                throw UsageError.grokPoolInvalidToken
-            }
-            throw UsageError.apiError(statusCode: response.statusCode, message: "GrokPool user/self")
-        }
-        return try Self.decodeUserSelf(data: response.data)
-    }
-
-    /// Pulls the current month's consumption log page by page until the relay
-    /// stops returning entries (or the page cap is hit).
-    private func fetchMonthlyLogs(baseURL: String, apiKey: String) async throws -> GrokPoolUsageStats {
-        let calendar = Calendar.current
-        let now = Date()
-        let startOfMonth = calendar.dateInterval(of: .month, for: now)?.start ?? now
-        let startTimestamp = Int(startOfMonth.timeIntervalSince1970)
-        let endTimestamp = Int(now.timeIntervalSince1970)
-
-        var allItems: [GrokPoolLogItem] = []
-        for page in 1 ... Self.maxPages {
-            let items = try await fetchLogPage(
-                baseURL: baseURL, apiKey: apiKey, page: page,
-                startTimestamp: startTimestamp, endTimestamp: endTimestamp)
-            if items.isEmpty { break }
-            allItems.append(contentsOf: items)
-        }
-        return Self.aggregate(items: allItems, now: now, calendar: calendar)
-    }
-
-    private func fetchLogPage(
-        baseURL: String, apiKey: String, page: Int,
-        startTimestamp: Int, endTimestamp: Int) async throws -> [GrokPoolLogItem]
-    {
-        let endpoint = try Self.endpoint(baseURL: baseURL, path: "/api/log/self")
+    func fetchDashboard(baseURL: String, accessToken: String) async throws -> GrokPoolDashboardDTO {
+        let endpoint = try Self.endpoint(baseURL: baseURL, path: "/api/admin/v1/dashboard")
         guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
-            throw UsageError.networkError("Invalid GrokPool log URL")
+            throw UsageError.networkError("Invalid GrokPool dashboard URL")
         }
-        // new-api accepts both `p` and `page`; send both for compatibility.
         components.queryItems = [
-            URLQueryItem(name: "p", value: String(page)),
-            URLQueryItem(name: "page", value: String(page)),
-            URLQueryItem(name: "page_size", value: String(Self.pageSize)),
-            URLQueryItem(name: "start_timestamp", value: String(startTimestamp)),
-            URLQueryItem(name: "end_timestamp", value: String(endTimestamp)),
+            URLQueryItem(name: "period", value: "24h"),
         ]
         guard let url = components.url else {
-            throw UsageError.networkError("Could not construct GrokPool log URL")
+            throw UsageError.networkError("Could not construct GrokPool dashboard URL")
         }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        Self.apply(apiKey: apiKey, to: &request)
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.timeoutInterval = Self.timeoutSeconds
 
         let response = try await transport.response(for: request)
-        if let bodyError = Self.consoleAPIError(from: response) {
-            throw bodyError
+        if let error = Self.envelopeError(from: response) {
+            throw error
         }
         guard response.statusCode == 200 else {
             if response.statusCode == 401 || response.statusCode == 403 {
                 throw UsageError.grokPoolInvalidToken
             }
-            throw UsageError.apiError(statusCode: response.statusCode, message: "GrokPool log/self")
+            throw UsageError.apiError(statusCode: response.statusCode, message: "GrokPool dashboard")
         }
-        return try Self.decodeLogPage(data: response.data)
+        return try Self.decodeDashboard(data: response.data)
     }
 
-    private static func apply(apiKey: String, to request: inout URLRequest) {
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-    }
-
-    /// new-api reports auth failures as `{"success":false,"message":...}`;
-    /// the gateway proxy reports them as HTML bodies, which are ignored here
-    /// and handled by the HTTP status check instead.
-    private static func consoleAPIError(from response: HTTPResponse) -> UsageError? {
-        guard let object = try? JSONSerialization.jsonObject(with: response.data) as? [String: Any] else {
+    /// Maps a grok2api `{"error":{code,message}}` envelope to a UsageError.
+    /// `adminUnauthorized` / `adminInvalidToken` mean the access token is
+    /// stale; everything else is a plain API error.
+    private static func envelopeError(from response: HTTPResponse) -> UsageError? {
+        guard let object = try? JSONSerialization.jsonObject(with: response.data) as? [String: Any],
+              let error = object["error"] as? [String: Any],
+              let code = error["code"] as? String
+        else {
             return nil
         }
-        if let success = object["success"] as? Bool, success == false {
-            let message = (object["message"] as? String)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let lower = message.lowercased()
-            if lower.contains("unauthorized")
-                || lower.contains("invalid access token")
-                || lower.contains("not logged in")
-                || lower.contains("access token")
-                || lower.contains("api key")
-            {
-                return .grokPoolInvalidToken
+        let message = (error["message"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let lower = code.lowercased()
+        if lower.contains("unauthorized")
+            || lower.contains("invalidtoken")
+            || lower.contains("expired")
+            || lower.contains("notfound")
+        {
+            if lower.contains("notfound") {
+                // Endpoint not found is a real API shape change, not auth.
+                return .apiError(statusCode: response.statusCode, message: message.isEmpty ? code : message)
             }
-            if !message.isEmpty {
-                return .apiError(statusCode: response.statusCode, message: message)
-            }
+            return .grokPoolInvalidToken
         }
-        return nil
+        if !message.isEmpty {
+            return .apiError(statusCode: response.statusCode, message: message)
+        }
+        return .apiError(statusCode: response.statusCode, message: code)
     }
 
     private static func endpoint(baseURL: String, path: String) throws -> URL {
@@ -333,115 +291,104 @@ final class GrokPoolProvider: UsageProvider {
 
     // MARK: - Decoding (static for tests)
 
-    static func decodeUserSelf(data: Data) throws -> GrokPoolUserSelf {
-        let decoded: GrokPoolUserSelfResponse
+    static func decodeLogin(data: Data) throws -> GrokPoolLogin {
+        let envelope: GrokPoolEnvelope<GrokPoolLoginResponse>
         do {
-            decoded = try JSONDecoder().decode(GrokPoolUserSelfResponse.self, from: data)
+            envelope = try JSONDecoder().decode(GrokPoolEnvelope<GrokPoolLoginResponse>.self, from: data)
         } catch {
             throw UsageError.parseFailed(error.localizedDescription)
         }
-        if decoded.success == false {
-            let message = decoded.message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let lower = message.lowercased()
-            if lower.contains("unauthorized")
-                || lower.contains("invalid access token")
-                || lower.contains("not logged in")
-                || lower.contains("api key")
-            {
-                throw UsageError.grokPoolInvalidToken
-            }
-            throw UsageError.apiError(statusCode: 401, message: message.isEmpty ? "GrokPool user/self" : message)
+        if let errorBody = envelope.error {
+            throw Self.error(from: errorBody)
         }
-        guard let userData = decoded.data else {
-            throw UsageError.parseFailed("Missing GrokPool user/self data")
+        guard let token = envelope.data?.accessToken, !token.isEmpty else {
+            throw UsageError.parseFailed("Missing GrokPool login access token")
         }
-        return GrokPoolUserSelf(
-            quota: userData.quota ?? 0,
-            usedQuota: userData.usedQuota ?? 0,
-            quotaPerUnit: Self.defaultQuotaPerUnit)
+        return GrokPoolLogin(
+            token: token,
+            expiresAt: parseExpiry(envelope.data?.accessTokenExpiresAt))
     }
 
-    static func decodeLogPage(data: Data) throws -> [GrokPoolLogItem] {
-        let decoded: GrokPoolLogResponse
+    static func decodeDashboard(data: Data) throws -> GrokPoolDashboardDTO {
+        let envelope: GrokPoolEnvelope<GrokPoolDashboardDTO>
         do {
-            decoded = try JSONDecoder().decode(GrokPoolLogResponse.self, from: data)
+            envelope = try JSONDecoder().decode(GrokPoolEnvelope<GrokPoolDashboardDTO>.self, from: data)
         } catch {
             throw UsageError.parseFailed(error.localizedDescription)
         }
-        if decoded.success == false {
-            let message = decoded.message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let lower = message.lowercased()
-            if lower.contains("unauthorized")
-                || lower.contains("invalid access token")
-                || lower.contains("not logged in")
-                || lower.contains("api key")
-            {
-                throw UsageError.grokPoolInvalidToken
-            }
-            throw UsageError.apiError(statusCode: 401, message: message.isEmpty ? "GrokPool log/self" : message)
+        if let errorBody = envelope.error {
+            throw Self.error(from: errorBody)
         }
-        guard let items = decoded.data?.items else {
-            throw UsageError.parseFailed("Missing GrokPool log/self data")
+        guard let dto = envelope.data else {
+            throw UsageError.parseFailed("Missing GrokPool dashboard data")
         }
-        return items
+        return dto
     }
 
-    static func aggregate(items: [GrokPoolLogItem], now: Date, calendar: Calendar) -> GrokPoolUsageStats {
-        var todayTokens = 0
-        var monthTokens = 0
-        var todayCost: Double = 0
-        var monthCost: Double = 0
-        var todayRequests = 0
-        var monthRequests = 0
-        var monthPromptTokens = 0
-        var monthCompletionTokens = 0
-        var monthCacheTokens = 0
-        var modelTokens: [String: Int] = [:]
-
-        let todayStart = calendar.startOfDay(for: now)
-        let monthStart = calendar.dateInterval(of: .month, for: now)?.start ?? now
-
-        for item in items {
-            let createdAt = Date(timeIntervalSince1970: item.createdAt ?? 0)
-            let prompt = item.promptTokens ?? 0
-            let completion = item.completionTokens ?? 0
-            let tokens = prompt + completion
-            let cost = Double(item.quota ?? 0) / Self.defaultQuotaPerUnit
-
-            if createdAt >= todayStart {
-                todayTokens += tokens
-                todayCost += cost
-                todayRequests += 1
-            }
-            if createdAt >= monthStart {
-                monthTokens += tokens
-                monthCost += cost
-                monthRequests += 1
-                monthPromptTokens += prompt
-                monthCompletionTokens += completion
-                monthCacheTokens += item.cacheTokens()
-                if let model = item.modelName {
-                    modelTokens[model, default: 0] += tokens
-                }
-            }
+    private static func error(from body: GrokPoolErrorBody) -> UsageError {
+        let code = body.code ?? ""
+        let message = (body.message ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = code.lowercased()
+        if lower.contains("unauthorized") || lower.contains("invalidtoken") || lower.contains("expired") {
+            return .grokPoolInvalidToken
         }
+        if !message.isEmpty {
+            return .apiError(statusCode: 401, message: message)
+        }
+        return .apiError(statusCode: 401, message: code.isEmpty ? "GrokPool admin API" : code)
+    }
 
-        let topModel = modelTokens.max {
-            if $0.value == $1.value { return $0.key > $1.key }
-            return $0.value < $1.value
-        }?.key
+    /// Builds the display summary from a dashboard DTO. Uses the 24-hour
+    /// window the provider always requests; token totals are the input/output/
+    /// reasoning split, and the top model is the highest-token model.
+    static func makeSummary(_ dashboard: GrokPoolDashboardDTO) -> GrokPoolSummary {
+        let usage = dashboard.usage
+        let resources = dashboard.resources
+        let requests = usage?.requests ?? 0
+        let successRate = usage?.successRate
+            ?? (requests > 0 ? Double(usage?.successfulRequests ?? 0) / Double(requests) * 100 : 0)
+        let topModel = dashboard.topModels?
+            .filter { $0.model != nil && !$0.model!.isEmpty }
+            .max { a, b in
+                let ta = a.tokens ?? 0
+                let tb = b.tokens ?? 0
+                if ta == tb { return (a.model ?? "") > (b.model ?? "") }
+                return ta < tb
+            }?.model
+        return GrokPoolSummary(
+            period: dashboard.period ?? "24h",
+            requests: requests,
+            successfulRequests: usage?.successfulRequests ?? 0,
+            failedRequests: usage?.failedRequests ?? 0,
+            successRate: successRate,
+            inputTokens: usage?.inputTokens ?? 0,
+            cachedInputTokens: usage?.cachedInputTokens ?? 0,
+            outputTokens: usage?.outputTokens ?? 0,
+            reasoningTokens: usage?.reasoningTokens ?? 0,
+            tokens: usage?.tokens ?? 0,
+            costUSD: usdTicksToValue(usage?.billedCostUsdTicks ?? 0),
+            activeAccounts: resources?.activeAccounts ?? 0,
+            totalAccounts: resources?.totalAccounts ?? 0,
+            topModel: topModel)
+    }
 
-        return GrokPoolUsageStats(
-            todayTokens: todayTokens,
-            currentMonthTokens: monthTokens,
-            todayCost: todayCost,
-            currentMonthCost: monthCost,
-            requestCount: todayRequests,
-            currentMonthRequestCount: monthRequests,
-            topModel: topModel,
-            promptTokens: monthPromptTokens,
-            completionTokens: monthCompletionTokens,
-            cacheTokens: monthCacheTokens)
+    /// 1 USD = 10^10 ticks (grok2api's `USD_TICKS`).
+    static func usdTicksToValue(_ ticks: Int64) -> Double {
+        Double(ticks) / usdTicksPerDollar
+    }
+
+    /// Parses a Go `time.Time` RFC3339 timestamp, tolerating optional
+    /// fractional seconds. Returns nil for missing or malformed values (the
+    /// caller then treats the token as expired and re-logins).
+    private static func parseExpiry(_ raw: String?) -> Date? {
+        guard let raw else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: raw) {
+            return date
+        }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: raw)
     }
 
     private static func trimmed(_ value: String) -> String? {
@@ -450,41 +397,61 @@ final class GrokPoolProvider: UsageProvider {
     }
 }
 
-// MARK: - Parsed domain values
-
-struct GrokPoolUserSelf: Sendable, Equatable {
-    /// Remaining quota in raw quota units.
-    let quota: Int
-    /// Cumulative consumed quota in raw quota units.
-    let usedQuota: Int
-    let quotaPerUnit: Double
+struct GrokPoolLogin: Sendable, Equatable {
+    let token: String
+    let expiresAt: Date?
 }
 
-struct GrokPoolUsageStats: Sendable, Equatable {
-    let todayTokens: Int
-    let currentMonthTokens: Int
-    let todayCost: Double?
-    let currentMonthCost: Double?
-    let requestCount: Int
-    let currentMonthRequestCount: Int
-    let topModel: String?
-    /// Current-month input (prompt) and output (completion) tokens.
-    let promptTokens: Int
-    let completionTokens: Int
-    /// Current-month cache-hit input tokens (from the log's `other` blob).
-    let cacheTokens: Int
+// MARK: - Token cache
+
+/// Thread-safe cache for the short-lived admin access token (15-minute TTL).
+/// `@unchecked Sendable` because the NSLock guards every access.
+private final class GrokPoolTokenCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var token: String?
+    private var expiresAt: Date?
+
+    func validToken(margin: TimeInterval) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let token, let expiresAt,
+              expiresAt > Date().addingTimeInterval(margin)
+        else {
+            return nil
+        }
+        return token
+    }
+
+    func store(token: String, expiresAt: Date?) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.token = token
+        self.expiresAt = expiresAt
+    }
+
+    func invalidate() {
+        lock.lock()
+        defer { lock.unlock() }
+        token = nil
+        expiresAt = nil
+    }
 }
 
 // MARK: - Credentials
 
-/// Reads GrokPool gateway credentials from the environment. Settings
+/// Reads GrokPool administrator credentials from the environment. Settings
 /// (Keychain) values take precedence; these are the fallback.
 enum GrokPoolCredentialResolver {
-    static let apiKeyKeys = ["GROKPOOL_API_KEY", "GROK_POOL_API_KEY", "GROKFARM_API_KEY"]
+    static let usernameKeys = ["GROKPOOL_USERNAME", "GROK_POOL_USERNAME"]
+    static let passwordKeys = ["GROKPOOL_PASSWORD", "GROK_POOL_PASSWORD"]
     static let baseURLKeys = ["GROKPOOL_BASE_URL", "GROK_POOL_BASE_URL"]
 
-    static func apiKey(environment: [String: String]) -> String? {
-        value(for: apiKeyKeys, environment: environment)
+    static func username(environment: [String: String]) -> String? {
+        value(for: usernameKeys, environment: environment)
+    }
+
+    static func password(environment: [String: String]) -> String? {
+        value(for: passwordKeys, environment: environment)
     }
 
     static func baseURL(environment: [String: String]) -> String? {

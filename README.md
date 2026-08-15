@@ -2,7 +2,7 @@
 
 [English](README.en.md) · [安全报告](SECURITY.md) · [更新日志](CHANGELOG.md)
 
-TokenBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding/Agent Plan、OpenCode Go、DeepSeek、APINebula 中转站、智谱（Z.ai）、Kimi For Coding 与 GrokPool 网关的剩余用量；不会显示 Dock 图标。
+TokenBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding/Agent Plan、OpenCode Go、DeepSeek、APINebula 中转站、智谱（Z.ai）、Kimi For Coding 与 GrokPool 网关的用量；不会显示 Dock 图标。
 
 ## 特性
 
@@ -14,12 +14,12 @@ TokenBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding
 - DeepSeek 凭据支持三种来源：设置页填写（存入 Keychain）、环境变量，以及**自动读取 Chrome 中已登录的 DeepSeek 平台会话**（无需任何 Key）。
 - APINebula（new-api 中转站）监控：余额圆环 = 累计已用 ÷ (累计已用 + 余额)，今日/每月费用、Token、请求次数，以及**缓存读/未缓存/输出**分类（来自控制台使用日志）。
 - APINebula 余额与日志是控制台接口：凭据来自浏览器登录会话（设置页显式导入并缓存到 Keychain），可选 API Key 兜底。
-- GrokPool（grok-farm 网关，new-api 兼容）监控：余额圆环 = 累计已用 ÷ (累计已用 + 余额)，今日/每月费用、Token、请求次数与缓存读/未缓存/输出分类；网关 API Key 即 new-api 控制台令牌，`Authorization: Bearer` 直接调用 `api/user/self` 与 `api/log/self`，无需浏览器会话。与 APINebula 标签页完全隔离（独立设置与状态），按 new-api 默认 500000 quota = $1 换算。
+- GrokPool（grok2api 管理员网关）监控：以管理员账号登录（`POST /api/admin/v1/auth/login`）换取短期访问令牌，读取 **24h 运营看板**（`GET /api/admin/v1/dashboard?period=24h`）：请求数/成功率、计费费用、输入/缓存/输出/推理 token、活跃账号数与常用模型。成功率圆环 = 成功请求占比；与 APINebula 标签页完全隔离（独立设置与状态）。计费按 grok2api 的 10^10 ticks = $1 换算。
 - 支持在 Ark、OpenCode Go、DeepSeek、APINebula、智谱（Z.ai）、Kimi 与 GrokPool 之间即时切换，并隔离各边的刷新状态与错误。
 - **概览**标签一览所有可见 Provider 的剩余百分比与胶囊进度条；点击某行进入对应完整卡片。可在「设置 → 通用」开关。
 - 每个 Provider 可在自己的设置页中独立**显示/隐藏**，隐藏后从切换器移除并停止后台刷新。
 - 菜单栏样式可选：进度条、进度条 + 百分比、仅百分比、仅 Logo、Logo + 百分比、Logo + 进度条；Logo 16pt、百分比使用系统字号，与 CodexBar 对齐。
-- DeepSeek 与 APINebula 可在各自设置页选择菜单栏显示「剩余百分比」还是「余额（含货币符号）」：DeepSeek 按接口返回的币种显示 `¥`（CNY）或 `$`（USD），APINebula 固定人民币 `¥`，GrokPool 固定美元 `$`，均保留两位小数；余额模式下状态栏自动加宽以容纳金额。
+- DeepSeek 与 APINebula 可在各自设置页选择菜单栏显示「剩余百分比」还是「余额（含货币符号）」：DeepSeek 按接口返回的币种显示 `¥`（CNY）或 `$`（USD），APINebula 固定人民币 `¥`，均保留两位小数；GrokPool 在「成功率百分比」与「24h 费用（`$`）」之间选择。余额/费用模式下状态栏自动加宽以容纳金额。
 - 支持跟随系统、简体中文和 English。
 - 不含遥测；OpenCode/APINebula 浏览器接入只在用户明确操作时读取认证 Cookie。会话与 API Key 写入本机 Keychain，并镜像到应用支持目录下的凭据文件缓存，常规重启不弹钥匙串。
 
@@ -74,7 +74,7 @@ lipo -archs TokenBar
 | APINebula（中转站） | 在“设置 → APINebula 中转”中显式点击“重新读取浏览器登录”（控制台会话缓存到 Keychain）；可选填 API Key | 余额/累计已用来自控制台 `api/user/self`；今日/每月费用、Token、请求次数与缓存读/未缓存/输出分类来自 `api/log/self` 使用日志（缓存 token 位于日志 `other` 字段）。余额与日志是控制台接口，API Key 仅保证 `/v1` 模型调用。 |
 | 智谱（Z.ai） | 在“设置 → 智谱 Coding Plan”中填写 API Key（存 Keychain + 文件缓存）；可选环境变量 `Z_AI_API_KEY` 兜底；API 区域可选 Global（`api.z.ai`）或 BigModel 国内站（`open.bigmodel.cn`），默认国内站 | 读取 `api/monitor/usage/quota/limit` 返回的 Coding Plan 额度窗口：5 小时 + 每周（session/weekly 环），部分套餐另有每月 MCP 时间窗口（monthly 环）。凭据优先级：设置值 > 环境变量。 |
 | Kimi For Coding | API Key 可选（在“设置 → Kimi For Coding”填写，存 Keychain + 文件缓存；环境变量 `KIMI_CODE_API_KEY` 兜底）；在“设置 → Kimi For Coding”点“重新读取浏览器登录”导入 `www.kimi.com` 会话后可额外读取共享总池 | 读取 `api.kimi.com/coding/v1/usages` 的 Code 会员配额：总配额（每周，weekly 环）+ 5 小时限流窗口（session 环）；浏览器会话另读取 `www.kimi.com` 的 `GetSubscriptionStats`，把 **Kimi Code + Kimi Work 共享总池**映射为 monthly 环。凭据优先级：设置值 > 环境变量。 |
-| GrokPool（grok-farm 网关） | 在“设置 → GrokPool 网关”填写网关 API Key（即 new-api 控制台令牌，与 `/v1` 模型调用同 key；存 Keychain + 文件缓存）；可选环境变量 `GROKPOOL_API_KEY` 兜底；Base URL 默认 `https://grok.axonlume.com` | 余额/累计已用来自 `api/user/self`，今日/每月费用、Token、请求次数与缓存读/未缓存/输出分类来自 `api/log/self` 使用日志；全部以 `Authorization: Bearer <key>` 调用（网关对所有端点校验同一 key）。按 500000 quota = $1 换算。 |
+| GrokPool（grok2api 网关） | 在“设置 → GrokPool 网关”填写**管理员账号密码**（存 Keychain + 文件缓存）；可选环境变量 `GROKPOOL_USERNAME` / `GROKPOOL_PASSWORD` 兜底；Base URL 默认 `https://grok.axonlume.com` | 以管理员身份登录（`POST /api/admin/v1/auth/login`）获取短期 Bearer 访问令牌，读取 24h 运营看板（`GET /api/admin/v1/dashboard?period=24h`）：请求数与成功率、计费费用（10^10 ticks = $1）、输入/缓存/输出/推理 token 拆分、活跃账号数与常用模型。令牌每 15 分钟自动重新获取，401 时自动重登。 |
 
 Ark CLI 的最新安装方式请以官方 [Ark CLI 文档](https://github.com/volcengine/ark-cli) 为准。
 
@@ -85,7 +85,8 @@ export VOLCENGINE_ACCESS_KEY_ID='...'
 export VOLCENGINE_SECRET_ACCESS_KEY='...'
 export Z_AI_API_KEY='...'
 export KIMI_CODE_API_KEY='...'
-export GROKPOOL_API_KEY='...'
+export GROKPOOL_USERNAME='...'
+export GROKPOOL_PASSWORD='...'
 .build/debug/TokenBar
 ```
 
@@ -100,7 +101,7 @@ export GROKPOOL_API_KEY='...'
 - APINebula 标签页使用单个余额圆环：已用比例 = 累计已用 ÷ (累计已用 + 余额)；圆环下方显示缓存读/未缓存/输出分类明细与常用模型。可在该设置页选择菜单栏展示剩余百分比还是人民币余额（`¥`）。
 - 智谱（Z.ai）标签页显示 Coding Plan 额度圆环：5 小时窗口对应 session 环、每周窗口对应 weekly 环（部分套餐另有每月 MCP 时间窗口对应 monthly 环）；圆环与图例均按**剩余**填充。
 - Kimi For Coding 标签页显示会员配额圆环：Code 总配额（每周）对应 weekly 环、5 小时限流窗口对应 session 环；导入浏览器登录后，**Kimi Code + Kimi Work 共享总池**额外对应 monthly 环。圆环与图例均按**剩余**填充。
-- GrokPool 标签页使用单个余额圆环：已用比例 = 累计已用 ÷ (累计已用 + 余额)；圆环下方显示缓存读/未缓存/输出分类明细与常用模型。可在该设置页选择菜单栏展示剩余百分比还是美元余额（`$`）。
+- GrokPool 标签页显示 24h 运营看板：主环 = 请求成功率（剩余 = 成功率，全成功即满环）；环右侧为请求数（成功/失败）、计费费用（`$`，10^10 ticks = $1）与成功率；环下方为输入/缓存/输出/推理 token 拆分、活跃账号数与常用模型。可在该设置页选择菜单栏展示成功率百分比还是 24h 费用（`$`）。
 - 刷新失败时会保留上次确认的数据，并标记为过期数据。
 - 默认仅按“设置 → 刷新 → 间隔”自动同步；可开启“点开菜单栏图标时刷新”，在每次打开角标时额外刷新。重复触发会合并为一次请求。
 - 手动“刷新”会保留面板，在原位置显示“刷新中”；成功后显示“刚刚更新 / X 分钟前更新”，失败时显示原因。
@@ -121,7 +122,7 @@ export GROKPOOL_API_KEY='...'
 - 在 DeepSeek 设置页填写的 API Key / Platform Token 只保存在本机 Keychain + 文件缓存，不会写入 UserDefaults、源码或日志。
 - 在智谱设置页填写的 API Key 同样只保存在本机 Keychain + 文件缓存，不会写入 UserDefaults、源码或日志；区域偏好仅存 UserDefaults，不含任何凭据。
 - 在 Kimi For Coding 设置页填写的 API Key 同样只保存在本机 Keychain + 文件缓存，不会写入 UserDefaults、源码或日志；浏览器导入只读取 `www.kimi.com` 的 `kimi-auth` cookie（JWT），仅用于调用控制台用量接口，同样只存 Keychain + 文件缓存。
-- 在 GrokPool 设置页填写的网关 API Key 只保存在本机 Keychain + 文件缓存，不会写入 UserDefaults、源码或日志；Base URL 仅是地址偏好，存 UserDefaults。
+- 在 GrokPool 设置页填写的管理员账号密码只保存在本机 Keychain + 文件缓存，不会写入 UserDefaults、源码或日志；Base URL 仅是地址偏好，存 UserDefaults。登录令牌只在内存缓存（15 分钟有效期），不会落盘。
 - `arkcli` 自己管理 SSO 会话；TokenBar 只运行 `arkcli usage plan --format json` 并解析输出。
 - AK/SK 与 Ark API Key 仅从启动环境读取，TokenBar 不会把它们写入磁盘。
 - 网络请求仅发送到所选数据源需要的火山方舟接口、`opencode.ai`、`platform.deepseek.com`、智谱配额接口（`open.bigmodel.cn` / `api.z.ai`）、Kimi 配额接口（`api.kimi.com`）、Kimi 控制台接口（`www.kimi.com`）或 GrokPool 网关（`grok.axonlume.com`）。

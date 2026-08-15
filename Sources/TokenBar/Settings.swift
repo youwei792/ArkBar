@@ -236,14 +236,15 @@ final class AppSettings: ObservableObject {
     }
     @Published private(set) var zaiAPIKey: String
 
-    /// GrokPool (grok-farm new-api gateway) base URL (a harmless UI
-    /// preference, so it lives in UserDefaults) and its API key (Keychain
-    /// mirror, never persisted there). Isolated from the Nebula relay's
-    /// settings.
+    /// GrokPool (grok2api admin gateway) base URL (a harmless UI preference,
+    /// so it lives in UserDefaults) plus the administrator username and
+    /// password used to obtain the dashboard access token (Keychain mirrors,
+    /// never persisted there). Isolated from the Nebula relay's settings.
     @Published var grokPoolBaseURL: String {
         didSet { UserDefaults.standard.set(grokPoolBaseURL, forKey: Keys.grokPoolBaseURL) }
     }
-    @Published private(set) var grokPoolAPIKey: String
+    @Published private(set) var grokPoolUsername: String
+    @Published private(set) var grokPoolPassword: String
 
     /// Kimi (Kimi For Coding) API key (Keychain mirror, never persisted to
     /// UserDefaults).
@@ -256,7 +257,7 @@ final class AppSettings: ObservableObject {
     var nebulaAPIKeyHasValue: Bool { !nebulaAPIKey.isEmpty }
     var zaiAPIKeyHasValue: Bool { !zaiAPIKey.isEmpty }
     var kimiAPIKeyHasValue: Bool { !kimiAPIKey.isEmpty }
-    var grokPoolAPIKeyHasValue: Bool { !grokPoolAPIKey.isEmpty }
+    var grokPoolCredentialsHaveValue: Bool { !grokPoolUsername.isEmpty && !grokPoolPassword.isEmpty }
 
     func setZaiAPIKey(_ value: String?) {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -296,15 +297,23 @@ final class AppSettings: ObservableObject {
         nebulaAPIKey = CookieKeychainStore.load(provider: "nebula-key") ?? ""
     }
 
-    func setGrokPoolAPIKey(_ value: String?) {
+    func setGrokPoolUsername(_ value: String?) {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let key = trimmed?.isEmpty == false ? trimmed : nil
-        let persisted = CookieKeychainStore.store(cookie: key, provider: "grokpool-key")
-        grokPoolAPIKey = persisted ? (key ?? "") : (CookieKeychainStore.load(provider: "grokpool-key") ?? "")
+        let username = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: username, provider: "grokpool-user")
+        grokPoolUsername = persisted ? (username ?? "") : (CookieKeychainStore.load(provider: "grokpool-user") ?? "")
+    }
+
+    func setGrokPoolPassword(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let password = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: password, provider: "grokpool-pass")
+        grokPoolPassword = persisted ? (password ?? "") : (CookieKeychainStore.load(provider: "grokpool-pass") ?? "")
     }
 
     func loadGrokPoolFromKeychain() {
-        grokPoolAPIKey = CookieKeychainStore.load(provider: "grokpool-key") ?? ""
+        grokPoolUsername = CookieKeychainStore.load(provider: "grokpool-user") ?? ""
+        grokPoolPassword = CookieKeychainStore.load(provider: "grokpool-pass") ?? ""
     }
 
     func setDeepSeekAPIKey(_ value: String?) {
@@ -413,7 +422,8 @@ final class AppSettings: ObservableObject {
         self.nebulaAPIKey = CookieKeychainStore.load(provider: "nebula-key") ?? ""
         self.grokPoolBaseURL = defaults.string(forKey: Keys.grokPoolBaseURL)
             ?? GrokPoolProvider.defaultBaseURL
-        self.grokPoolAPIKey = CookieKeychainStore.load(provider: "grokpool-key") ?? ""
+        self.grokPoolUsername = CookieKeychainStore.load(provider: "grokpool-user") ?? ""
+        self.grokPoolPassword = CookieKeychainStore.load(provider: "grokpool-pass") ?? ""
         let zaiRegionRaw = defaults.string(forKey: Keys.zaiRegion) ?? ZaiAPIRegion.bigmodelCN.rawValue
         self.zaiRegion = ZaiAPIRegion(rawValue: zaiRegionRaw) ?? .bigmodelCN
         self.zaiAPIKey = CookieKeychainStore.load(provider: "zai-token") ?? ""
