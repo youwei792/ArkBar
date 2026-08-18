@@ -1036,7 +1036,7 @@ struct ProviderVisibilityTests {
     @Test("Hidden providers drop out of the switcher list")
     func visibleTabsFilters() {
         let settings = AppSettings.shared
-        let original = (settings.showArk, settings.showOpenCode, settings.showDeepSeek, settings.showNebula, settings.showZai, settings.showKimi)
+        let original = (settings.showArk, settings.showOpenCode, settings.showDeepSeek, settings.showNebula, settings.showZai, settings.showKimi, settings.showGrokPool, settings.showLongCat)
         defer {
             settings.showArk = original.0
             settings.showOpenCode = original.1
@@ -1044,6 +1044,8 @@ struct ProviderVisibilityTests {
             settings.showNebula = original.3
             settings.showZai = original.4
             settings.showKimi = original.5
+            settings.showGrokPool = original.6
+            settings.showLongCat = original.7
         }
         settings.showArk = false
         settings.showOpenCode = true
@@ -1051,10 +1053,15 @@ struct ProviderVisibilityTests {
         settings.showNebula = false
         settings.showZai = false
         settings.showKimi = false
+        settings.showGrokPool = false
+        settings.showLongCat = false
         #expect(settings.visibleTabs == [.opencode, .deepseek])
         #expect(settings.isVisible(.ark) == false)
+        #expect(settings.isVisible(.grokPool) == false)
         settings.showOpenCode = false
         #expect(settings.visibleTabs == [.deepseek])
+        settings.showGrokPool = true
+        #expect(settings.visibleTabs == [.deepseek, .grokPool])
     }
 
     @Test("Hiding the selected tab moves the selection to the first visible tab")
@@ -1413,6 +1420,255 @@ struct NebulaConsoleAuthErrorTests {
     }
 }
 
+@Suite("GrokPoolProvider decode")
+struct GrokPoolProviderTests {
+    @Test("Parses the real login envelope: tokens nested under data.tokens")
+    func decodesLogin() throws {
+        let json = #"""
+        {"data": {
+          "admin": {"id": 1, "username": "admin"},
+          "tokens": {
+            "accessToken": "jwt-token-abc",
+            "accessTokenExpiresAt": "2026-08-15T10:00:00.000Z",
+            "refreshTokenExpiresAt": "2026-09-14T10:00:00.000Z"
+          }
+        }}
+        """#
+        let login = try GrokPoolProvider.decodeLogin(data: json.data(using: .utf8)!)
+        #expect(login.token == "jwt-token-abc")
+        #expect(login.expiresAt != nil)
+    }
+
+    @Test("Flat accessToken shape still decodes (fallback)")
+    func decodesFlatLogin() throws {
+        let json = #"""
+        {"data": {
+          "accessToken": "flat-token",
+          "accessTokenExpiresAt": "2026-08-15T10:00:00Z"
+        }}
+        """#
+        let login = try GrokPoolProvider.decodeLogin(data: json.data(using: .utf8)!)
+        #expect(login.token == "flat-token")
+    }
+
+    @Test("Login without a token throws")
+    func loginWithoutToken() {
+        let json = #"{"data": {}}"#
+        do {
+            _ = try GrokPoolProvider.decodeLogin(data: json.data(using: .utf8)!)
+            Issue.record("expected throw")
+        } catch let error as UsageError {
+            if case .parseFailed = error {
+                // ok
+            } else {
+                Issue.record("unexpected \(error)")
+            }
+        } catch {
+            Issue.record("unexpected non-UsageError \(error)")
+        }
+    }
+
+    @Test("Parses the 24h dashboard envelope (real grok2api shape)")
+    func decodesDashboard() throws {
+        let json = #"""
+        {"data": {
+          "period": "24h",
+          "range": {"start": "2026-08-14T12:00:00Z", "end": "2026-08-15T12:00:00Z"},
+          "resources": {"activeAccounts": 23, "totalAccounts": 24, "buildAccounts": 10,
+                        "webAccounts": 8, "consoleAccounts": 5, "enabledModels": 14,
+                        "totalModels": 16, "activeClientKeys": 3, "totalClientKeys": 5},
+          "usage": {"requests": 12345, "successfulRequests": 12000, "failedRequests": 345,
+                    "inputTokens": 1150000, "cachedInputTokens": 1150000,
+                    "outputTokens": 420000, "reasoningTokens": 180000,
+                    "tokens": 2900000, "billedCostUsdTicks": 152000000000,
+                    "successRate": 97.2, "averageFirstTokenMs": 850,
+                    "outputTokensPerSecond": 18.5, "firstTokenSamples": 100, "throughputSamples": 100},
+          "topModels": [{"model": "grok-4", "requests": 8000, "tokens": 2000000,
+                         "inputTokens": 800000, "cachedInputTokens": 800000,
+                         "outputTokens": 300000, "reasoningTokens": 100000,
+                         "billedCostUsdTicks": 100000000000}]
+        }}
+        """#
+        let dashboard = try GrokPoolProvider.decodeDashboard(data: json.data(using: .utf8)!)
+        #expect(dashboard.period == "24h")
+        #expect(dashboard.resources?.activeAccounts == 23)
+        #expect(dashboard.resources?.totalAccounts == 24)
+        let usage = try #require(dashboard.usage)
+        #expect(usage.requests == 12_345)
+        #expect(usage.cachedInputTokens == 1_150_000)
+        #expect(usage.billedCostUsdTicks == 152_000_000_000)
+        #expect(usage.successRate == 97.2)
+        #expect(dashboard.topModels?.first?.model == "grok-4")
+    }
+
+    @Test("USD ticks convert at 10^10 per dollar")
+    func usdTicks() {
+        // 152000000000 ticks = $15.20.
+        #expect(abs(GrokPoolProvider.usdTicksToValue(152_000_000_000) - 15.20) < 0.0001)
+        #expect(GrokPoolProvider.usdTicksToValue(0) == 0)
+        #expect(GrokPoolProvider.usdTicksPerDollar == 10_000_000_000)
+    }
+
+    @Test("makeSummary maps dashboard usage into the display summary")
+    func makeSummary() throws {
+        let dashboard = try GrokPoolProvider.decodeDashboard(data: """
+        {"data": {
+          "period": "24h",
+          "resources": {"activeAccounts": 23, "totalAccounts": 24},
+          "usage": {"requests": 12345, "successfulRequests": 12000, "failedRequests": 345,
+                    "inputTokens": 1150000, "cachedInputTokens": 1150000,
+                    "outputTokens": 420000, "reasoningTokens": 180000,
+                    "tokens": 2900000, "billedCostUsdTicks": 152000000000,
+                    "successRate": 97.2},
+          "topModels": [
+            {"model": "grok-4", "tokens": 2000000},
+            {"model": "grok-4-fast", "tokens": 900000}
+          ]
+        }}
+        """.data(using: .utf8)!)
+        let summary = GrokPoolProvider.makeSummary(dashboard)
+        #expect(summary.period == "24h")
+        #expect(summary.requests == 12_345)
+        #expect(summary.successfulRequests == 12_000)
+        #expect(summary.failedRequests == 345)
+        #expect(summary.successRate == 97.2)
+        #expect(summary.inputTokens == 1_150_000)
+        #expect(summary.cachedInputTokens == 1_150_000)
+        #expect(summary.outputTokens == 420_000)
+        #expect(summary.reasoningTokens == 180_000)
+        #expect(summary.tokens == 2_900_000)
+        #expect(abs(summary.costUSD - 15.20) < 0.0001)
+        #expect(summary.activeAccounts == 23)
+        #expect(summary.totalAccounts == 24)
+        #expect(summary.topModel == "grok-4")
+    }
+
+    @Test("Success rate falls back to successful/requests ratio")
+    func successRateFallback() throws {
+        let dashboard = try GrokPoolProvider.decodeDashboard(data: """
+        {"data": {"period": "24h", "usage": {"requests": 10, "successfulRequests": 7, "failedRequests": 3}}}
+        """.data(using: .utf8)!)
+        let summary = GrokPoolProvider.makeSummary(dashboard)
+        #expect(summary.successRate == 70)
+        // Zero requests -> 0% success (empty ring).
+        let empty = try GrokPoolProvider.decodeDashboard(data: #"{"data": {"period": "24h"}}"#.data(using: .utf8)!)
+        #expect(GrokPoolProvider.makeSummary(empty).successRate == 0)
+    }
+
+    @Test("Admin unauthorized envelope maps to invalid token")
+    func adminUnauthorized() {
+        let json = #"{"error": {"code": "adminUnauthorized", "message": "管理员登录已失效", "requestId": "xyz"}}"#
+        do {
+            _ = try GrokPoolProvider.decodeDashboard(data: json.data(using: .utf8)!)
+            Issue.record("expected throw")
+        } catch let error as UsageError {
+            if case .grokPoolInvalidToken = error {
+                // ok
+            } else {
+                Issue.record("unexpected \(error)")
+            }
+        } catch {
+            Issue.record("unexpected non-UsageError \(error)")
+        }
+    }
+
+    @Test("Base URL normalization strips /v1 and trailing slashes")
+    func normalizesBaseURL() {
+        #expect(GrokPoolProvider.normalizedBaseURL("https://grok.axonlume.com") == "https://grok.axonlume.com")
+        #expect(GrokPoolProvider.normalizedBaseURL("https://grok.axonlume.com/") == "https://grok.axonlume.com")
+        #expect(GrokPoolProvider.normalizedBaseURL("https://grok.axonlume.com/v1") == "https://grok.axonlume.com")
+        #expect(GrokPoolProvider.normalizedBaseURL("") == nil)
+    }
+
+    @Test("Reads administrator credentials from environment aliases")
+    func readsEnvironment() {
+        #expect(GrokPoolCredentialResolver.username(environment: ["GROKPOOL_USERNAME": "admin"]) == "admin")
+        #expect(GrokPoolCredentialResolver.username(environment: ["GROK_POOL_USERNAME": "admin"]) == "admin")
+        #expect(GrokPoolCredentialResolver.password(environment: ["GROKPOOL_PASSWORD": "s3cret"]) == "s3cret")
+        #expect(GrokPoolCredentialResolver.username(environment: [:]) == nil)
+        #expect(GrokPoolCredentialResolver.username(environment: ["GROKPOOL_USERNAME": "\"admin\""]) == "admin")
+        #expect(GrokPoolCredentialResolver.baseURL(environment: ["GROKPOOL_BASE_URL": "https://grok.example"]) == "https://grok.example")
+    }
+}
+
+@Suite("GrokPool card")
+@MainActor
+struct GrokPoolCardTests {
+    @Test("Renders availability ring and 24h legend rows in USD")
+    func rendersCard() throws {
+        let summary = GrokPoolSummary(
+            period: "24h",
+            requests: 12_345,
+            successfulRequests: 12_000,
+            failedRequests: 345,
+            successRate: 97.2,
+            inputTokens: 1_150_000,
+            cachedInputTokens: 1_150_000,
+            outputTokens: 420_000,
+            reasoningTokens: 180_000,
+            tokens: 2_900_000,
+            costUSD: 15.20,
+            activeAccounts: 23,
+            totalAccounts: 24,
+            topModel: "grok-4")
+        let plan = PlanSnapshot(
+            id: "grokpool",
+            product: .grokPool,
+            edition: nil,
+            tier: nil,
+            seatID: nil,
+            subscribed: true,
+            windows: [UsageWindow(label: "24h", usedPercent: 2.8, used: nil, total: nil, resetsAt: nil)],
+            expiryDate: nil,
+            errorMessage: nil,
+            deepseek: nil,
+            nebula: nil,
+            grokPool: summary)
+        #expect(plan.grokPool?.costUSD == 15.20)
+        let view = GrokPoolCardView(plan: plan, now: Date(), width: 340)
+        view.updateTrackingAreas()
+        #expect(view.subviews.allSatisfy {
+            $0.frame.minX >= 0 && $0.frame.maxX <= view.bounds.maxX
+        })
+        let labels = view.subviews.compactMap { $0 as? NSTextField }.map(\.stringValue)
+        #expect(labels.contains(L(.grokPoolRequests)))
+        #expect(labels.contains(L(.grokPoolCost)))
+        #expect(labels.contains(L(.grokPoolAccountAvailability)))
+        #expect(labels.contains("$15.20"))
+        #expect(labels.contains("95.8%"))
+
+        // Render for visual inspection on a dark material approximation.
+        let card = GrokPoolCardView(plan: plan, now: Date(), width: 340)
+        let header = HeaderCardView(
+            snapshot: ProviderSnapshot(
+                providerName: "GrokPool",
+                authMethod: "admin",
+                plans: [plan],
+                updatedAt: Date(),
+                errorMessage: nil),
+            width: 340)
+        let switcher = ProviderSwitcherView(tabs: ProviderTab.allCases, selected: .provider(.grokPool), showSummary: false, width: 340, onSelect: { _ in })
+        let totalHeight = switcher.bounds.height + header.bounds.height + card.bounds.height
+        let dashboard = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: totalHeight))
+        dashboard.wantsLayer = true
+        dashboard.layer?.backgroundColor = NSColor(calibratedWhite: 0.30, alpha: 1).cgColor
+        card.frame.origin = .zero
+        header.frame.origin = NSPoint(x: 0, y: card.bounds.height)
+        switcher.frame.origin = NSPoint(x: 0, y: card.bounds.height + header.bounds.height)
+        dashboard.addSubview(card)
+        dashboard.addSubview(header)
+        dashboard.addSubview(switcher)
+        dashboard.layoutSubtreeIfNeeded()
+
+        let dashboardRep = try #require(dashboard.bitmapImageRepForCachingDisplay(in: dashboard.bounds))
+        dashboard.cacheDisplay(in: dashboard.bounds, to: dashboardRep)
+        let dashboardPNG = try #require(
+            dashboardRep.representation(using: .png, properties: [:]))
+        try dashboardPNG.write(to: URL(fileURLWithPath: "/tmp/tokenbar_grokpool_dashboard.png"))
+        #expect(FileManager.default.fileExists(atPath: "/tmp/tokenbar_grokpool_dashboard.png"))
+    }
+}
+
 @Suite("ZaiProvider decode")
 struct ZaiProviderTests {
     @Test("CREDIT_LIMIT windows (real BigModel payload) parse as token-like")
@@ -1748,6 +2004,132 @@ struct KimiBrowserSessionTokenTests {
         }
     }
 }
+
+@Suite("LongCat browser session")
+struct LongCatBrowserSessionTests {
+    @Test("Keeps identity cookies and drops only tracking cookies")
+    func filtersCookieHeader() {
+        let header = LongCatBrowserSession.requestCookieHeader(
+            from: "theme=dark; session=abc123; analytics=drop; passport_token_key=tok-xyz; utm_source=spam")
+        #expect(header?.contains("session=abc123") == true)
+        #expect(header?.contains("passport_token_key=tok-xyz") == true)
+        #expect(header?.contains("theme=dark") == true)
+        #expect(header?.contains("analytics=drop") == true)
+        #expect(header?.contains("utm_source=spam") != true)
+    }
+
+    @Test("Keeps all cookies when none are tracking cookies")
+    func fallsBackToAllCookies() {
+        let header = LongCatBrowserSession.requestCookieHeader(
+            from: "foo=bar; baz=qux")
+        #expect(header?.contains("foo=bar") == true)
+        #expect(header?.contains("baz=qux") == true)
+    }
+
+    @Test("Rejects empty cookie strings")
+    func rejectsEmptyCookie() {
+        #expect(LongCatBrowserSession.requestCookieHeader(from: "") == nil)
+        #expect(LongCatBrowserSession.requestCookieHeader(from: "theme=dark") != nil)
+    }
+
+    @Test("Drops only utm_ prefixed tracking cookies")
+    func dropsUtmTracking() {
+        let header = LongCatBrowserSession.requestCookieHeader(
+            from: "utm_source=spam; utm_medium=cpc; _lxsdk_cuid=user123; passport_token_key=tok")
+        #expect(header?.contains("utm_source=spam") != true)
+        #expect(header?.contains("utm_medium=cpc") != true)
+        #expect(header?.contains("_lxsdk_cuid=user123") == true)
+        #expect(header?.contains("passport_token_key=tok") == true)
+    }
+}
+
+@Suite("LongCat provider decode")
+struct LongCatProviderDecodeTests {
+    /// Real token-pack summary shape captured from the pay metering service.
+    private static let summaryJSON = #"""
+    {
+      "code": 0,
+      "msg": "success",
+      "data": {
+        "currentLot": {
+          "lotId": 247603,
+          "grantCategory": "GIFT",
+          "source": "FREE_PACK",
+          "remainingToken": 7300910,
+          "consumedToken": 2699090,
+          "frozenToken": 0,
+          "totalToken": 10000000,
+          "consumedRatio": 0.269909,
+          "effectiveTime": "2026-07-26 17:22:11",
+          "expireTime": "2026-08-25 17:22:11"
+        }
+      }
+    }
+    """#
+
+    @Test("Parses the pay-metering token pack summary")
+    func parsesTokenPackSummary() throws {
+        let data = Self.summaryJSON.data(using: .utf8)!
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let unwrapped = try LongCatEnvelope.unwrap(object)
+        let summary = try #require(unwrapped as? [String: Any])
+        let lot = try #require(LongCatJSON.object(summary["currentLot"]))
+
+        #expect(LongCatJSON.double(lot["totalToken"]) == 10_000_000)
+        #expect(LongCatJSON.double(lot["consumedToken"]) == 2_699_090)
+        #expect(LongCatJSON.double(lot["remainingToken"]) == 7_300_910)
+
+        let parsed = LongCatProvider.makeSummary(account: "又得取名字了", usage: lot, fuel: nil)
+        #expect(parsed.totalToken == 10_000_000)
+        #expect(parsed.usedToken == 2_699_090)
+        #expect(parsed.availableToken == 7_300_910)
+        // 2699090 / 10000000 = 27.0% used, 73.0% remaining.
+        #expect(abs(parsed.usedPercent - 26.9909) < 0.01)
+        #expect(abs(parsed.remainingPercent - 73.0091) < 0.01)
+        #expect(parsed.accountName == "又得取名字了")
+        #expect(parsed.nearestFuelExpiry != nil)
+    }
+
+    @Test("Zero total token pack is treated as invalid session")
+    func zeroTotalIsInvalid() {
+        let data = """
+        {"code":0,"data":{"currentLot":{"totalToken":0,"consumedToken":0,"remainingToken":0}}}
+        """.data(using: .utf8)!
+        let object = try! JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let unwrapped = try! LongCatEnvelope.unwrap(object)
+        let summary = unwrapped as! [String: Any]
+        let lot = LongCatJSON.object(summary["currentLot"])!
+        #expect(LongCatJSON.double(lot["totalToken"]) == 0)
+        // makeSummary with a zero pack yields a zero summary (no crash).
+        let parsed = LongCatProvider.makeSummary(account: nil, usage: lot, fuel: nil)
+        #expect(parsed.totalToken == 0)
+        #expect(parsed.usedPercent == 0)
+    }
+
+    @Test("Legacy fuel-pack fields still parse")
+    func parsesFuelFields() {
+        let usage: [String: Any] = [
+            "totalToken": 10_000_000,
+            "usedToken": 2_000_000,
+            "availableToken": 8_000_000,
+        ]
+        let fuel: [String: Any] = [
+            "totalQuota": 5_000_000,
+            "list": [
+                ["availableToken": 3_000_000, "expireTime": "2026-09-01 00:00:00"],
+                ["availableToken": 2_000_000, "expireTime": "2026-10-01 00:00:00"],
+            ],
+        ]
+        let parsed = LongCatProvider.makeSummary(account: nil, usage: usage, fuel: fuel)
+        #expect(parsed.totalToken == 10_000_000)
+        #expect(parsed.usedToken == 2_000_000)
+        #expect(parsed.availableToken == 8_000_000)
+        #expect(parsed.fuelPackTotal == 5_000_000)
+        #expect(parsed.fuelPackRemaining == 5_000_000)
+        #expect(parsed.nearestFuelExpiry != nil)
+    }
+}
+
 
 // MARK: - Test helpers
 

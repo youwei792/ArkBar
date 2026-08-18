@@ -20,7 +20,7 @@ struct UsageWindow: Sendable, Equatable {
     /// Canonical sort rank so session < 5h < weekly < monthly regardless of locale.
     var sortRank: Int {
         switch self.label.lowercased() {
-        case "session", "5h", "5-hour", "five_hour", "balance": 0
+        case "session", "5h", "5-hour", "five_hour", "balance", "24h": 0
         case "weekly", "week": 1
         case "monthly", "month": 2
         default: 3
@@ -82,6 +82,71 @@ struct NebulaSummary: Sendable, Equatable {
     let usageAvailable: Bool
 }
 
+/// GrokPool (grok2api admin gateway) 24-hour operational summary. Unlike the
+/// balance-based relays there is no money balance: the ring reflects the
+/// active-account availability rate and the status item can show the billed cost.
+struct GrokPoolSummary: Sendable, Equatable {
+    /// Dashboard period, always "24h" for now.
+    let period: String
+    let requests: Int
+    let successfulRequests: Int
+    let failedRequests: Int
+    /// Request success rate as a 0–100 percentage (kept for the DTO, not shown
+    /// in the UI — the ring displays `availabilityRate` instead).
+    let successRate: Double
+    let inputTokens: Int
+    let cachedInputTokens: Int
+    let outputTokens: Int
+    let reasoningTokens: Int
+    /// Total tokens (input + cached input + output + reasoning).
+    let tokens: Int
+    /// Billed cost in USD over the window.
+    let costUSD: Double
+    let activeAccounts: Int
+    let totalAccounts: Int
+    let topModel: String?
+
+    /// Active-account availability as a 0–100 percentage. This is what the
+    /// GrokPool ring and status item show (there is no money balance).
+    var availabilityRate: Double {
+        guard totalAccounts > 0 else { return 0 }
+        return min(100, max(0, Double(activeAccounts) / Double(totalAccounts) * 100))
+    }
+}
+
+/// LongCat (longcat.chat) token-resource-package quota. Unlike the balance-based
+/// relays there is no money balance: the ring reflects the remaining-token
+/// percentage of the quota (总额度). Fuel packs (加油包) are tracked separately
+/// and expire independently.
+struct LongCatSummary: Sendable, Equatable {
+    /// Total token quota in the resource package.
+    let totalToken: Double
+    /// Consumed tokens.
+    let usedToken: Double
+    /// Remaining tokens (may be inferred from total - used if omitted).
+    let availableToken: Double
+    /// Combined fuel-pack quota, if any.
+    let fuelPackTotal: Double?
+    /// Remaining fuel-pack tokens.
+    let fuelPackRemaining: Double?
+    /// Nearest fuel-pack expiry date.
+    let nearestFuelExpiry: Date?
+    /// Account display name, if resolved.
+    let accountName: String?
+
+    /// Token consumption as a 0–100 percentage.
+    var usedPercent: Double {
+        guard totalToken > 0 else { return 0 }
+        return min(100, max(0, usedToken / totalToken * 100))
+    }
+
+    /// Remaining quota as a 0–100 percentage — what the ring shows.
+    var remainingPercent: Double {
+        guard totalToken > 0 else { return 0 }
+        return min(100, max(0, availableToken / totalToken * 100))
+    }
+}
+
 /// One subscribed product (e.g. personal Coding Plan, team Agent Plan).
 struct PlanSnapshot: Sendable, Equatable, Identifiable {
     enum Product: String, Sendable, Equatable {
@@ -92,6 +157,8 @@ struct PlanSnapshot: Sendable, Equatable, Identifiable {
         case openCodeGo = "opencode-go"
         case deepseek = "deepseek"
         case nebula = "nebula"
+        case grokPool = "grok-pool"
+        case longcat = "longcat"
 
         var displayName: String {
             L10n.shared.productName(self)
@@ -101,7 +168,7 @@ struct PlanSnapshot: Sendable, Equatable, Identifiable {
         var isTeam: Bool {
             switch self {
             case .codingPlanTeam, .agentPlanTeam: true
-            case .codingPlan, .agentPlan, .openCodeGo, .deepseek, .nebula: false
+            case .codingPlan, .agentPlan, .openCodeGo, .deepseek, .nebula, .grokPool, .longcat: false
             }
         }
     }
@@ -121,6 +188,12 @@ struct PlanSnapshot: Sendable, Equatable, Identifiable {
     var deepseek: DeepSeekSummary? = nil
     /// Nebula (new-api relay) balance/usage breakdown (nil for other providers).
     var nebula: NebulaSummary? = nil
+    /// GrokPool (grok2api admin gateway) operational summary (nil for other
+    /// providers). Fully isolated from the Nebula tab's data.
+    var grokPool: GrokPoolSummary? = nil
+    /// LongCat (longcat.chat) token-resource-package quota (nil for other
+    /// providers). The ring shows the remaining-token percentage.
+    var longcat: LongCatSummary? = nil
 
     /// The tightest window (highest used percent) — what the bar icon reflects.
     var tightestWindow: UsageWindow? {
@@ -204,6 +277,10 @@ enum UsageError: LocalizedError, Sendable {
     case zaiInvalidToken
     case kimiMissingCredentials
     case kimiInvalidToken
+    case grokPoolMissingCredentials
+    case grokPoolInvalidToken
+    case longcatMissingCredentials
+    case longcatInvalidSession
 
     var errorDescription: String? {
         switch self {
@@ -253,6 +330,14 @@ enum UsageError: LocalizedError, Sendable {
             L(.errorKimiMissingCredentials)
         case .kimiInvalidToken:
             L(.errorKimiInvalidToken)
+        case .grokPoolMissingCredentials:
+            L(.errorGrokPoolMissingCredentials)
+        case .grokPoolInvalidToken:
+            L(.errorGrokPoolInvalidToken)
+        case .longcatMissingCredentials:
+            L(.errorLongcatMissingCredentials)
+        case .longcatInvalidSession:
+            L(.errorLongcatInvalidSession)
         }
     }
 }

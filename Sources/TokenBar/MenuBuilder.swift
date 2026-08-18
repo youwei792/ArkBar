@@ -94,6 +94,14 @@ enum MenuBuilder {
                 menu.addItem(actionItem(L(.openKimiConsole), action: {
                     NSWorkspace.shared.open(URL(string: "https://www.kimi.com/code/console")!)
                 }))
+            case .grokPool:
+                menu.addItem(actionItem(L(.openGrokPoolConsole), action: {
+                    NSWorkspace.shared.open(URL(string: "https://grok.axonlume.com/console")!)
+                }))
+            case .longcat:
+                menu.addItem(actionItem(L(.openLongCatConsole), action: {
+                    NSWorkspace.shared.open(URL(string: "https://longcat.chat/platform/usage")!)
+                }))
             }
         }
         menu.addItem(actionItem(L(.settings), action: state.onSettings))
@@ -195,6 +203,10 @@ enum MenuBuilder {
             item.view = DeepSeekCardView(plan: plan, now: now, width: cardWidth)
         } else if plan.nebula != nil {
             item.view = NebulaCardView(plan: plan, now: now, width: cardWidth)
+        } else if plan.grokPool != nil {
+            item.view = GrokPoolCardView(plan: plan, now: now, width: cardWidth)
+        } else if plan.longcat != nil {
+            item.view = LongCatCardView(plan: plan, now: now, width: cardWidth)
         } else {
             item.view = PlanCardView(plan: plan, now: now, width: cardWidth)
         }
@@ -418,8 +430,10 @@ final class SummaryRowView: NSView {
         }
     }
 
-    /// Formats the remaining balance for DeepSeek/Nebula summary rows. Returns
-    /// nil for providers that have no money balance or a missing summary.
+    /// Formats the remaining balance for DeepSeek/Nebula/GrokPool summary
+    /// rows. Returns nil for providers that have no money balance or a
+    /// missing summary. GrokPool has no balance; the status item shows the
+    /// 24-hour billed cost instead.
     private static func balanceText(for tab: ProviderTab, snapshot: ProviderSnapshot) -> String? {
         switch tab {
         case .deepseek:
@@ -429,7 +443,10 @@ final class SummaryRowView: NSView {
         case .nebula:
             guard let summary = snapshot.plans.first?.nebula else { return nil }
             return NebulaCardView.money(summary.balance, symbol: "¥")
-        case .ark, .opencode, .zai, .kimi:
+        case .grokPool:
+            guard let summary = snapshot.plans.first?.grokPool else { return nil }
+            return GrokPoolCardView.money(summary.costUSD, symbol: "$")
+        case .ark, .opencode, .zai, .kimi, .longcat:
             return nil
         }
     }
