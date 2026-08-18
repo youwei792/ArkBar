@@ -38,6 +38,13 @@ final class AppSettings: ObservableObject {
         case manual
     }
 
+    /// LongCat can reuse a signed-in browser session or a manually pasted
+    /// Cookie header. Automatic is the default.
+    enum LongCatCookieSource: String, CaseIterable {
+        case automatic
+        case manual
+    }
+
     /// What numeric value the menu bar shows for balance-based providers
     /// (DeepSeek, Nebula). Plan-based providers always show a percentage;
     /// this only affects providers whose "remaining" is a money balance.
@@ -144,6 +151,9 @@ final class AppSettings: ObservableObject {
     @Published var showGrokPool: Bool {
         didSet { UserDefaults.standard.set(showGrokPool, forKey: Keys.showGrokPool) }
     }
+    @Published var showLongCat: Bool {
+        didSet { UserDefaults.standard.set(showLongCat, forKey: Keys.showLongCat) }
+    }
     /// Whether the menu bar shows the remaining percent or the money balance
     /// for balance-based providers (DeepSeek, Nebula).
     @Published var deepseekValueDisplay: BalanceDisplay {
@@ -170,6 +180,7 @@ final class AppSettings: ObservableObject {
         case .zai: showZai
         case .kimi: showKimi
         case .grokPool: showGrokPool
+        case .longcat: showLongCat
         }
     }
 
@@ -181,7 +192,7 @@ final class AppSettings: ObservableObject {
         case .deepseek: deepseekValueDisplay == .balance
         case .nebula: nebulaValueDisplay == .balance
         case .grokPool: grokPoolValueDisplay == .balance
-        case .ark, .opencode, .zai, .kimi: false
+        case .ark, .opencode, .zai, .kimi, .longcat: false
         }
     }
 
@@ -196,6 +207,7 @@ final class AppSettings: ObservableObject {
         case .zai: showZai = visible
         case .kimi: showKimi = visible
         case .grokPool: showGrokPool = visible
+        case .longcat: showLongCat = visible
         }
         if !visible, case .provider(tab) = selectedMenu {
             if showSummary {
@@ -252,12 +264,22 @@ final class AppSettings: ObservableObject {
     /// Kimi web `kimi-auth` JWT (imported from the browser; Keychain mirror).
     @Published private(set) var kimiAuthToken: String
 
+    /// LongCat (longcat.chat) cookie source: automatic (browser import) or
+    /// manual (pasted Cookie header).
+    @Published var longcatCookieSource: LongCatCookieSource {
+        didSet { UserDefaults.standard.set(longcatCookieSource.rawValue, forKey: Keys.longcatCookieSource) }
+    }
+    /// In-memory mirror of the LongCat manual Cookie header (Keychain mirror,
+    /// never persisted to UserDefaults).
+    @Published private(set) var longcatCookie: String
+
     var deepseekApiKeyHasValue: Bool { !deepseekApiKey.isEmpty }
     var deepseekPlatformTokenHasValue: Bool { !deepseekPlatformToken.isEmpty }
     var nebulaAPIKeyHasValue: Bool { !nebulaAPIKey.isEmpty }
     var zaiAPIKeyHasValue: Bool { !zaiAPIKey.isEmpty }
     var kimiAPIKeyHasValue: Bool { !kimiAPIKey.isEmpty }
     var grokPoolCredentialsHaveValue: Bool { !grokPoolUsername.isEmpty && !grokPoolPassword.isEmpty }
+    var longcatCookieHasValue: Bool { !longcatCookie.isEmpty }
 
     func setZaiAPIKey(_ value: String?) {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -345,6 +367,17 @@ final class AppSettings: ObservableObject {
         opencodeCookie = persisted ? (cookie ?? "") : (CookieKeychainStore.load(provider: "opencode") ?? "")
     }
 
+    func setLongCatCookie(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cookie = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: cookie, provider: "longcat-cookie")
+        longcatCookie = persisted ? (cookie ?? "") : (CookieKeychainStore.load(provider: "longcat-cookie") ?? "")
+    }
+
+    func loadLongCatCookieFromKeychain() {
+        longcatCookie = CookieKeychainStore.load(provider: "longcat-cookie") ?? ""
+    }
+
     func loadOpenCodeCookieFromKeychain() {
         opencodeCookie = CookieKeychainStore.load(provider: "opencode") ?? ""
     }
@@ -366,6 +399,8 @@ final class AppSettings: ObservableObject {
         static let showZai = "tokenbar.showZai"
         static let showKimi = "tokenbar.showKimi"
         static let showGrokPool = "tokenbar.showGrokPool"
+        static let showLongCat = "tokenbar.showLongCat"
+        static let longcatCookieSource = "tokenbar.longcatCookieSource"
         static let deepseekValueDisplay = "tokenbar.deepseekValueDisplay"
         static let nebulaValueDisplay = "tokenbar.nebulaValueDisplay"
         static let grokPoolValueDisplay = "tokenbar.grokPoolValueDisplay"
@@ -401,6 +436,11 @@ final class AppSettings: ObservableObject {
         self.showZai = defaults.object(forKey: Keys.showZai) as? Bool ?? true
         self.showKimi = defaults.object(forKey: Keys.showKimi) as? Bool ?? true
         self.showGrokPool = defaults.object(forKey: Keys.showGrokPool) as? Bool ?? true
+        self.showLongCat = defaults.object(forKey: Keys.showLongCat) as? Bool ?? true
+        let longcatCookieSourceRaw = defaults.string(forKey: Keys.longcatCookieSource)
+            ?? LongCatCookieSource.automatic.rawValue
+        self.longcatCookieSource = LongCatCookieSource(rawValue: longcatCookieSourceRaw) ?? .automatic
+        self.longcatCookie = CookieKeychainStore.load(provider: "longcat-cookie") ?? ""
         let deepseekValueRaw = defaults.string(forKey: Keys.deepseekValueDisplay)
             ?? BalanceDisplay.percent.rawValue
         self.deepseekValueDisplay = BalanceDisplay(rawValue: deepseekValueRaw) ?? .percent

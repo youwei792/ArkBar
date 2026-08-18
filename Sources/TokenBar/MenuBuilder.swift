@@ -98,6 +98,10 @@ enum MenuBuilder {
                 menu.addItem(actionItem(L(.openGrokPoolConsole), action: {
                     NSWorkspace.shared.open(URL(string: "https://grok.axonlume.com/console")!)
                 }))
+            case .longcat:
+                menu.addItem(actionItem(L(.openLongCatConsole), action: {
+                    NSWorkspace.shared.open(URL(string: "https://longcat.chat/platform/usage")!)
+                }))
             }
         }
         menu.addItem(actionItem(L(.settings), action: state.onSettings))
@@ -201,6 +205,8 @@ enum MenuBuilder {
             item.view = NebulaCardView(plan: plan, now: now, width: cardWidth)
         } else if plan.grokPool != nil {
             item.view = GrokPoolCardView(plan: plan, now: now, width: cardWidth)
+        } else if plan.longcat != nil {
+            item.view = LongCatCardView(plan: plan, now: now, width: cardWidth)
         } else {
             item.view = PlanCardView(plan: plan, now: now, width: cardWidth)
         }
@@ -440,7 +446,7 @@ final class SummaryRowView: NSView {
         case .grokPool:
             guard let summary = snapshot.plans.first?.grokPool else { return nil }
             return GrokPoolCardView.money(summary.costUSD, symbol: "$")
-        case .ark, .opencode, .zai, .kimi:
+        case .ark, .opencode, .zai, .kimi, .longcat:
             return nil
         }
     }

@@ -1,8 +1,8 @@
 import AppKit
 
-/// GrokPool (grok2api admin gateway) card: a 24-hour request-success ring with
-/// three legend rows (Requests / Billed cost / Success rate), plus the token
-/// split, account health, and top model below the ring.
+/// GrokPool (grok2api admin gateway) card: a 24-hour account-availability ring
+/// with three legend rows (Requests / Billed cost / Account availability), plus
+/// the token split, account health, and top model below the ring.
 final class GrokPoolCardView: NSView {
     private let plan: PlanSnapshot
     private let summary: GrokPoolSummary
@@ -67,15 +67,15 @@ final class GrokPoolCardView: NSView {
     // MARK: - Ring + legend
 
     private func buildRingAndLegend(atY y: inout CGFloat) {
-        let successRate = min(100, max(0, summary.successRate))
+        let availability = min(100, max(0, summary.availabilityRate))
         let ringImage = RingRenderer.makeImage(
             rings: [RingRenderer.Ring(
-                id: "success",
-                label: L(.grokPoolSuccessRate),
-                remainingPercent: successRate,
+                id: "availability",
+                label: L(.grokPoolAccountAvailability),
+                remainingPercent: availability,
                 tone: .balance)],
-            primaryRemaining: successRate,
-            primaryLabel: L(.grokPoolSuccessRate),
+            primaryRemaining: availability,
+            primaryLabel: L(.grokPoolAccountAvailability),
             size: ringSize)
         let imageView = NSImageView(frame: NSRect(x: horizontalPadding, y: y - ringSize,
                                                   width: ringSize, height: ringSize))
@@ -98,8 +98,8 @@ final class GrokPoolCardView: NSView {
             value: Self.money(summary.costUSD, symbol: symbol),
             detail: String(format: L(.grokPoolTokenTotal), DeepSeekCardView.compactTokens(summary.tokens))))
         rows.append((
-            label: L(.grokPoolSuccessRate),
-            value: String(format: "%.1f%%", successRate),
+            label: L(.grokPoolAccountAvailability),
+            value: String(format: "%.1f%%", availability),
             detail: ""))
 
         let legendX = horizontalPadding + ringSize + 14
@@ -109,7 +109,11 @@ final class GrokPoolCardView: NSView {
             let legendY = y - 8 - CGFloat(index) * 42
             let dot = NSView(frame: NSRect(x: legendX, y: legendY - 12, width: 8, height: 8))
             dot.wantsLayer = true
-            dot.layer?.backgroundColor = NSColor.systemGreen.withAlphaComponent(0.85).cgColor
+            // Availability rows turn red when the pool is mostly down.
+            let dotColor = index == 2
+                ? (availability >= 50 ? NSColor.systemGreen : NSColor.systemRed)
+                : NSColor.systemGreen
+            dot.layer?.backgroundColor = dotColor.withAlphaComponent(0.85).cgColor
             dot.layer?.cornerRadius = 4
             addSubview(dot)
 

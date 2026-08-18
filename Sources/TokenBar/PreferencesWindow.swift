@@ -50,6 +50,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
     case zai
     case kimi
     case grokPool
+    case longcat
     case diagnostics
 
     var id: Self { self }
@@ -64,6 +65,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .zai: L(.settingsZai)
         case .kimi: L(.settingsKimi)
         case .grokPool: L(.settingsGrokPool)
+        case .longcat: L(.settingsLongCat)
         case .diagnostics: L(.settingsDiagnostics)
         }
     }
@@ -78,6 +80,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .zai: "sparkles"
         case .kimi: "sparkles"
         case .grokPool: "bolt"
+        case .longcat: "cat"
         case .diagnostics: "stethoscope"
         }
     }
@@ -93,6 +96,7 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .zai: .zai
         case .kimi: .kimi
         case .grokPool: .grokPool
+        case .longcat: .longcat
         case .general, .diagnostics: nil
         }
     }
@@ -181,6 +185,8 @@ private struct PreferencesRootView: View {
             KimiPreferencesPane(settings: settings, store: store)
         case .grokPool:
             GrokPoolPreferencesPane(settings: settings, store: store)
+        case .longcat:
+            LongCatPreferencesPane(settings: settings, store: store)
         case .diagnostics:
             DiagnosticsPreferencesPane()
         }
@@ -781,6 +787,103 @@ private struct GrokPoolPreferencesPane: View {
 
     private func savePassword() {
         settings.setGrokPoolPassword(passwordField)
+    }
+}
+
+private struct LongCatPreferencesPane: View {
+    @ObservedObject var settings: AppSettings
+    @ObservedObject var store: UsageStore
+    @State private var manualCookie: String
+
+    init(settings: AppSettings, store: UsageStore) {
+        self.settings = settings
+        self.store = store
+        _manualCookie = State(initialValue: settings.longcatCookie)
+    }
+
+    var body: some View {
+        PreferencesPaneContainer(title: L(.settingsLongCat)) {
+            Form {
+                Section(L(.sectionDisplay)) {
+                    Toggle(L(.showProvider), isOn: Binding(
+                        get: { settings.showLongCat },
+                        set: { settings.setVisible(.longcat, $0) }))
+                        .toggleStyle(.switch)
+                }
+
+                Section(L(.sectionConnection)) {
+                    Picker(L(.longCatCookieSource), selection: $settings.longcatCookieSource) {
+                        Text(L(.longCatCookieAutomatic))
+                            .tag(AppSettings.LongCatCookieSource.automatic)
+                        Text(L(.longCatCookieManual))
+                            .tag(AppSettings.LongCatCookieSource.manual)
+                    }
+
+                    Text(settings.longcatCookieSource == .automatic
+                         ? L(.longCatAutomaticHint)
+                         : L(.longCatManualHint))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if settings.longcatCookieSource == .manual {
+                        SecureField(L(.longCatCookiePlaceholder), text: $manualCookie)
+                            .onSubmit(saveManualCookie)
+                        Button(L(.saveCookie), action: saveManualCookie)
+                    } else {
+                        Button {
+                            store.reimportLongCatBrowserSession()
+                        } label: {
+                            Label(
+                                store.longcatIsRefreshing
+                                    ? L(.refreshingStatus)
+                                    : L(.reimportLongCatBrowserSession),
+                                systemImage: "person.crop.circle.badge.arrow.trianglehead.counterclockwise")
+                        }
+                        .disabled(store.longcatIsRefreshing)
+                    }
+
+                    if let source = LongCatBrowserSession.cachedSourceLabel() {
+                        Label(String(format: L(.longCatBrowserSession), source), systemImage: "globe")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+
+                    ProviderStatusRows(
+                        status: store.longcatStatus,
+                        isRefreshing: store.longcatIsRefreshing,
+                        lastUpdatedAt: store.longcatLastUpdatedAt)
+
+                    Label(L(.longCatCredentialsHint), systemImage: "key")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+
+                Section(L(.sectionActions)) {
+                    Button {
+                        store.refresh(tab: .longcat)
+                    } label: {
+                        Label(
+                            store.longcatIsRefreshing ? L(.refreshing) : L(.refreshLongCat),
+                            systemImage: "arrow.clockwise")
+                    }
+                    Button {
+                        NSWorkspace.shared.open(URL(string: "https://longcat.chat/platform/usage")!)
+                    } label: {
+                        Label(L(.openLongCatConsole), systemImage: "safari")
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        }
+    }
+
+    private func saveManualCookie() {
+        settings.setLongCatCookie(manualCookie)
     }
 }
 

@@ -29,6 +29,7 @@ final class UsageStore: ObservableObject {
     @Published private(set) var zaiStatus: LoadStatus = .never
     @Published private(set) var kimiStatus: LoadStatus = .never
     @Published private(set) var grokPoolStatus: LoadStatus = .never
+    @Published private(set) var longcatStatus: LoadStatus = .never
     @Published private(set) var arkLastUpdatedAt: Date?
     @Published private(set) var opencodeLastUpdatedAt: Date?
     @Published private(set) var deepseekLastUpdatedAt: Date?
@@ -36,6 +37,7 @@ final class UsageStore: ObservableObject {
     @Published private(set) var zaiLastUpdatedAt: Date?
     @Published private(set) var kimiLastUpdatedAt: Date?
     @Published private(set) var grokPoolLastUpdatedAt: Date?
+    @Published private(set) var longcatLastUpdatedAt: Date?
     @Published private(set) var arkIsRefreshing = false
     @Published private(set) var opencodeIsRefreshing = false
     @Published private(set) var deepseekIsRefreshing = false
@@ -43,6 +45,7 @@ final class UsageStore: ObservableObject {
     @Published private(set) var zaiIsRefreshing = false
     @Published private(set) var kimiIsRefreshing = false
     @Published private(set) var grokPoolIsRefreshing = false
+    @Published private(set) var longcatIsRefreshing = false
 
     /// Convenience for the status item: in summary mode, pick the tightest
     /// (lowest remaining percent) provider.
@@ -72,7 +75,7 @@ final class UsageStore: ObservableObject {
     var allStatuses: [ProviderTab: LoadStatus] {
         [.ark: arkStatus, .opencode: opencodeStatus,
          .deepseek: deepseekStatus, .nebula: nebulaStatus, .zai: zaiStatus,
-         .kimi: kimiStatus, .grokPool: grokPoolStatus]
+         .kimi: kimiStatus, .grokPool: grokPoolStatus, .longcat: longcatStatus]
     }
 
     /// The "tightest" (lowest remaining percent, most urgent) provider.
@@ -110,6 +113,7 @@ final class UsageStore: ObservableObject {
     private var zaiProvider: ZaiProvider?
     private var kimiProvider: KimiProvider?
     private var grokPoolProvider: GrokPoolProvider?
+    private var longcatProvider: LongCatProvider?
     private var timer: Timer?
     private var lastSuccessfulArkSnapshot: ProviderSnapshot?
     private var lastSuccessfulOpenCodeSnapshot: ProviderSnapshot?
@@ -118,6 +122,7 @@ final class UsageStore: ObservableObject {
     private var lastSuccessfulZaiSnapshot: ProviderSnapshot?
     private var lastSuccessfulKimiSnapshot: ProviderSnapshot?
     private var lastSuccessfulGrokPoolSnapshot: ProviderSnapshot?
+    private var lastSuccessfulLongCatSnapshot: ProviderSnapshot?
     private var cancellables = Set<AnyCancellable>()
 
     init(settings: AppSettings = .shared) {
@@ -179,6 +184,14 @@ final class UsageStore: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in self?.refresh(tab: .grokPool) }
             .store(in: &cancellables)
+        settings.$longcatCookie
+            .dropFirst()
+            .sink { [weak self] _ in self?.refresh(tab: .longcat) }
+            .store(in: &cancellables)
+        settings.$longcatCookieSource
+            .dropFirst()
+            .sink { [weak self] _ in self?.refresh(tab: .longcat) }
+            .store(in: &cancellables)
         // When the selection switches to a provider with no data, refresh it.
         settings.$selectedMenu
             .dropFirst()
@@ -200,6 +213,7 @@ final class UsageStore: ObservableObject {
             case .zai: publisher = settings.$showZai.eraseToAnyPublisher()
             case .kimi: publisher = settings.$showKimi.eraseToAnyPublisher()
             case .grokPool: publisher = settings.$showGrokPool.eraseToAnyPublisher()
+            case .longcat: publisher = settings.$showLongCat.eraseToAnyPublisher()
             }
             publisher
                 .dropFirst()
@@ -242,6 +256,7 @@ final class UsageStore: ObservableObject {
         zaiProvider = ZaiProvider(settings: settings)
         kimiProvider = KimiProvider(settings: settings)
         grokPoolProvider = GrokPoolProvider(settings: settings)
+        longcatProvider = LongCatProvider(settings: settings)
     }
 
     func start() {
@@ -266,6 +281,7 @@ final class UsageStore: ObservableObject {
         case .zai: refreshZai()
         case .kimi: refreshKimi()
         case .grokPool: refreshGrokPool()
+        case .longcat: refreshLongCat()
         }
     }
 
@@ -360,6 +376,37 @@ final class UsageStore: ObservableObject {
             } catch {
                 Self.log("✗ Kimi browser import: \(error.localizedDescription)")
                 self.finishKimiRefresh(error: error.localizedDescription)
+            }
+        }
+    }
+
+    func reimportLongCatBrowserSession() {
+        guard !longcatIsRefreshing else { return }
+        guard let provider = longcatProvider else {
+            if lastSuccessfulLongCatSnapshot == nil {
+                longcatStatus = .error(message: L(.errorLongcatBrowserAuthorizationRequired))
+            }
+            return
+        }
+
+        longcatIsRefreshing = true
+        switch longcatStatus {
+        case .ok, .stale: break
+        case .never, .loading, .error: longcatStatus = .loading
+        }
+
+        let environment = ProcessInfo.processInfo.environment
+        let browser = LongCatBrowserSession.browserForInteractiveImport()
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try LongCatBrowserSession.importSessionInteractively(from: browser)
+                }.value
+                await self.runLongCatProvider(provider, environment: environment)
+            } catch {
+                Self.log("✗ LongCat browser import: \(error.localizedDescription)")
+                self.finishLongCatRefresh(error: error.localizedDescription)
             }
         }
     }
@@ -694,6 +741,48 @@ final class UsageStore: ObservableObject {
         }
     }
 
+    private func refreshLongCat() {
+        guard !longcatIsRefreshing else { return }
+        guard let provider = longcatProvider else { return }
+        longcatIsRefreshing = true
+        switch longcatStatus {
+        case .ok, .stale: break
+        case .never, .loading, .error: longcatStatus = .loading
+        }
+        let environment = ProcessInfo.processInfo.environment
+        Task { [weak self] in
+            await self?.runLongCatProvider(provider, environment: environment)
+        }
+    }
+
+    private func runLongCatProvider(_ provider: LongCatProvider, environment: [String: String]) async {
+        do {
+            let snapshot = try await provider.fetch(environment: environment)
+            Self.log("✓ \(provider.displayName): token quota")
+            longcatLastUpdatedAt = Date()
+            lastSuccessfulLongCatSnapshot = snapshot
+            longcatStatus = .ok(snapshot: snapshot)
+            finishLongCatRefresh()
+        } catch let error as UsageError {
+            Self.log("✗ \(provider.displayName): \(error.errorDescription ?? "Unknown error")")
+            finishLongCatRefresh(error: error.errorDescription ?? "Unknown error")
+        } catch {
+            Self.log("✗ \(provider.displayName): \(error.localizedDescription)")
+            finishLongCatRefresh(error: error.localizedDescription)
+        }
+    }
+
+    private func finishLongCatRefresh(error: String? = nil) {
+        longcatIsRefreshing = false
+        if let error {
+            if let snapshot = lastSuccessfulLongCatSnapshot {
+                longcatStatus = .stale(snapshot: snapshot, message: error)
+            } else {
+                longcatStatus = .error(message: error)
+            }
+        }
+    }
+
     func status(for tab: ProviderTab) -> LoadStatus {
         switch tab {
         case .ark: return arkStatus
@@ -703,6 +792,7 @@ final class UsageStore: ObservableObject {
         case .zai: return zaiStatus
         case .kimi: return kimiStatus
         case .grokPool: return grokPoolStatus
+        case .longcat: return longcatStatus
         }
     }
 
@@ -715,6 +805,7 @@ final class UsageStore: ObservableObject {
         case .zai: return zaiLastUpdatedAt
         case .kimi: return kimiLastUpdatedAt
         case .grokPool: return grokPoolLastUpdatedAt
+        case .longcat: return longcatLastUpdatedAt
         }
     }
 
@@ -727,6 +818,7 @@ final class UsageStore: ObservableObject {
         case .zai: return zaiIsRefreshing
         case .kimi: return kimiIsRefreshing
         case .grokPool: return grokPoolIsRefreshing
+        case .longcat: return longcatIsRefreshing
         }
     }
 

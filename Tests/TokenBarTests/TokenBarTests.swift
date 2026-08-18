@@ -1036,7 +1036,7 @@ struct ProviderVisibilityTests {
     @Test("Hidden providers drop out of the switcher list")
     func visibleTabsFilters() {
         let settings = AppSettings.shared
-        let original = (settings.showArk, settings.showOpenCode, settings.showDeepSeek, settings.showNebula, settings.showZai, settings.showKimi, settings.showGrokPool)
+        let original = (settings.showArk, settings.showOpenCode, settings.showDeepSeek, settings.showNebula, settings.showZai, settings.showKimi, settings.showGrokPool, settings.showLongCat)
         defer {
             settings.showArk = original.0
             settings.showOpenCode = original.1
@@ -1045,6 +1045,7 @@ struct ProviderVisibilityTests {
             settings.showZai = original.4
             settings.showKimi = original.5
             settings.showGrokPool = original.6
+            settings.showLongCat = original.7
         }
         settings.showArk = false
         settings.showOpenCode = true
@@ -1053,6 +1054,7 @@ struct ProviderVisibilityTests {
         settings.showZai = false
         settings.showKimi = false
         settings.showGrokPool = false
+        settings.showLongCat = false
         #expect(settings.visibleTabs == [.opencode, .deepseek])
         #expect(settings.isVisible(.ark) == false)
         #expect(settings.isVisible(.grokPool) == false)
@@ -1592,7 +1594,7 @@ struct GrokPoolProviderTests {
 @Suite("GrokPool card")
 @MainActor
 struct GrokPoolCardTests {
-    @Test("Renders success-rate ring and 24h legend rows in USD")
+    @Test("Renders availability ring and 24h legend rows in USD")
     func rendersCard() throws {
         let summary = GrokPoolSummary(
             period: "24h",
@@ -1631,9 +1633,9 @@ struct GrokPoolCardTests {
         let labels = view.subviews.compactMap { $0 as? NSTextField }.map(\.stringValue)
         #expect(labels.contains(L(.grokPoolRequests)))
         #expect(labels.contains(L(.grokPoolCost)))
-        #expect(labels.contains(L(.grokPoolSuccessRate)))
+        #expect(labels.contains(L(.grokPoolAccountAvailability)))
         #expect(labels.contains("$15.20"))
-        #expect(labels.contains("97.2%"))
+        #expect(labels.contains("95.8%"))
 
         // Render for visual inspection on a dark material approximation.
         let card = GrokPoolCardView(plan: plan, now: Date(), width: 340)
@@ -2000,6 +2002,131 @@ struct KimiBrowserSessionTokenTests {
         } catch {
             Issue.record("Expected kimiInvalidToken, got \(error)")
         }
+    }
+}
+
+@Suite("LongCat browser session")
+struct LongCatBrowserSessionTests {
+    @Test("Keeps identity cookies and drops only tracking cookies")
+    func filtersCookieHeader() {
+        let header = LongCatBrowserSession.requestCookieHeader(
+            from: "theme=dark; session=abc123; analytics=drop; passport_token_key=tok-xyz; utm_source=spam")
+        #expect(header?.contains("session=abc123") == true)
+        #expect(header?.contains("passport_token_key=tok-xyz") == true)
+        #expect(header?.contains("theme=dark") == true)
+        #expect(header?.contains("analytics=drop") == true)
+        #expect(header?.contains("utm_source=spam") != true)
+    }
+
+    @Test("Keeps all cookies when none are tracking cookies")
+    func fallsBackToAllCookies() {
+        let header = LongCatBrowserSession.requestCookieHeader(
+            from: "foo=bar; baz=qux")
+        #expect(header?.contains("foo=bar") == true)
+        #expect(header?.contains("baz=qux") == true)
+    }
+
+    @Test("Rejects empty cookie strings")
+    func rejectsEmptyCookie() {
+        #expect(LongCatBrowserSession.requestCookieHeader(from: "") == nil)
+        #expect(LongCatBrowserSession.requestCookieHeader(from: "theme=dark") != nil)
+    }
+
+    @Test("Drops only utm_ prefixed tracking cookies")
+    func dropsUtmTracking() {
+        let header = LongCatBrowserSession.requestCookieHeader(
+            from: "utm_source=spam; utm_medium=cpc; _lxsdk_cuid=user123; passport_token_key=tok")
+        #expect(header?.contains("utm_source=spam") != true)
+        #expect(header?.contains("utm_medium=cpc") != true)
+        #expect(header?.contains("_lxsdk_cuid=user123") == true)
+        #expect(header?.contains("passport_token_key=tok") == true)
+    }
+}
+
+@Suite("LongCat provider decode")
+struct LongCatProviderDecodeTests {
+    /// Real token-pack summary shape captured from the pay metering service.
+    private static let summaryJSON = #"""
+    {
+      "code": 0,
+      "msg": "success",
+      "data": {
+        "currentLot": {
+          "lotId": 247603,
+          "grantCategory": "GIFT",
+          "source": "FREE_PACK",
+          "remainingToken": 7300910,
+          "consumedToken": 2699090,
+          "frozenToken": 0,
+          "totalToken": 10000000,
+          "consumedRatio": 0.269909,
+          "effectiveTime": "2026-07-26 17:22:11",
+          "expireTime": "2026-08-25 17:22:11"
+        }
+      }
+    }
+    """#
+
+    @Test("Parses the pay-metering token pack summary")
+    func parsesTokenPackSummary() throws {
+        let data = Self.summaryJSON.data(using: .utf8)!
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let unwrapped = try LongCatEnvelope.unwrap(object)
+        let summary = try #require(unwrapped as? [String: Any])
+        let lot = try #require(LongCatJSON.object(summary["currentLot"]))
+
+        #expect(LongCatJSON.double(lot["totalToken"]) == 10_000_000)
+        #expect(LongCatJSON.double(lot["consumedToken"]) == 2_699_090)
+        #expect(LongCatJSON.double(lot["remainingToken"]) == 7_300_910)
+
+        let parsed = LongCatProvider.makeSummary(account: "又得取名字了", usage: lot, fuel: nil)
+        #expect(parsed.totalToken == 10_000_000)
+        #expect(parsed.usedToken == 2_699_090)
+        #expect(parsed.availableToken == 7_300_910)
+        // 2699090 / 10000000 = 27.0% used, 73.0% remaining.
+        #expect(abs(parsed.usedPercent - 26.9909) < 0.01)
+        #expect(abs(parsed.remainingPercent - 73.0091) < 0.01)
+        #expect(parsed.accountName == "又得取名字了")
+        #expect(parsed.nearestFuelExpiry != nil)
+    }
+
+    @Test("Zero total token pack is treated as invalid session")
+    func zeroTotalIsInvalid() {
+        let data = """
+        {"code":0,"data":{"currentLot":{"totalToken":0,"consumedToken":0,"remainingToken":0}}}
+        """.data(using: .utf8)!
+        let object = try! JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let unwrapped = try! LongCatEnvelope.unwrap(object)
+        let summary = unwrapped as! [String: Any]
+        let lot = LongCatJSON.object(summary["currentLot"])!
+        #expect(LongCatJSON.double(lot["totalToken"]) == 0)
+        // makeSummary with a zero pack yields a zero summary (no crash).
+        let parsed = LongCatProvider.makeSummary(account: nil, usage: lot, fuel: nil)
+        #expect(parsed.totalToken == 0)
+        #expect(parsed.usedPercent == 0)
+    }
+
+    @Test("Legacy fuel-pack fields still parse")
+    func parsesFuelFields() {
+        let usage: [String: Any] = [
+            "totalToken": 10_000_000,
+            "usedToken": 2_000_000,
+            "availableToken": 8_000_000,
+        ]
+        let fuel: [String: Any] = [
+            "totalQuota": 5_000_000,
+            "list": [
+                ["availableToken": 3_000_000, "expireTime": "2026-09-01 00:00:00"],
+                ["availableToken": 2_000_000, "expireTime": "2026-10-01 00:00:00"],
+            ],
+        ]
+        let parsed = LongCatProvider.makeSummary(account: nil, usage: usage, fuel: fuel)
+        #expect(parsed.totalToken == 10_000_000)
+        #expect(parsed.usedToken == 2_000_000)
+        #expect(parsed.availableToken == 8_000_000)
+        #expect(parsed.fuelPackTotal == 5_000_000)
+        #expect(parsed.fuelPackRemaining == 5_000_000)
+        #expect(parsed.nearestFuelExpiry != nil)
     }
 }
 

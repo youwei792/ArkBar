@@ -109,6 +109,7 @@ enum LKey: String {
     case tabZai = "tab.zai"
     case tabKimi = "tab.kimi"
     case tabGrokPool = "tab.grokPool"
+    case tabLongCat = "tab.longcat"
     case tabSummary = "tab.summary"
     case showProvider = "settings.showProvider"
     case showSummary = "settings.showSummary"
@@ -128,6 +129,7 @@ enum LKey: String {
     case settingsZai = "settings.zai"
     case settingsKimi = "settings.kimi"
     case settingsGrokPool = "settings.grokPool"
+    case settingsLongCat = "settings.longcat"
     case settingsDiagnostics = "settings.diagnostics"
     case sectionAppearance = "settings.sectionAppearance"
     case sectionBehavior = "settings.sectionBehavior"
@@ -142,11 +144,13 @@ enum LKey: String {
     case refreshZai = "settings.refreshZai"
     case refreshKimi = "settings.refreshKimi"
     case refreshGrokPool = "settings.refreshGrokPool"
+    case refreshLongCat = "settings.refreshLongCat"
     case openDeepSeekPlatform = "menu.openDeepSeekPlatform"
     case openNebulaConsole = "menu.openNebulaConsole"
     case openZaiConsole = "menu.openZaiConsole"
     case openKimiConsole = "menu.openKimiConsole"
     case openGrokPoolConsole = "menu.openGrokPoolConsole"
+    case openLongCatConsole = "menu.openLongCatConsole"
     case openCodeCookieSource = "settings.openCodeCookieSource"
     case openCodeCookieAutomatic = "settings.openCodeCookieAutomatic"
     case openCodeCookieManual = "settings.openCodeCookieManual"
@@ -176,6 +180,7 @@ enum LKey: String {
     case productDeepSeek = "product.deepseek"
     case productNebula = "product.nebula"
     case productGrokPool = "product.grokPool"
+    case productLongCat = "product.longcat"
     case windowSession = "window.session"
     case window5Hour = "window.5hour"
     case windowWeekly = "window.weekly"
@@ -214,6 +219,7 @@ enum LKey: String {
     case kimiBrowserHint = "kimi.browserHint"
     case kimiWebSessionInvalidHint = "kimi.webSessionInvalidHint"
     case reimportKimiBrowserSession = "settings.reimportKimiBrowserSession"
+    case reimportLongCatBrowserSession = "settings.reimportLongCatBrowserSession"
     case grokPoolBaseURLLabel = "grokPool.baseURLLabel"
     case grokPoolBaseURLHint = "grokPool.baseURLHint"
     case grokPoolUsernameLabel = "grokPool.usernameLabel"
@@ -221,7 +227,7 @@ enum LKey: String {
     case grokPoolCredentialsHint = "grokPool.credentialsHint"
     case grokPoolValuePercent = "grokPool.valuePercent"
     case grokPoolValueCost = "grokPool.valueCost"
-    case grokPoolSuccessRate = "grokPool.successRate"
+    case grokPoolAccountAvailability = "grokPool.accountAvailability"
     case grokPoolRequests = "grokPool.requests"
     case grokPoolRequestDetail = "grokPool.requestDetail"
     case grokPoolCost = "grokPool.cost"
@@ -255,9 +261,31 @@ enum LKey: String {
     case errorKimiBrowserAuthorizationRequired = "error.kimiBrowserAuthorizationRequired"
     case errorGrokPoolMissingCredentials = "error.grokPoolMissingCredentials"
     case errorGrokPoolInvalidToken = "error.grokPoolInvalidToken"
+    case errorLongcatMissingCredentials = "error.longcatMissingCredentials"
+    case errorLongcatInvalidSession = "error.longcatInvalidSession"
+    case errorLongcatBrowserSessionMissing = "error.longcatBrowserSessionMissing"
+    case errorLongcatBrowserAuthorizationRequired = "error.longcatBrowserAuthorizationRequired"
     case errorProbeModels = "error.probeModels"
     case apiKeyNoHeaders = "apiKey.noHeaders"
     case apiKeyNoWindow = "apiKey.noWindow"
+
+    // LongCat card + settings
+    case longCatTokenQuota = "longcat.tokenQuota"
+    case longCatTotalTokens = "longcat.totalTokens"
+    case longCatUsedTokens = "longcat.usedTokens"
+    case longCatAvailableTokens = "longcat.availableTokens"
+    case longCatUsedPercent = "longcat.usedPercent"
+    case longCatRemainingPercent = "longcat.remainingPercent"
+    case longCatFuelPack = "longcat.fuelPack"
+    case longCatFuelExpiry = "longcat.fuelExpiry"
+    case longCatCookieSource = "longcat.cookieSource"
+    case longCatCookieAutomatic = "longcat.cookieAutomatic"
+    case longCatCookieManual = "longcat.cookieManual"
+    case longCatAutomaticHint = "longcat.automaticHint"
+    case longCatManualHint = "longcat.manualHint"
+    case longCatCookiePlaceholder = "longcat.cookiePlaceholder"
+    case longCatCredentialsHint = "longcat.credentialsHint"
+    case longCatBrowserSession = "longcat.browserSession"
 
     // Display mode display names
     case displayIconOnly = "display.iconOnly"
@@ -330,6 +358,7 @@ final class L10n: ObservableObject {
         case .deepseek: t(.productDeepSeek)
         case .nebula: t(.productNebula)
         case .grokPool: t(.productGrokPool)
+        case .longcat: t(.productLongCat)
         }
     }
 
@@ -444,6 +473,7 @@ final class L10n: ObservableObject {
         add(.tabZai, "智谱", "Z.ai")
         add(.tabKimi, "Kimi", "Kimi")
         add(.tabGrokPool, "GrokPool", "GrokPool")
+        add(.tabLongCat, "LongCat", "LongCat")
         add(.tabSummary, "概览", "Overview")
         add(.showSummary, "在菜单栏显示概览", "Show overview in menu bar")
         add(.showProvider, "在菜单栏显示", "Show in menu bar")
@@ -463,6 +493,7 @@ final class L10n: ObservableObject {
         add(.settingsZai, "智谱 Coding Plan", "Z.ai Coding Plan")
         add(.settingsKimi, "Kimi For Coding", "Kimi For Coding")
         add(.settingsGrokPool, "GrokPool 网关", "GrokPool Gateway")
+        add(.settingsLongCat, "LongCat", "LongCat")
         add(.settingsDiagnostics, "诊断", "Diagnostics")
         add(.sectionAppearance, "外观", "Appearance")
         add(.sectionBehavior, "行为", "Behavior")
@@ -477,11 +508,13 @@ final class L10n: ObservableObject {
         add(.refreshZai, "刷新智谱", "Refresh Z.ai")
         add(.refreshKimi, "刷新 Kimi", "Refresh Kimi")
         add(.refreshGrokPool, "刷新 GrokPool", "Refresh GrokPool")
+        add(.refreshLongCat, "刷新 LongCat", "Refresh LongCat")
         add(.openDeepSeekPlatform, "打开 DeepSeek 平台", "Open DeepSeek Platform")
         add(.openNebulaConsole, "打开 APINebula 控制台", "Open APINebula Console")
         add(.openZaiConsole, "打开智谱用量页", "Open Z.ai Usage")
         add(.openKimiConsole, "打开 Kimi Code 控制台", "Open Kimi Code Console")
         add(.openGrokPoolConsole, "打开 GrokPool 控制台", "Open GrokPool Console")
+        add(.openLongCatConsole, "打开 LongCat 用量页", "Open LongCat Usage")
         add(.openCodeCookieSource, "Cookie 来源", "Cookie source")
         add(.openCodeCookieAutomatic, "自动读取浏览器", "Automatic from browser")
         add(.openCodeCookieManual, "手动 Cookie", "Manual Cookie")
@@ -511,6 +544,7 @@ final class L10n: ObservableObject {
         add(.productDeepSeek, "DeepSeek", "DeepSeek")
         add(.productNebula, "APINebula", "APINebula")
         add(.productGrokPool, "GrokPool", "GrokPool")
+        add(.productLongCat, "LongCat", "LongCat")
         add(.windowSession, "会话", "Session")
         add(.window5Hour, "5 小时", "5-hour")
         add(.windowWeekly, "每周", "Weekly")
@@ -549,20 +583,37 @@ final class L10n: ObservableObject {
         add(.kimiBrowserHint, "共享总池来自 www.kimi.com 的 access_token（不是 kimi-auth cookie）。TokenBar 会静默读取已登录的 Kimi.app；也可点“重新读取浏览器登录”从浏览器 Local Storage 导入。", "The shared pool uses the www.kimi.com access_token (not the kimi-auth cookie). TokenBar silently reads a signed-in Kimi.app, or import the browser Local Storage token with “Re-import Browser Sign-in”.")
         add(.kimiWebSessionInvalidHint, "共享总池会话无效。请先打开并登录本机 Kimi.app，或在浏览器打开 www.kimi.com 后重新读取浏览器登录。kimi-auth cookie 不够，需要 Local Storage 里的 access_token。", "The shared-pool session is invalid. Sign in to the Kimi.app desktop client, or open www.kimi.com in a browser and re-import. The kimi-auth cookie is not enough; the Local Storage access_token is required.")
         add(.reimportKimiBrowserSession, "重新读取浏览器登录", "Re-import Browser Sign-in")
+        add(.reimportLongCatBrowserSession, "重新读取浏览器登录", "Re-import Browser Sign-in")
         add(.grokPoolBaseURLLabel, "API 地址", "API base URL")
         add(.grokPoolBaseURLHint, "网关地址，默认 https://grok.axonlume.com（不要填 /v1）", "Gateway base URL, default https://grok.axonlume.com (do not append /v1)")
         add(.grokPoolUsernameLabel, "管理员账号", "Administrator username")
         add(.grokPoolPasswordLabel, "管理员密码", "Administrator password")
         add(.grokPoolCredentialsHint, "使用 Grok2API 控制台的管理员账号密码登录（POST /api/admin/v1/auth/login），用短期访问令牌读取 24h 运营看板（GET /api/admin/v1/dashboard?period=24h）。凭据与令牌只存本机 Keychain；令牌每 15 分钟自动重新获取。", "Sign in with the Grok2API console administrator account (POST /api/admin/v1/auth/login) and read the 24-hour dashboard (GET /api/admin/v1/dashboard?period=24h) with the short-lived access token. Credentials and tokens stay in the local Keychain; the token re-fetches automatically every 15 minutes.")
-        add(.grokPoolValuePercent, "成功率百分比", "Success percent")
+        add(.grokPoolValuePercent, "账号可用率百分比", "Availability percent")
         add(.grokPoolValueCost, "24h 费用（$）", "24h cost ($)")
-        add(.grokPoolSuccessRate, "成功率", "Success rate")
+        add(.grokPoolAccountAvailability, "账号可用率", "Account availability")
         add(.grokPoolRequests, "24h 请求数", "Requests (24h)")
         add(.grokPoolRequestDetail, "成功 %@ · 失败 %@", "OK %@ · Failed %@")
         add(.grokPoolCost, "24h 费用", "Billed (24h)")
         add(.grokPoolTokenTotal, "总 Token %@", "%@ tokens")
         add(.grokPoolTokenDetail, "输入 %@ · 缓存 %@ · 输出 %@ · 推理 %@", "Input %@ · Cached %@ · Output %@ · Reasoning %@")
         add(.grokPoolAccounts, "活跃账号 %@/%@", "Active accounts %@/%@")
+        add(.longCatTokenQuota, "Token 资源包", "Token Quota")
+        add(.longCatTotalTokens, "总额度", "Total")
+        add(.longCatUsedTokens, "已用", "Used")
+        add(.longCatAvailableTokens, "剩余", "Available")
+        add(.longCatUsedPercent, "已用 %.1f%%", "%.1f%% used")
+        add(.longCatRemainingPercent, "剩余 %.1f%%", "%.1f%% left")
+        add(.longCatFuelPack, "加油包 %@ / %@", "Fuel pack %@ / %@")
+        add(.longCatFuelExpiry, "最近到期 %@", "Nearest expiry %@")
+        add(.longCatCookieSource, "Cookie 来源", "Cookie source")
+        add(.longCatCookieAutomatic, "自动读取浏览器", "Automatic from browser")
+        add(.longCatCookieManual, "手动 Cookie", "Manual Cookie")
+        add(.longCatAutomaticHint, "普通刷新只使用 TokenBar 已缓存的会话，不会弹出密码框。首次使用或登录失效后，请点「重新读取浏览器登录」；只有这个操作可能请求一次钥匙串授权。", "Routine refreshes only use TokenBar's cached session and never show a password prompt. On first use or after sign-in expires, click “Re-import Browser Sign-in”; only that action may request Keychain access once.")
+        add(.longCatManualHint, "仅在自动读取失败时使用。Cookie 会保存在本机钥匙串，不会写入偏好设置或日志。", "Use only when automatic import fails. The Cookie is stored in Keychain, never preferences or logs.")
+        add(.longCatCookiePlaceholder, "粘贴 longcat.chat 的 Cookie 头", "Paste the Cookie header from longcat.chat")
+        add(.longCatCredentialsHint, "LongCat 的用量接口在 longcat.chat 控制台（不是 api.longcat.chat），需要浏览器登录会话。支持自动读取浏览器 Cookie 或手动粘贴。", "LongCat's usage endpoints live behind the longcat.chat console (not api.longcat.chat) and need a browser sign-in session. Automatic browser-Cookie import or a manually pasted Cookie header are both supported.")
+        add(.longCatBrowserSession, "浏览器会话：%@", "Browser session: %@")
         add(.errorArkcliNotFound, "未找到 arkcli。请安装后执行 `arkcli auth login volc-sso`。", "arkcli was not found. Install it, then run `arkcli auth login volc-sso`.")
         add(.errorArkcliNotAuthenticated, "arkcli 尚未登录。请执行 `arkcli auth login volc-sso` 后刷新。", "arkcli is not signed in. Run `arkcli auth login volc-sso`, then refresh.")
         add(.errorArkcliTimedOut, "arkcli 查询超时。请检查登录状态后重试。", "arkcli usage timed out. Check authentication and try again.")
@@ -590,6 +641,10 @@ final class L10n: ObservableObject {
         add(.errorKimiBrowserAuthorizationRequired, "TokenBar 尚未缓存 Kimi 浏览器登录。请在 Kimi For Coding 设置中点“重新读取浏览器登录”。", "TokenBar has no cached Kimi browser sign-in. Click “Re-import Browser Sign-in” in Kimi For Coding settings.")
         add(.errorGrokPoolMissingCredentials, "未配置 GrokPool 管理员账号。请在 GrokPool 设置中填写账号密码，或设置环境变量 GROKPOOL_USERNAME / GROKPOOL_PASSWORD。", "No GrokPool administrator account is configured. Enter the username and password in the GrokPool settings, or set GROKPOOL_USERNAME / GROKPOOL_PASSWORD.")
         add(.errorGrokPoolInvalidToken, "GrokPool 管理员登录失败或会话已过期。请检查账号密码，或在 Grok2API 控制台重新登录。", "GrokPool administrator login failed or the session expired. Check the username and password, or sign in again in the Grok2API console.")
+        add(.errorLongcatMissingCredentials, "未找到 LongCat 控制台会话。请在浏览器登录 longcat.chat，或在 LongCat 设置中粘贴 Cookie 头。", "No LongCat console session found. Sign in at longcat.chat, or paste a Cookie header in the LongCat settings.")
+        add(.errorLongcatInvalidSession, "LongCat 登录已失效。请重新登录 longcat.chat，或更新手动 Cookie。", "The LongCat sign-in expired. Sign in again at longcat.chat or update the manual Cookie.")
+        add(.errorLongcatBrowserSessionMissing, "没有在浏览器中找到 longcat.chat 登录会话。请先在浏览器登录 LongCat 控制台。", "No longcat.chat browser session was found. Sign in to the LongCat console in a browser first.")
+        add(.errorLongcatBrowserAuthorizationRequired, "TokenBar 尚未缓存 LongCat 浏览器登录。请在 LongCat 设置中点“重新读取浏览器登录”。", "TokenBar has no cached LongCat browser sign-in. Click “Re-import Browser Sign-in” in LongCat settings.")
         add(.errorProbeModels, "所有探测模型均不可用", "All probe models failed")
         add(.apiKeyNoHeaders, "API Key 有效，但响应未返回请求限额头。", "API key is valid, but no request-limit headers were returned.")
         add(.apiKeyNoWindow, "API Key 有效，但未返回用量窗口。", "API key is valid, but no usage window was returned.")

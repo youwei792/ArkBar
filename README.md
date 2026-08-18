@@ -2,7 +2,7 @@
 
 [English](README.en.md) · [安全报告](SECURITY.md) · [更新日志](CHANGELOG.md)
 
-TokenBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding/Agent Plan、OpenCode Go、DeepSeek、APINebula 中转站、智谱（Z.ai）、Kimi For Coding 与 GrokPool 网关的用量；不会显示 Dock 图标。
+TokenBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding/Agent Plan、OpenCode Go、DeepSeek、APINebula 中转站、智谱（Z.ai）、Kimi For Coding、GrokPool 网关与 LongCat (longcat.chat) 的用量；不会显示 Dock 图标。
 
 ## 特性
 
@@ -15,7 +15,8 @@ TokenBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding
 - APINebula（new-api 中转站）监控：余额圆环 = 累计已用 ÷ (累计已用 + 余额)，今日/每月费用、Token、请求次数，以及**缓存读/未缓存/输出**分类（来自控制台使用日志）。
 - APINebula 余额与日志是控制台接口：凭据来自浏览器登录会话（设置页显式导入并缓存到 Keychain），可选 API Key 兜底。
 - GrokPool（grok2api 管理员网关）监控：以管理员账号登录（`POST /api/admin/v1/auth/login`）换取短期访问令牌，读取 **24h 运营看板**（`GET /api/admin/v1/dashboard?period=24h`）：请求数/成功率、计费费用、输入/缓存/输出/推理 token、活跃账号数与常用模型。成功率圆环 = 成功请求占比；与 APINebula 标签页完全隔离（独立设置与状态）。计费按 grok2api 的 10^10 ticks = $1 换算。
-- 支持在 Ark、OpenCode Go、DeepSeek、APINebula、智谱（Z.ai）、Kimi 与 GrokPool 之间即时切换，并隔离各边的刷新状态与错误。
+- LongCat (longcat.chat) 监控：用量接口在 longcat.chat 控制台（非 api.longcat.chat），以浏览器登录会话认证。剩余额度圆环 = 当前 token pack 的剩余 Token 占比；环右侧展示总额/已用/已用百分比与剩余/剩余百分比，以及可选的 fuel pack 余额与最近过期倒计时。
+- 支持在 Ark、OpenCode Go、DeepSeek、APINebula、智谱（Z.ai）、Kimi、GrokPool 与 LongCat 之间即时切换，并隔离各边的刷新状态与错误。
 - **概览**标签一览所有可见 Provider 的剩余百分比与胶囊进度条；点击某行进入对应完整卡片。可在「设置 → 通用」开关。
 - 每个 Provider 可在自己的设置页中独立**显示/隐藏**，隐藏后从切换器移除并停止后台刷新。
 - 菜单栏样式可选：进度条、进度条 + 百分比、仅百分比、仅 Logo、Logo + 百分比、Logo + 进度条；Logo 16pt、百分比使用系统字号，与 CodexBar 对齐。
@@ -75,6 +76,7 @@ lipo -archs TokenBar
 | 智谱（Z.ai） | 在“设置 → 智谱 Coding Plan”中填写 API Key（存 Keychain + 文件缓存）；可选环境变量 `Z_AI_API_KEY` 兜底；API 区域可选 Global（`api.z.ai`）或 BigModel 国内站（`open.bigmodel.cn`），默认国内站 | 读取 `api/monitor/usage/quota/limit` 返回的 Coding Plan 额度窗口：5 小时 + 每周（session/weekly 环），部分套餐另有每月 MCP 时间窗口（monthly 环）。凭据优先级：设置值 > 环境变量。 |
 | Kimi For Coding | API Key 可选（在“设置 → Kimi For Coding”填写，存 Keychain + 文件缓存；环境变量 `KIMI_CODE_API_KEY` 兜底）；在“设置 → Kimi For Coding”点“重新读取浏览器登录”导入 `www.kimi.com` 会话后可额外读取共享总池 | 读取 `api.kimi.com/coding/v1/usages` 的 Code 会员配额：总配额（每周，weekly 环）+ 5 小时限流窗口（session 环）；浏览器会话另读取 `www.kimi.com` 的 `GetSubscriptionStats`，把 **Kimi Code + Kimi Work 共享总池**映射为 monthly 环。凭据优先级：设置值 > 环境变量。 |
 | GrokPool（grok2api 网关） | 在“设置 → GrokPool 网关”填写**管理员账号密码**（存 Keychain + 文件缓存）；可选环境变量 `GROKPOOL_USERNAME` / `GROKPOOL_PASSWORD` 兜底；Base URL 默认 `https://grok.axonlume.com` | 以管理员身份登录（`POST /api/admin/v1/auth/login`）获取短期 Bearer 访问令牌，读取 24h 运营看板（`GET /api/admin/v1/dashboard?period=24h`）：请求数与成功率、计费费用（10^10 ticks = $1）、输入/缓存/输出/推理 token 拆分、活跃账号数与常用模型。令牌每 15 分钟自动重新获取，401 时自动重登。 |
+| LongCat (longcat.chat) | 在“设置 → LongCat”点“重新读取浏览器登录”导入 `longcat.chat` 会话（存 Keychain + 文件缓存）；支持 Chrome / Arc / Safari / Edge / Brave / Firefox 多浏览器回退；可选手动粘贴 Cookie 头或环境变量 `LONGCAT_MANUAL_COOKIE` | 用量接口在 longcat.chat 控制台（非 api.longcat.chat）。从 `POST /api/pay/quota/metering/token-packs/summary` 读取当前 token pack（`data.currentLot`：`totalToken` / `consumedToken` / `remainingToken` / `expireTime`），剩余圆环 = 剩余 Token 占比。可选读取 pending fuel pack 作为补充余额与最近过期时间。凭据优先级：手动 Cookie > 浏览器会话 > 环境变量。 |
 
 Ark CLI 的最新安装方式请以官方 [Ark CLI 文档](https://github.com/volcengine/ark-cli) 为准。
 
@@ -87,6 +89,7 @@ export Z_AI_API_KEY='...'
 export KIMI_CODE_API_KEY='...'
 export GROKPOOL_USERNAME='...'
 export GROKPOOL_PASSWORD='...'
+export LONGCAT_MANUAL_COOKIE='...'
 .build/debug/TokenBar
 ```
 
@@ -102,6 +105,7 @@ export GROKPOOL_PASSWORD='...'
 - 智谱（Z.ai）标签页显示 Coding Plan 额度圆环：5 小时窗口对应 session 环、每周窗口对应 weekly 环（部分套餐另有每月 MCP 时间窗口对应 monthly 环）；圆环与图例均按**剩余**填充。
 - Kimi For Coding 标签页显示会员配额圆环：Code 总配额（每周）对应 weekly 环、5 小时限流窗口对应 session 环；导入浏览器登录后，**Kimi Code + Kimi Work 共享总池**额外对应 monthly 环。圆环与图例均按**剩余**填充。
 - GrokPool 标签页显示 24h 运营看板：主环 = 请求成功率（剩余 = 成功率，全成功即满环）；环右侧为请求数（成功/失败）、计费费用（`$`，10^10 ticks = $1）与成功率；环下方为输入/缓存/输出/推理 token 拆分、活跃账号数与常用模型。可在该设置页选择菜单栏展示成功率百分比还是 24h 费用（`$`）。
+- LongCat 标签页显示 token pack 剩余额度圆环：剩余百分比 = `remainingToken ÷ totalToken`；环右侧三行分别为总额 / 已用（含已用百分比）/ 剩余（含剩余百分比）；可选的 fuel pack 余额与最近过期倒计时显示在环下方。菜单栏固定显示剩余百分比。
 - 刷新失败时会保留上次确认的数据，并标记为过期数据。
 - 默认仅按“设置 → 刷新 → 间隔”自动同步；可开启“点开菜单栏图标时刷新”，在每次打开角标时额外刷新。重复触发会合并为一次请求。
 - 手动“刷新”会保留面板，在原位置显示“刷新中”；成功后显示“刚刚更新 / X 分钟前更新”，失败时显示原因。
@@ -123,9 +127,10 @@ export GROKPOOL_PASSWORD='...'
 - 在智谱设置页填写的 API Key 同样只保存在本机 Keychain + 文件缓存，不会写入 UserDefaults、源码或日志；区域偏好仅存 UserDefaults，不含任何凭据。
 - 在 Kimi For Coding 设置页填写的 API Key 同样只保存在本机 Keychain + 文件缓存，不会写入 UserDefaults、源码或日志；浏览器导入只读取 `www.kimi.com` 的 `kimi-auth` cookie（JWT），仅用于调用控制台用量接口，同样只存 Keychain + 文件缓存。
 - 在 GrokPool 设置页填写的管理员账号密码只保存在本机 Keychain + 文件缓存，不会写入 UserDefaults、源码或日志；Base URL 仅是地址偏好，存 UserDefaults。登录令牌只在内存缓存（15 分钟有效期），不会落盘。
+- LongCat 浏览器接入只在用户点击“重新读取浏览器登录”后读取 `longcat.chat` 的会话 Cookie（仅丢弃 `utm_` 跟踪项，保留 passport_token_key、_lxsdk_cuid 等认证项），仅用于调用控制台用量接口，写入 Keychain + 文件缓存。手动粘贴的 Cookie 同样只存 Keychain + 文件缓存。
 - `arkcli` 自己管理 SSO 会话；TokenBar 只运行 `arkcli usage plan --format json` 并解析输出。
 - AK/SK 与 Ark API Key 仅从启动环境读取，TokenBar 不会把它们写入磁盘。
-- 网络请求仅发送到所选数据源需要的火山方舟接口、`opencode.ai`、`platform.deepseek.com`、智谱配额接口（`open.bigmodel.cn` / `api.z.ai`）、Kimi 配额接口（`api.kimi.com`）、Kimi 控制台接口（`www.kimi.com`）或 GrokPool 网关（`grok.axonlume.com`）。
+- 网络请求仅发送到所选数据源需要的火山方舟接口、`opencode.ai`、`platform.deepseek.com`、智谱配额接口（`open.bigmodel.cn` / `api.z.ai`）、Kimi 配额接口（`api.kimi.com`）、Kimi 控制台接口（`www.kimi.com`）、GrokPool 网关（`grok.axonlume.com`）或 LongCat 控制台（`longcat.chat`）。
 
 ## 开发与测试
 
@@ -133,12 +138,12 @@ export GROKPOOL_PASSWORD='...'
 swift test
 ```
 
-测试覆盖 Ark CLI/OpenAPI/OpenCode Go/DeepSeek/智谱/Kimi/GrokPool 解码、DeepSeek 余额与用量聚合、浏览器会话 token 提取、时间格式、图标渲染、刷新交互和菜单卡片视觉回归。GitHub Actions 会在 pull request 和 `main` 推送时执行同一测试命令。
+测试覆盖 Ark CLI/OpenAPI/OpenCode Go/DeepSeek/智谱/Kimi/GrokPool/LongCat 解码、DeepSeek 余额与用量聚合、浏览器会话 token 提取、时间格式、图标渲染、刷新交互和菜单卡片视觉回归。GitHub Actions 会在 pull request 和 `main` 推送时执行同一测试命令。
 
 ## 目录结构
 
 ```text
-Sources/TokenBar/          应用源码（含 DeepSeek/APINebula/Zai/Kimi/GrokPool Provider、浏览器会话导入、概览 SummaryRow、CredentialFileCache、单环卡片、ProviderLogo 与 Resources/provider 图标）
+Sources/TokenBar/          应用源码（含 DeepSeek/APINebula/Zai/Kimi/GrokPool/LongCat Provider、浏览器会话导入、概览 SummaryRow、CredentialFileCache、单环卡片、ProviderLogo 与 Resources/provider 图标）
 Scripts/package_app.sh   本地 Apple Silicon 打包脚本
 Tests/TokenBarTests/       解码与视觉回归测试
 ```

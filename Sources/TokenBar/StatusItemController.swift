@@ -62,6 +62,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         store.$grokPoolStatus
             .sink { [weak self] _ in self?.updateIconAndMenu() }
             .store(in: &cancellables)
+        store.$longcatStatus
+            .sink { [weak self] _ in self?.updateIconAndMenu() }
+            .store(in: &cancellables)
         // Refresh view updates.
         store.$arkLastUpdatedAt
             .sink { [weak self] _ in self?.updateActiveRefreshView() }
@@ -84,6 +87,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         store.$grokPoolLastUpdatedAt
             .sink { [weak self] _ in self?.updateActiveRefreshView() }
             .store(in: &cancellables)
+        store.$longcatLastUpdatedAt
+            .sink { [weak self] _ in self?.updateActiveRefreshView() }
+            .store(in: &cancellables)
         store.$arkIsRefreshing
             .sink { [weak self] _ in self?.updateActiveRefreshView() }
             .store(in: &cancellables)
@@ -103,6 +109,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             .sink { [weak self] _ in self?.updateActiveRefreshView() }
             .store(in: &cancellables)
         store.$grokPoolIsRefreshing
+            .sink { [weak self] _ in self?.updateActiveRefreshView() }
+            .store(in: &cancellables)
+        store.$longcatIsRefreshing
             .sink { [weak self] _ in self?.updateActiveRefreshView() }
             .store(in: &cancellables)
         // Selection change.
@@ -166,7 +175,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             settings.$showNebula.map { _ in },
             settings.$showZai.map { _ in },
             settings.$showKimi.map { _ in },
-            settings.$showGrokPool.map { _ in })
+            settings.$showGrokPool.map { _ in },
+            settings.$showLongCat.map { _ in })
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.updateIcon()
@@ -302,7 +312,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         case .grokPool:
             guard let summary = snapshot.plans.first?.grokPool else { return nil }
             return GrokPoolCardView.money(summary.costUSD, symbol: "$")
-        case .ark, .opencode, .zai, .kimi:
+        case .ark, .opencode, .zai, .kimi, .longcat:
             return nil
         }
     }

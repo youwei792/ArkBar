@@ -2,7 +2,7 @@
 
 [简体中文](README.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
 
-TokenBar is a native macOS menu-bar app for Volcengine Ark Coding/Agent Plan, OpenCode Go, DeepSeek, APINebula relay, Z.ai (Zhipu GLM), Kimi For Coding, and GrokPool gateway usage. It keeps the quota you have **left** visible without a Dock icon.
+TokenBar is a native macOS menu-bar app for Volcengine Ark Coding/Agent Plan, OpenCode Go, DeepSeek, APINebula relay, Z.ai (Zhipu GLM), Kimi For Coding, GrokPool gateway, and LongCat (longcat.chat) usage. It keeps the quota you have **left** visible without a Dock icon.
 
 ## Highlights
 
@@ -15,7 +15,8 @@ TokenBar is a native macOS menu-bar app for Volcengine Ark Coding/Agent Plan, Op
 - APINebula (new-api relay) monitoring: a balance ring (cumulative spend ÷ spend + balance), today/monthly cost, token counts, request counts, and a cache-read/uncached/output split aggregated from the console usage log.
 - APINebula balance and usage logs are console APIs: credentials come from the browser sign-in session (imported explicitly in Settings and cached in Keychain), with an optional API key fallback.
 - GrokPool (grok2api admin gateway) monitoring: sign in with the administrator account (`POST /api/admin/v1/auth/login`) for a short-lived access token and read the **24-hour dashboard** (`GET /api/admin/v1/dashboard?period=24h`): request counts/success rate, billed cost, input/cached/output/reasoning tokens, active accounts, and the top model. The success ring = successful request share; fully isolated from the APINebula tab (separate settings and state). Billing converts at grok2api's 10^10 ticks = $1.
-- Instant Ark/OpenCode Go/DeepSeek/APINebula/Z.ai/Kimi/GrokPool switching with isolated refresh and error state.
+- LongCat (longcat.chat) monitoring: usage endpoints live behind the longcat.chat console (not api.longcat.chat) and authenticate with a browser sign-in session. The remaining-quota ring = remaining-token share of the active token pack; beside the ring are total / used (with used percent) / remaining (with remaining percent), plus an optional fuel-pack balance and nearest-expiry countdown below the ring.
+- Instant Ark/OpenCode Go/DeepSeek/APINebula/Z.ai/Kimi/GrokPool/LongCat switching with isolated refresh and error state.
 - An **Overview** tab lists every visible provider's remaining percent with a teal→blue capsule meter; click a row to open that provider's full card. Toggle it in **Settings → General**.
 - Each provider can be independently shown/hidden from its own settings pane; hidden providers leave the switcher and stop refreshing.
 - Menu-bar styles: meter bar, bar + percent, percent only, logo only, logo + percent, and logo + bar. Logo glyphs are 16pt and percent text uses the system font size, matching CodexBar's menu-bar scale.
@@ -75,6 +76,7 @@ In **Auto** mode, TokenBar prefers explicitly configured credentials, then falls
 | Z.ai (Zhipu GLM) | API key entered in **Settings → Z.ai Coding Plan** (stored in Keychain + file cache); optional `Z_AI_API_KEY` environment fallback; API region Global (`api.z.ai`) or BigModel CN (`open.bigmodel.cn`, default) | Reads the Coding Plan quota windows from `api/monitor/usage/quota/limit`: a 5-hour + weekly pair (session/weekly rings), plus a monthly MCP time window (monthly ring) on some plans. Credential precedence: settings > environment. |
 | Kimi For Coding | API key optional (entered in **Settings → Kimi For Coding**, stored in Keychain + file cache; `KIMI_CODE_API_KEY` environment fallback); choose **Re-import Browser Sign-in** to also read the shared pool from the `www.kimi.com` session | Reads the Code membership quota from `api.kimi.com/coding/v1/usages`: total weekly quota (weekly ring) plus a 5-hour rate-limit window (session ring); the browser session also reads `GetSubscriptionStats` from `www.kimi.com` and maps the **shared Kimi Code + Kimi Work pool** to the monthly ring. Credential precedence: settings > environment. |
 | GrokPool (grok2api gateway) | Administrator username and password entered in **Settings → GrokPool Gateway** (stored in Keychain + file cache); optional `GROKPOOL_USERNAME` / `GROKPOOL_PASSWORD` environment fallback; base URL defaults to `https://grok.axonlume.com` | Signs in as the gateway administrator (`POST /api/admin/v1/auth/login`) for a short-lived Bearer access token, then reads the 24-hour dashboard (`GET /api/admin/v1/dashboard?period=24h`): requests and success rate, billed cost (10^10 ticks = $1), the input/cached/output/reasoning token split, active accounts, and the top model. The token refreshes automatically every 15 minutes and 401s trigger a re-login. |
+| LongCat (longcat.chat) | Choose **Re-import Browser Sign-in** in **Settings → LongCat** to import the `longcat.chat` session (stored in Keychain + file cache); multi-browser fallback across Chrome / Arc / Safari / Edge / Brave / Firefox; optional manual Cookie header or `LONGCAT_MANUAL_COOKIE` environment fallback | Usage endpoints live behind the longcat.chat console (not api.longcat.chat). Reads the active token pack from `POST /api/pay/quota/metering/token-packs/summary` (`data.currentLot`: `totalToken` / `consumedToken` / `remainingToken` / `expireTime`); the remaining ring = remaining-token share. Optionally reads pending fuel packs for a supplementary balance and the nearest expiry. Credential precedence: manual Cookie > browser session > environment. |
 
 See the official [Ark CLI installation guide](https://github.com/volcengine/ark-cli) for the current CLI setup.
 
@@ -87,6 +89,7 @@ export Z_AI_API_KEY='...'
 export KIMI_CODE_API_KEY='...'
 export GROKPOOL_USERNAME='...'
 export GROKPOOL_PASSWORD='...'
+export LONGCAT_MANUAL_COOKIE='...'
 .build/debug/TokenBar
 ```
 
@@ -102,6 +105,7 @@ export GROKPOOL_PASSWORD='...'
 - The Z.ai (Zhipu GLM) tab shows Coding Plan quota rings: the 5-hour window drives the session ring, the weekly window the weekly ring, and an optional monthly MCP time window (monthly ring) on some plans. Rings and legend rows fill from their **remaining** values.
 - The Kimi For Coding tab shows membership quota rings: Code's total weekly quota drives the weekly ring and the 5-hour rate-limit window the session ring; after importing the browser sign-in, the **shared Kimi Code + Kimi Work pool** additionally drives the monthly ring. Rings and legend rows fill from their **remaining** values.
 - The GrokPool tab shows the 24-hour dashboard: the primary ring is the request success rate (remaining = success, 100% success is a full ring); beside the ring are Requests (OK/failed), Billed cost (`$`, 10^10 ticks = $1), and Success rate; below the ring are the input/cached/output/reasoning token split, active accounts, and the top model. Its settings pane chooses whether the menu bar shows the success percent or the 24h cost (`$`).
+- The LongCat tab shows the token-pack remaining-quota ring: remaining percent = `remainingToken ÷ totalToken`; the three ring rows are total / used (with used percent) / remaining (with remaining percent); an optional fuel-pack balance and nearest-expiry countdown sit below the ring. The menu bar always shows the remaining percent.
 - A refresh failure preserves the last confirmed data and marks it stale.
 - By default, data refreshes only on the interval selected in **Settings → Refresh**. Enable **Refresh when opening the menu bar item** to also refresh whenever the status item is opened; overlapping triggers are coalesced into one request.
 - Manual **Refresh** keeps the panel open, shows a live refreshing state, then reports “Updated just now” / a relative update time or a failure reason.
@@ -123,9 +127,10 @@ Quota reset time is not subscription expiry. TokenBar displays a plan-expiry bad
 - The Z.ai API key entered in Settings is likewise stored only in the local Keychain + file cache, never UserDefaults, source files, or logs; the region preference is plain UserDefaults and holds no credentials.
 - The Kimi API key entered in Settings is likewise stored only in the local Keychain + file cache, never UserDefaults, source files, or logs; browser import reads only the `kimi-auth` cookie (JWT) from `www.kimi.com` and uses it only for the console usage endpoints, storing it in the same Keychain + file cache.
 - The GrokPool administrator username and password entered in Settings are stored only in the local Keychain + file cache, never UserDefaults, source files, or logs; the base URL is a plain address preference kept in UserDefaults. The login token is cached in memory only (15-minute validity) and never written to disk.
+- LongCat browser access reads the `longcat.chat` session cookies (dropping only `utm_` tracking cookies, keeping `passport_token_key`, `_lxsdk_cuid`, and other identity cookies) only after **Re-import Browser Sign-in** is clicked, and uses them only for the console usage endpoints, writing to the Keychain + file cache. A manually pasted Cookie header is likewise stored only in the local Keychain + file cache.
 - `arkcli` keeps ownership of its SSO session; TokenBar only runs `arkcli usage plan --format json` and parses its output.
 - AK/SK and Ark API keys are read from the launch environment and are never written to disk by TokenBar.
-- Network requests go only to the required Volcengine Ark endpoints, `opencode.ai`, `platform.deepseek.com`, the Z.ai quota endpoint (`open.bigmodel.cn` / `api.z.ai`), the Kimi quota endpoint (`api.kimi.com`), the Kimi console endpoints (`www.kimi.com`), or the GrokPool gateway (`grok.axonlume.com`).
+- Network requests go only to the required Volcengine Ark endpoints, `opencode.ai`, `platform.deepseek.com`, the Z.ai quota endpoint (`open.bigmodel.cn` / `api.z.ai`), the Kimi quota endpoint (`api.kimi.com`), the Kimi console endpoints (`www.kimi.com`), the GrokPool gateway (`grok.axonlume.com`), or the LongCat console (`longcat.chat`).
 
 ## Development
 
@@ -133,7 +138,7 @@ Quota reset time is not subscription expiry. TokenBar displays a plan-expiry bad
 swift test
 ```
 
-The test suite covers Ark CLI, OpenAPI, OpenCode Go, DeepSeek, Z.ai, Kimi, and GrokPool decoding, DeepSeek balance/usage aggregation, browser-session token extraction, time formatting, icon rendering, refresh interaction, and menu-card layout regressions. GitHub Actions runs the same test command for pull requests and pushes to `main`.
+The test suite covers Ark CLI, OpenAPI, OpenCode Go, DeepSeek, Z.ai, Kimi, GrokPool, and LongCat decoding, DeepSeek balance/usage aggregation, browser-session token extraction, time formatting, icon rendering, refresh interaction, and menu-card layout regressions. GitHub Actions runs the same test command for pull requests and pushes to `main`.
 
 ## Project structure
 
@@ -153,7 +158,10 @@ Sources/TokenBar/
   ZaiProvider.swift    Z.ai (Zhipu GLM) Coding Plan quota provider
   KimiProvider.swift   Kimi For Coding membership quota provider
   GrokPoolProvider.swift GrokPool (grok2api admin gateway) dashboard provider
-  ProviderLogo.swift     provider brand icons (doubao/opencode/deepseek/apinebula/zai/kimi/grokpool)
+  LongCatProvider.swift  LongCat (longcat.chat) token-pack quota provider
+  LongCatBrowserSession.swift explicit multi-browser session importer
+  LongCatCardView.swift  single remaining-token-ring menu card
+  ProviderLogo.swift     provider brand icons (doubao/opencode/deepseek/apinebula/zai/kimi/grokpool/longcat)
   CookieKeychainStore.swift Keychain + file-cache credential store
   CredentialFileCache.swift on-disk credential mirror (mode 0600)
   MenuBuilder.swift      menu construction incl. SummaryRowView overview rows

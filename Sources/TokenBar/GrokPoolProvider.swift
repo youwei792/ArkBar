@@ -101,8 +101,8 @@ struct GrokPoolModelUsageDTO: Decodable {
 /// from the grok2api admin panel: log in with the administrator username and
 /// password (`POST /api/admin/v1/auth/login`), then read the 24-hour dashboard
 /// (`GET /api/admin/v1/dashboard?period=24h`) with the short-lived Bearer
-/// access token. There is no money balance — the ring shows the request
-/// success rate and the status item can show the 24h billed cost.
+/// access token. There is no money balance — the ring shows the active-account
+/// availability rate and the status item can show the 24h billed cost.
 final class GrokPoolProvider: UsageProvider {
     let displayName = "GrokPool"
 
@@ -202,11 +202,12 @@ final class GrokPoolProvider: UsageProvider {
     {
         let dashboard = try await fetchDashboard(baseURL: baseURL, accessToken: accessToken)
         let summary = Self.makeSummary(dashboard)
-        // The ring reflects request success: 0% used means everything
-        // succeeded, so the remaining percent is the success rate itself.
+        // The ring reflects active-account availability: 0% used means every
+        // account is available, so the remaining percent is the availability
+        // rate itself.
         let window = UsageWindow(
             label: "24h",
-            usedPercent: max(0, min(100, 100 - summary.successRate)),
+            usedPercent: max(0, min(100, 100 - summary.availabilityRate)),
             used: nil, total: nil, resetsAt: nil)
         let plan = PlanSnapshot(
             id: "grokpool",
