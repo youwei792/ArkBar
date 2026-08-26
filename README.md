@@ -9,7 +9,7 @@ TokenBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding
 - 面向 macOS 14+ 的原生 AppKit 界面。
 - 分套餐展示会话、每周和每月的**剩余**用量与重置倒计时。
 - 用量越低，圆环渐变颜色越深，便于快速识别风险。
-- 支持自动选择、`arkcli` SSO、Volcengine AK/SK 和 Ark API Key。
+- 支持自动选择、`arkcli` SSO、Volcengine AK/SK（可在设置页填写，长期有效）和 Ark API Key。
 - DeepSeek 监控（余额、今日/每月费用、Token 用量、请求次数、缓存命中/未命中/输出分类），余额圆环 = 本月已用 ÷ (本月已用 + 余额)，充值后随刷新自动更新。
 - DeepSeek 凭据支持三种来源：设置页填写（存入 Keychain）、环境变量，以及**自动读取 Chrome 中已登录的 DeepSeek 平台会话**（无需任何 Key）。
 - APINebula（new-api 中转站）监控：余额圆环 = 累计已用 ÷ (累计已用 + 余额)，今日/每月费用、Token、请求次数，以及**缓存读/未缓存/输出**分类（来自控制台使用日志）。
@@ -68,7 +68,7 @@ lipo -archs TokenBar
 | 数据源 | 配置方式 | 覆盖范围与限制 |
 | --- | --- | --- |
 | `arkcli` SSO（推荐） | `npm install -g @volcengine/ark-cli`，随后执行 `arkcli auth login volc-sso` | 可读取 `arkcli usage plan` 提供的个人版/团队版 Coding 与 Agent Plan 用量。 |
-| Volcengine AK/SK | `VOLCENGINE_ACCESS_KEY_ID` 和 `VOLCENGINE_SECRET_ACCESS_KEY` | 仅 Coding Plan，用 Volcengine V4 签名请求读取。 |
+| Volcengine AK/SK | 三选一：在“设置 → Ark 套餐”填写 Access Key / Secret Key（存 Keychain + 文件缓存）、环境变量 `VOLCENGINE_ACCESS_KEY_ID` 和 `VOLCENGINE_SECRET_ACCESS_KEY` | 仅 Coding Plan，用 Volcengine V4 签名请求读取。IAM 长期密钥不会过期：填一次只读子账号密钥对即可免去 arkcli SSO 约 48 小时一轮的重新登录。凭据优先级：设置值 > 环境变量。 |
 | Ark API Key | `ARK_API_KEY`；可选 `ARK_MODEL_ID` | 仅单个请求限额窗口。探测会发送最小 API 请求，可能消耗请求额度。 |
 | OpenCode Go | 在“设置 → OpenCode Go”中明确点击“重新读取浏览器登录”，或选择手动 Cookie | 从 `opencode.ai` 的订阅页面读取其返回的套餐用量；不会用本地消费记录估算余额。 |
 | DeepSeek | 三选一：设置页填写 API Key / Platform Token（存 Keychain）、环境变量 `DEEPSEEK_API_KEY` / `DEEPSEEK_PLATFORM_TOKEN`，或让 Chrome 登录 platform.deepseek.com 后自动读取 | 余额来自 `api.deepseek.com/user/balance`（或平台钱包）；今日/每月费用、Token、请求次数与分类明细来自平台 `usage/amount` + `usage/cost`。凭据优先级：设置值 > 环境变量 > Chrome 会话。 |
@@ -96,7 +96,7 @@ export LONGCAT_MANUAL_COOKIE='...'
 ## 如何理解界面
 
 - 所有核心百分比都表示**剩余**，不是已用。
-- 菜单栏胶囊显示当前所选标签的 Session / 5 小时剩余量；在**概览**模式下显示所有可见 Provider 中剩余最低（最紧急）的那一侧。显示样式可在“设置 → 外观 → 显示模式”中选择进度条、百分比与 Provider Logo 的组合。
+- 菜单栏胶囊按「绑定约束」取值（与 CodexBar 一致）：默认显示当前所选标签的 Session / 5 小时剩余量；但若更长周期窗口（每周/每月）已完全用尽，则改显该耗尽窗口——例如周额度没了而 Session 还是 100% 时，菜单栏如实显示 0% 而不是误导性的 100%。在**概览**模式下显示所有可见 Provider 中剩余最低（最紧急）的那个。显示样式可在“设置 → 外观 → 显示模式”中选择进度条、百分比与 Provider Logo 的组合。
 - 切换器最前为可选的「概览」；Provider 较多时切换器自动收成仅图标（完整名称在 tooltip）。
 - 圆环中心显示会话（或 5 小时）剩余量；每一圈也按自己的**剩余**量填充，因此 100% 会显示为满环。
 - 圆环右侧依次为会话、每周、每月剩余量；每项配有自身的重置倒计时。
@@ -129,7 +129,7 @@ export LONGCAT_MANUAL_COOKIE='...'
 - 在 GrokPool 设置页填写的管理员账号密码只保存在本机 Keychain + 文件缓存，不会写入 UserDefaults、源码或日志；Base URL 仅是地址偏好，存 UserDefaults。登录令牌只在内存缓存（15 分钟有效期），不会落盘。
 - LongCat 浏览器接入只在用户点击“重新读取浏览器登录”后读取 `longcat.chat` 的会话 Cookie（仅丢弃 `utm_` 跟踪项，保留 passport_token_key、_lxsdk_cuid 等认证项），仅用于调用控制台用量接口，写入 Keychain + 文件缓存。手动粘贴的 Cookie 同样只存 Keychain + 文件缓存。
 - `arkcli` 自己管理 SSO 会话；TokenBar 只运行 `arkcli usage plan --format json` 并解析输出。
-- AK/SK 与 Ark API Key 仅从启动环境读取，TokenBar 不会把它们写入磁盘。
+- 在 Ark 设置页填写的 Access Key / Secret Key 只保存在本机 Keychain + 文件缓存，不会写入 UserDefaults、源码或日志；Ark API Key 仅从启动环境读取。
 - 网络请求仅发送到所选数据源需要的火山方舟接口、`opencode.ai`、`platform.deepseek.com`、智谱配额接口（`open.bigmodel.cn` / `api.z.ai`）、Kimi 配额接口（`api.kimi.com`）、Kimi 控制台接口（`www.kimi.com`）、GrokPool 网关（`grok.axonlume.com`）或 LongCat 控制台（`longcat.chat`）。
 
 ## 开发与测试

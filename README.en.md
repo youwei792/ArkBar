@@ -9,7 +9,7 @@ TokenBar is a native macOS menu-bar app for Volcengine Ark Coding/Agent Plan, Op
 - Native AppKit UI for macOS 14+.
 - Per-plan session, weekly, and monthly remaining quota with reset countdowns.
 - A gradient ring that becomes visually deeper as remaining quota gets low.
-- Auto, `arkcli` SSO, AK/SK, and Ark API key data-source modes.
+- Auto, `arkcli` SSO, AK/SK (enterable in Settings; long-lived), and Ark API key data-source modes.
 - DeepSeek monitoring: balance, today/monthly cost, token counts, request counts, and a cache hit/miss/output breakdown. The balance ring = this month's spend ÷ (spend + balance) and recalculates automatically after a top-up.
 - DeepSeek credentials come from three sources: settings fields (stored in Keychain), environment variables, or the **signed-in DeepSeek Platform session in Chrome** (no key needed at all).
 - APINebula (new-api relay) monitoring: a balance ring (cumulative spend ÷ spend + balance), today/monthly cost, token counts, request counts, and a cache-read/uncached/output split aggregated from the console usage log.
@@ -68,7 +68,7 @@ In **Auto** mode, TokenBar prefers explicitly configured credentials, then falls
 | Source | Configuration | Coverage and limits |
 | --- | --- | --- |
 | `arkcli` SSO (recommended) | `npm install -g @volcengine/ark-cli` then `arkcli auth login volc-sso` | Personal and team Coding/Agent Plan usage exposed by `arkcli usage plan`. |
-| Volcengine AK/SK | `VOLCENGINE_ACCESS_KEY_ID` and `VOLCENGINE_SECRET_ACCESS_KEY` | Coding Plan usage only, via signed `GetCodingPlanUsage`. |
+| Volcengine AK/SK | Any of: enter the Access Key / Secret Key in **Settings → Ark Plans** (stored in Keychain + file cache), or environment variables `VOLCENGINE_ACCESS_KEY_ID` and `VOLCENGINE_SECRET_ACCESS_KEY` | Coding Plan usage only, via signed `GetCodingPlanUsage`. IAM long-lived keys never expire: entering a read-only sub-account key pair once removes arkcli SSO's roughly-48-hour re-login cycle. Precedence: settings values > environment variables. |
 | Ark API key | `ARK_API_KEY`; optionally `ARK_MODEL_ID` | One request-rate-limit window only. The probe sends a minimal API request, so it can consume request quota. |
 | OpenCode Go | Explicitly choose **Re-import Browser Session** in **Settings → OpenCode Go**, or select a manual Cookie | Subscription usage returned by `opencode.ai`; TokenBar never substitutes a local spending estimate. |
 | DeepSeek | Any of: API Key / Platform Token entered in Settings (stored in Keychain), environment variables `DEEPSEEK_API_KEY` / `DEEPSEEK_PLATFORM_TOKEN`, or simply signing in to platform.deepseek.com in Chrome | Balance from `api.deepseek.com/user/balance` (or the platform wallets); today/monthly cost, tokens, request counts, and the category breakdown from the platform `usage/amount` + `usage/cost` endpoints. Credential precedence: settings > environment > Chrome session. |
@@ -96,7 +96,7 @@ export LONGCAT_MANUAL_COOKIE='...'
 ## Reading the UI
 
 - All prominent percentages mean **remaining** quota, not consumed quota.
-- The menu-bar item shows the selected tab's current Session / 5-hour quota left; in **Overview** mode it shows the tightest (lowest remaining) provider. The style (meter bar, percent, provider logo, or a combination) is chosen in **Settings → Appearance → Display mode**.
+- The menu-bar item follows CodexBar's binding-constraint rule: it shows the selected tab's current Session / 5-hour quota left by default, but a fully exhausted longer window (weekly/monthly) takes over — e.g. with the weekly pool spent and the session ring back at 100%, the item honestly reads 0% instead of a misleading 100%. In **Overview** mode it shows the tightest (lowest remaining) provider. The style (meter bar, percent, provider logo, or a combination) is chosen in **Settings → Appearance → Display mode**.
 - The switcher's leading **Overview** tab is optional; with 4+ tabs the switcher collapses to icons (full names in tooltips).
 - The ring centre shows the Session (or 5-hour) quota left, and every ring fills from its own **remaining** value—100% is a full ring.
 - The three ring rows are Session, Weekly, and Monthly remaining quota; each row keeps its own reset countdown.
@@ -129,7 +129,7 @@ Quota reset time is not subscription expiry. TokenBar displays a plan-expiry bad
 - The GrokPool administrator username and password entered in Settings are stored only in the local Keychain + file cache, never UserDefaults, source files, or logs; the base URL is a plain address preference kept in UserDefaults. The login token is cached in memory only (15-minute validity) and never written to disk.
 - LongCat browser access reads the `longcat.chat` session cookies (dropping only `utm_` tracking cookies, keeping `passport_token_key`, `_lxsdk_cuid`, and other identity cookies) only after **Re-import Browser Sign-in** is clicked, and uses them only for the console usage endpoints, writing to the Keychain + file cache. A manually pasted Cookie header is likewise stored only in the local Keychain + file cache.
 - `arkcli` keeps ownership of its SSO session; TokenBar only runs `arkcli usage plan --format json` and parses its output.
-- AK/SK and Ark API keys are read from the launch environment and are never written to disk by TokenBar.
+- The Access Key / Secret Key entered on the Ark settings pane are stored only in the local Keychain + file cache, never in UserDefaults, source code, or logs; the Ark API key is read from the launch environment only.
 - Network requests go only to the required Volcengine Ark endpoints, `opencode.ai`, `platform.deepseek.com`, the Z.ai quota endpoint (`open.bigmodel.cn` / `api.z.ai`), the Kimi quota endpoint (`api.kimi.com`), the Kimi console endpoints (`www.kimi.com`), the GrokPool gateway (`grok.axonlume.com`), or the LongCat console (`longcat.chat`).
 
 ## Development

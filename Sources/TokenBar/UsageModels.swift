@@ -241,6 +241,20 @@ struct ProviderSnapshot: Sendable, Equatable {
             .flatMap(\.windows)
             .first { $0.sortRank == 0 }
     }
+
+    /// Menu-bar metric using CodexBar's combined-display rule: normally the
+    /// Session / 5-hour number, but a longer-cadence window (weekly / monthly)
+    /// with zero remaining overrides it — an exhausted pool blocks every request
+    /// even while the freshly-reset session ring still reads 100%.
+    var menuBarWindow: UsageWindow? {
+        if let exhausted = plans.flatMap(\.windows)
+            .filter({ $0.sortRank > 0 && $0.remainingPercent <= 0 })
+            .min(by: { $0.sortRank < $1.sortRank })
+        {
+            return exhausted
+        }
+        return sessionWindow
+    }
 }
 
 // MARK: - Provider protocol

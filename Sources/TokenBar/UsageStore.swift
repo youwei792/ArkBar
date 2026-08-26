@@ -87,8 +87,8 @@ final class UsageStore: ObservableObject {
             return (tab, s)
         }
         if let first = candidates.min(by: { a, b in
-            let pa = a.1.snapshot?.sessionWindow?.remainingPercent ?? 100
-            let pb = b.1.snapshot?.sessionWindow?.remainingPercent ?? 100
+            let pa = a.1.snapshot?.menuBarWindow?.remainingPercent ?? 100
+            let pb = b.1.snapshot?.menuBarWindow?.remainingPercent ?? 100
             return pa < pb
         }) {
             return first.1
@@ -136,6 +136,16 @@ final class UsageStore: ObservableObject {
         settings.$sourceMode
             .dropFirst()
             .sink { [weak self] _ in
+                self?.rebuildProviders()
+                self?.refresh(tab: .ark)
+            }
+            .store(in: &cancellables)
+        settings.$arkAccessKeyID
+            .combineLatest(settings.$arkSecretAccessKey)
+            .dropFirst()
+            .sink { [weak self] _ in
+                // A saved half-pair resolves to nil in resolvedVolcCredentials,
+                // so rebuilding is always safe here.
                 self?.rebuildProviders()
                 self?.refresh(tab: .ark)
             }
@@ -234,14 +244,14 @@ final class UsageStore: ObservableObject {
         case .cli:
             providers.append(ArkCLIProvider())
         case .api:
-            if let credentials = VolcCredentialResolver.resolve(environment: environment) {
+            if let credentials = resolvedVolcCredentials(environment: environment) {
                 providers.append(VolcAPIProvider(credentials: credentials))
             }
             if let key = ArkAPIKeyResolver.resolve(environment: environment) {
                 providers.append(ArkAPIKeyProvider(apiKey: key))
             }
         case .auto:
-            if let credentials = VolcCredentialResolver.resolve(environment: environment) {
+            if let credentials = resolvedVolcCredentials(environment: environment) {
                 providers.append(VolcAPIProvider(credentials: credentials))
             }
             if let key = ArkAPIKeyResolver.resolve(environment: environment) {
@@ -257,6 +267,15 @@ final class UsageStore: ObservableObject {
         kimiProvider = KimiProvider(settings: settings)
         grokPoolProvider = GrokPoolProvider(settings: settings)
         longcatProvider = LongCatProvider(settings: settings)
+    }
+
+    /// Ark signed-OpenAPI credentials, in the same precedence the DeepSeek
+    /// provider documents: values entered in Settings (Keychain) first, then
+    /// environment variables. A GUI app launched from Finder never sees shell
+    /// rc environment variables, so the Keychain entry is what makes this path
+    /// actually usable.
+    private func resolvedVolcCredentials(environment: [String: String]) -> VolcCredentials? {
+        settings.storedVolcCredentials ?? VolcCredentialResolver.resolve(environment: environment)
     }
 
     func start() {
