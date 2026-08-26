@@ -89,6 +89,36 @@ struct ArkCLIDecodeTests {
         #expect(snapshot.sessionWindow?.remainingPercent == 27)
     }
 
+    @Test("Exhausted weekly pool overrides a fresh session in the menu bar")
+    func exhaustedWeeklyOverridesSession() throws {
+        // The reported failure mode: weekly fully used, session untouched.
+        let json = #"""
+        {"viewer":{"auth_method":"sso"},"items":[
+          {"product":"coding-plan","subscribed":true,
+           "periods":[{"label":"session","percent":0},{"label":"weekly","percent":100}]}
+        ]}
+        """#
+        let snapshot = try ArkCLIProvider.decode(stdout: json.data(using: .utf8)!, date: Date())
+        #expect(snapshot.sessionWindow?.remainingPercent == 100)
+        // menuBarWindow surfaces the binding constraint instead of the fresh 5h ring.
+        let window = snapshot.menuBarWindow
+        #expect(window?.label == "Weekly")
+        #expect(window?.remainingPercent == 0)
+    }
+
+    @Test("Non-exhausted windows never override the session in the menu bar")
+    func freshSessionWinsMenuBar() throws {
+        let json = #"""
+        {"viewer":{"auth_method":"sso"},"items":[
+          {"product":"coding-plan","subscribed":true,
+           "periods":[{"label":"session","percent":0},{"label":"weekly","percent":80},{"label":"monthly","percent":50}]}
+        ]}
+        """#
+        let snapshot = try ArkCLIProvider.decode(stdout: json.data(using: .utf8)!, date: Date())
+        #expect(snapshot.menuBarWindow?.label == "Session")
+        #expect(snapshot.menuBarWindow?.remainingPercent == 100)
+    }
+
     @Test("auth_method=none throws not-authenticated")
     func throwsWhenNotAuthenticated() throws {
         let json = #"{"viewer":{"auth_method":"none"},"items":[]}"#

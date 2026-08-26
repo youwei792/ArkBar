@@ -289,6 +289,15 @@ private struct GeneralPreferencesPane: View {
 private struct ArkPreferencesPane: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var store: UsageStore
+    @State private var accessKeyField: String
+    @State private var secretKeyField: String
+
+    init(settings: AppSettings, store: UsageStore) {
+        self.settings = settings
+        self.store = store
+        _accessKeyField = State(initialValue: settings.arkAccessKeyID)
+        _secretKeyField = State(initialValue: settings.arkSecretAccessKey)
+    }
 
     var body: some View {
         PreferencesPaneContainer(title: L(.settingsArk)) {
@@ -306,6 +315,21 @@ private struct ArkPreferencesPane: View {
                             Text(sourceName(mode)).tag(mode)
                         }
                     }
+
+                    SecureField(L(.arkAccessKeyIDLabel), text: $accessKeyField)
+                        .onSubmit(saveAccessKeyID)
+                    Button(L(.saveCredential), action: saveAccessKeyID)
+
+                    SecureField(L(.arkSecretAccessKeyLabel), text: $secretKeyField)
+                        .onSubmit(saveSecretAccessKey)
+                    Button(L(.saveCredential), action: saveSecretAccessKey)
+
+                    Label(L(.arkAKSKHint), systemImage: "key")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+
                     ProviderStatusRows(
                         status: store.arkStatus,
                         isRefreshing: store.arkIsRefreshing,
@@ -344,6 +368,14 @@ private struct ArkPreferencesPane: View {
         case .cli: L(.sourceCli)
         case .api: L(.sourceApi)
         }
+    }
+
+    private func saveAccessKeyID() {
+        settings.setArkAccessKeyID(accessKeyField)
+    }
+
+    private func saveSecretAccessKey() {
+        settings.setArkSecretAccessKey(secretKeyField)
     }
 }
 

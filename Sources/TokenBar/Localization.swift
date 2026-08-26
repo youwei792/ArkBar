@@ -200,6 +200,9 @@ enum LKey: String {
     case deepseekPlatformTokenLabel = "deepseek.platformTokenLabel"
     case saveCredential = "deepseek.saveCredential"
     case deepseekBrowserSession = "deepseek.browserSession"
+    case arkAccessKeyIDLabel = "ark.accessKeyIDLabel"
+    case arkSecretAccessKeyLabel = "ark.secretAccessKeyLabel"
+    case arkAKSKHint = "ark.akskHint"
     case nebulaBaseURLLabel = "nebula.baseURLLabel"
     case nebulaBaseURLHint = "nebula.baseURLHint"
     case nebulaAPIKeyLabel = "nebula.apiKeyLabel"
@@ -452,6 +455,9 @@ final class L10n: ObservableObject {
         add(.lastFetch, "上次", "Last")
         add(.source, "来源", "Source")
         add(.sourceAuto, "自动 (AK/SK → API Key → arkcli)", "Auto (AK/SK -> API Key -> arkcli)")
+        add(.arkAccessKeyIDLabel, "Access Key ID（可选）", "Access Key ID (optional)")
+        add(.arkSecretAccessKeyLabel, "Secret Access Key（可选）", "Secret Access Key (optional)")
+        add(.arkAKSKHint, "按以下优先级读取：本页填写的 IAM 密钥（保存在钥匙串，长期有效不会过期）> 环境变量（VOLCENGINE_ACCESS_KEY_ID 等）> arkcli 登录。建议在控制台创建只读权限的子账号密钥对填到这里，之后无需再定期 arkcli 重新登录。", "Credentials are read in this order: the IAM key pair entered here (stored in Keychain; long-lived, never expires) > environment variables (VOLCENGINE_ACCESS_KEY_ID etc.) > the arkcli sign-in session. Create a read-only sub-account key pair in the console and enter it here to stop needing periodic arkcli re-logins.")
         add(.sourceCli, "arkcli (SSO)", "arkcli (SSO)")
         add(.sourceApi, "API (AK/SK 或 API Key)", "API (AK/SK or API Key)")
         add(.connectedVia, "已连接 ·", "Connected via")

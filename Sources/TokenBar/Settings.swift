@@ -234,6 +234,12 @@ final class AppSettings: ObservableObject {
     @Published private(set) var deepseekApiKey: String
     @Published private(set) var deepseekPlatformToken: String
 
+    /// Ark IAM long-lived Access Key pair (Keychain mirrors, never persisted
+    /// to UserDefaults). Unlike the arkcli SSO session these credentials do not
+    /// expire, so the signed OpenAPI keeps working without periodic re-login.
+    @Published private(set) var arkAccessKeyID: String
+    @Published private(set) var arkSecretAccessKey: String
+
     /// Nebula relay base URL (a harmless UI preference, so it lives in
     /// UserDefaults) and its API key (Keychain mirror, never persisted there).
     @Published var nebulaBaseURL: String {
@@ -275,6 +281,7 @@ final class AppSettings: ObservableObject {
 
     var deepseekApiKeyHasValue: Bool { !deepseekApiKey.isEmpty }
     var deepseekPlatformTokenHasValue: Bool { !deepseekPlatformToken.isEmpty }
+    var arkCredentialsHaveValue: Bool { !arkAccessKeyID.isEmpty && !arkSecretAccessKey.isEmpty }
     var nebulaAPIKeyHasValue: Bool { !nebulaAPIKey.isEmpty }
     var zaiAPIKeyHasValue: Bool { !zaiAPIKey.isEmpty }
     var kimiAPIKeyHasValue: Bool { !kimiAPIKey.isEmpty }
@@ -355,6 +362,33 @@ final class AppSettings: ObservableObject {
     func loadDeepSeekFromKeychain() {
         deepseekApiKey = CookieKeychainStore.load(provider: "deepseek-apikey") ?? ""
         deepseekPlatformToken = CookieKeychainStore.load(provider: "deepseek-platform") ?? ""
+    }
+
+    func setArkAccessKeyID(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: key, provider: "ark-accesskey")
+        arkAccessKeyID = persisted ? (key ?? "") : (CookieKeychainStore.load(provider: "ark-accesskey") ?? "")
+    }
+
+    func setArkSecretAccessKey(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: key, provider: "ark-secretkey")
+        arkSecretAccessKey = persisted ? (key ?? "") : (CookieKeychainStore.load(provider: "ark-secretkey") ?? "")
+    }
+
+    func loadArkFromKeychain() {
+        arkAccessKeyID = CookieKeychainStore.load(provider: "ark-accesskey") ?? ""
+        arkSecretAccessKey = CookieKeychainStore.load(provider: "ark-secretkey") ?? ""
+    }
+
+    /// The stored Ark IAM key pair, when both halves are present. Read on the
+    /// main actor by `UsageStore.rebuildProviders` to build the signed-OpenAPI
+    /// provider; environment variables remain the fallback.
+    var storedVolcCredentials: VolcCredentials? {
+        guard !arkAccessKeyID.isEmpty, !arkSecretAccessKey.isEmpty else { return nil }
+        return VolcCredentials(accessKeyID: arkAccessKeyID, secretAccessKey: arkSecretAccessKey)
     }
 
     func setOpenCodeCookie(_ value: String?) {
@@ -457,6 +491,8 @@ final class AppSettings: ObservableObject {
         self.opencodeCookie = CookieKeychainStore.load(provider: "opencode") ?? ""
         self.deepseekApiKey = CookieKeychainStore.load(provider: "deepseek-apikey") ?? ""
         self.deepseekPlatformToken = CookieKeychainStore.load(provider: "deepseek-platform") ?? ""
+        self.arkAccessKeyID = CookieKeychainStore.load(provider: "ark-accesskey") ?? ""
+        self.arkSecretAccessKey = CookieKeychainStore.load(provider: "ark-secretkey") ?? ""
         self.nebulaBaseURL = defaults.string(forKey: Keys.nebulaBaseURL)
             ?? NebulaProvider.defaultBaseURL
         self.nebulaAPIKey = CookieKeychainStore.load(provider: "nebula-key") ?? ""

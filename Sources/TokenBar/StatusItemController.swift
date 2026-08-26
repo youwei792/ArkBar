@@ -211,12 +211,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             return tab
         }
         // Summary mode: pick the provider with the lowest remaining percent.
+        // Uses menuBarWindow so an exhausted weekly pool outranks a fresh
+        // 100% session on another provider.
         let candidates = settings.visibleTabs
             .map { ($0, store.status(for: $0)) }
-            .filter { $0.1.snapshot?.sessionWindow != nil }
+            .filter { $0.1.snapshot?.menuBarWindow != nil }
         if let best = candidates.min(by: { a, b in
-            let pa = a.1.snapshot?.sessionWindow?.remainingPercent ?? 100
-            let pb = b.1.snapshot?.sessionWindow?.remainingPercent ?? 100
+            let pa = a.1.snapshot?.menuBarWindow?.remainingPercent ?? 100
+            let pb = b.1.snapshot?.menuBarWindow?.remainingPercent ?? 100
             return pa < pb
         }) {
             return best.0
@@ -237,10 +239,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             remaining = nil
             stale = true
         case let .stale(snapshot, _):
-            remaining = snapshot.sessionWindow?.remainingPercent
+            remaining = snapshot.menuBarWindow?.remainingPercent
             stale = true
         case let .ok(snapshot):
-            if let window = snapshot.sessionWindow {
+            if let window = snapshot.menuBarWindow {
                 remaining = window.remainingPercent
                 stale = false
             } else {
