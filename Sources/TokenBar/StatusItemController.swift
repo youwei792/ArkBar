@@ -29,6 +29,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         if let button = statusItem.button {
             button.imagePosition = .imageLeft
             button.wantsLayer = true
+            // The ring gauge bakes the current appearance's colours in, so it
+            // must be re-rendered when the menu-bar appearance changes
+            // (template icons used to re-tint for free).
+            button.publisher(for: \.effectiveAppearance)
+                .dropFirst()
+                .receive(on: RunLoop.main)
+                .sink { [weak self] _ in self?.updateIcon() }
+                .store(in: &cancellables)
             let trackingArea = NSTrackingArea(
                 rect: button.bounds,
                 options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
@@ -193,7 +201,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         switch displayMode {
         case .iconOnly, .logoOnly: 24
         case .iconAndPercent, .logoAndPercent: showsBalance ? 86 : 58
-        case .logoAndBar: 46
+        case .logoAndRings: 42
         case .percentOnly: showsBalance ? 64 : 40
         }
     }
@@ -256,13 +264,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let valueText = statusValueText(
             for: effectiveStatus, tab: tab, remaining: remaining,
             stale: stale, showBalance: showBalance)
+        let rings = menuBarRings(for: effectiveStatus)
 
         switch settings.displayMode {
         case .iconOnly:
-            button.image = IconRenderer.makeBarIcon(remainingPercent: remaining, stale: stale)
+            button.image = IconRenderer.makeRingIcon(rings: rings, stale: stale)
             button.title = ""
         case .iconAndPercent:
-            button.image = IconRenderer.makeBarIcon(remainingPercent: remaining, stale: stale)
+            button.image = IconRenderer.makeRingIcon(rings: rings, stale: stale)
             setPercentTitle(valueText, on: button)
         case .percentOnly:
             button.image = nil
@@ -273,11 +282,27 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         case .logoAndPercent:
             button.image = IconRenderer.makeLogoIcon(tab: tab)
             setPercentTitle(valueText, on: button)
-        case .logoAndBar:
-            button.image = IconRenderer.makeLogoAndBarIcon(
-                tab: tab, remainingPercent: remaining, stale: stale)
+        case .logoAndRings:
+            button.image = IconRenderer.makeLogoAndRingIcon(tab: tab, rings: rings, stale: stale)
             button.title = ""
         }
+    }
+
+    /// Rings for the status-item gauge: the tightest plan's windows when a
+    /// snapshot exists (three rings for session/weekly/monthly plans, one for
+    /// single-window providers), or nothing — the renderer then draws faint
+    /// placeholder tracks so "no data" keeps the same gauge shape.
+    private func menuBarRings(for status: UsageStore.LoadStatus) -> [RingRenderer.Ring] {
+        // `tightestWindow` alone cannot rebuild the sibling windows, so use the
+        // plan that owns it — the same plan driving the card's rings.
+        guard let snapshot = status.snapshot,
+              let window = snapshot.tightestWindow,
+              let plan = snapshot.plans.first(where: { $0.windows.contains(window) })
+                ?? snapshot.plans.first(where: { !$0.windows.isEmpty })
+        else {
+            return []
+        }
+        return RingRenderer.menuBarRings(for: plan)
     }
 
     /// Builds the numeric title shown next to the icon. For balance-capable

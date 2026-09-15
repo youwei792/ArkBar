@@ -43,6 +43,99 @@ enum RingRenderer {
         return image
     }
 
+    /// Compact menu-bar gauge: the same concentric rings (monthly outer,
+    /// weekly middle, session inner) shrunk onto a tiny canvas. Missing rings
+    /// are skipped and single-window providers collapse to one ring, so the
+    /// glyph always mirrors the card's data instead of implying phantom
+    /// windows. An empty input draws faint placeholder tracks so "no data"
+    /// still reads as the same gauge. No center text and no endpoint dots —
+    /// both would smear at menu-bar size.
+    static func makeMenuBarImage(rings: [Ring], stale: Bool, size: CGFloat = 18) -> NSImage {
+        let outputSize = NSSize(width: size, height: size)
+        let image = NSImage(size: outputSize, flipped: false) { rect in
+            drawCompact(rings: rings, stale: stale, in: rect)
+            return true
+        }
+        return image
+    }
+
+    /// Rings for the menu-bar gauge, derived from one plan: the dated windows
+    /// (monthly outer, weekly middle, session inner) when the plan has any, or
+    /// a single balance-toned ring for single-window plans (balance / 24h /
+    /// Requests quotas). No windows means no rings — the caller then draws
+    /// placeholder tracks.
+    static func menuBarRings(for plan: PlanSnapshot) -> [Ring] {
+        let windows = plan.windows
+        func find(_ labels: Set<String>) -> UsageWindow? {
+            windows.first { labels.contains($0.label.lowercased()) }
+        }
+        let dated: [Ring] = [
+            find(["monthly", "month"]).map {
+                Ring(id: "monthly", label: $0.displayName,
+                     remainingPercent: $0.remainingPercent, tone: .monthly)
+            },
+            find(["weekly", "week"]).map {
+                Ring(id: "weekly", label: $0.displayName,
+                     remainingPercent: $0.remainingPercent, tone: .weekly)
+            },
+            find(["session", "5h", "5-hour", "five_hour"]).map {
+                Ring(id: "session", label: $0.displayName,
+                     remainingPercent: $0.remainingPercent, tone: .session)
+            },
+        ].compactMap { $0 }
+        if !dated.isEmpty { return dated }
+        if let single = windows.first {
+            return [Ring(id: single.label, label: single.displayName,
+                         remainingPercent: single.remainingPercent, tone: .balance)]
+        }
+        return []
+    }
+
+    private static func drawCompact(rings: [Ring], stale: Bool, in rect: CGRect) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        // Thin strokes survive the shrink: 1.7pt progress on a ~1pt-wider
+        // track, 1pt gaps. Radii step inward so three rings fit the 18pt
+        // canvas (outer 7.35, middle 4.65, inner 1.95) without touching.
+        let width: CGFloat = 1.7
+        let gap: CGFloat = 1.0
+        let maxRadius = min(rect.width, rect.height) / 2 - width / 2 - 0.8
+        // No data still draws the gauge shape: three faint tracks so an empty
+        // status item reads as "rings with nothing yet" rather than blank.
+        let trackCount = rings.isEmpty ? 3 : rings.count
+        for index in 0 ..< trackCount {
+            let radius = maxRadius - CGFloat(index) * (width + gap)
+            guard radius > width / 2 else { continue }
+            ctx.setLineWidth(width + 0.9)
+            ctx.setLineCap(.butt)
+            ctx.setStrokeColor(NSColor.tertiaryLabelColor.withAlphaComponent(0.32).cgColor)
+            ctx.addArc(center: center, radius: radius, startAngle: 0, endAngle: .pi * 2, clockwise: false)
+            ctx.strokePath()
+
+            guard index < rings.count else { continue }
+            let ring = rings[index]
+            let trim = CGFloat(min(100, max(0, ring.remainingPercent))) / 100
+            guard trim > 0.02 else { continue }
+            // Solid mid-spectrum colour per ring — the same hue family as the
+            // card's gradient, but a flat field reads cleaner at 18pt.
+            let startAngle: CGFloat = .pi / 2
+            let isFullRing = trim >= 0.995
+            ctx.setLineWidth(width)
+            // A full circle uses butt caps so the joint has no round-cap bump.
+            ctx.setLineCap(isFullRing ? .butt : .round)
+            ctx.setStrokeColor(ring.color.withAlphaComponent(stale ? 0.45 : 1.0).cgColor)
+            if isFullRing {
+                ctx.addArc(center: center, radius: radius, startAngle: 0, endAngle: .pi * 2, clockwise: false)
+            } else {
+                ctx.addArc(
+                    center: center, radius: radius,
+                    startAngle: startAngle, endAngle: startAngle - .pi * 2 * trim,
+                    clockwise: true)
+            }
+            ctx.strokePath()
+        }
+    }
+
     private static func draw(rings: [Ring], primaryRemaining: Double?, primaryLabel: String?, in rect: CGRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
 

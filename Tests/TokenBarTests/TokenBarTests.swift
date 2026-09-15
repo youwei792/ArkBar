@@ -357,7 +357,7 @@ struct MenuBuilderTests {
         #expect(StatusItemController.statusItemLength(for: .percentOnly) == 40)
         #expect(StatusItemController.statusItemLength(for: .logoOnly) == 24)
         #expect(StatusItemController.statusItemLength(for: .logoAndPercent) == 58)
-        #expect(StatusItemController.statusItemLength(for: .logoAndBar) == 46)
+        #expect(StatusItemController.statusItemLength(for: .logoAndRings) == 42)
     }
 
     @Test("Balance display widens the status item to fit currency text")
@@ -365,9 +365,9 @@ struct MenuBuilderTests {
     func balanceDisplayWidensStatusItem() {
         #expect(StatusItemController.statusItemLength(for: .iconAndPercent, showsBalance: true) == 86)
         #expect(StatusItemController.statusItemLength(for: .percentOnly, showsBalance: true) == 64)
-        // Icon-only/logo/logoAndBar layouts have no text and stay unchanged.
+        // Icon-only/logo/logo+rings layouts have no text and stay unchanged.
         #expect(StatusItemController.statusItemLength(for: .iconOnly, showsBalance: true) == 24)
-        #expect(StatusItemController.statusItemLength(for: .logoAndBar, showsBalance: true) == 46)
+        #expect(StatusItemController.statusItemLength(for: .logoAndRings, showsBalance: true) == 42)
     }
 
     @Test("Money formatting uses the correct currency symbol per provider")
@@ -458,33 +458,63 @@ struct MenuBuilderTests {
 @Suite("IconRenderer")
 @MainActor
 struct IconRendererTests {
-    @Test("Produces a template image at 18x18pt")
-    func makesTemplateImage() {
-        let icon = IconRenderer.makeBarIcon(remainingPercent: 50, stale: false)
+    @Test("Ring icon renders full-colour at 18x18pt")
+    func makesRingIcon() {
+        let icon = IconRenderer.makeRingIcon(
+            rings: [.init(id: "session", label: "Session", remainingPercent: 50, tone: .session)],
+            stale: false)
         #expect(icon.size.width == 18)
         #expect(icon.size.height == 18)
-        #expect(icon.isTemplate == true)
+        #expect(icon.isTemplate == false)
     }
 
-    @Test("Logo-only and logo+bar icons stay template images")
-    func logoIconsAreTemplate() {
+    @Test("Logo-only icon stays a template image; logo+rings is full-colour")
+    func logoIcons() {
         let logo = IconRenderer.makeLogoIcon(tab: .deepseek)
         #expect(logo.isTemplate == true)
-        let combo = IconRenderer.makeLogoAndBarIcon(tab: .deepseek, remainingPercent: 73, stale: false)
-        #expect(combo.isTemplate == true)
-        #expect(combo.size.width == 30)
+        let combo = IconRenderer.makeLogoAndRingIcon(
+            tab: .deepseek,
+            rings: [.init(id: "session", label: "Session", remainingPercent: 73, tone: .session)],
+            stale: false)
+        #expect(combo.isTemplate == false)
+        #expect(combo.size.width == 36)
+    }
+
+    @Test("Menu-bar ring mapping mirrors the card: dated windows or one balance ring")
+    func menuBarRingsMirrorCards() {
+        let plan = PlanSnapshot(
+            id: "test", product: .codingPlan, edition: nil, tier: nil, seatID: nil,
+            subscribed: true,
+            windows: [
+                UsageWindow(label: "Monthly", usedPercent: 31, used: nil, total: nil, resetsAt: nil),
+                UsageWindow(label: "Weekly", usedPercent: 9, used: nil, total: nil, resetsAt: nil),
+                UsageWindow(label: "5-hour", usedPercent: 3, used: nil, total: nil, resetsAt: nil),
+            ],
+            expiryDate: nil, errorMessage: nil)
+        let rings = RingRenderer.menuBarRings(for: plan)
+        #expect(rings.map(\.id) == ["monthly", "weekly", "session"])
+        #expect(rings.map(\.tone) == [.monthly, .weekly, .session])
+
+        let balancePlan = PlanSnapshot(
+            id: "test", product: .deepseek, edition: nil, tier: nil, seatID: nil,
+            subscribed: true,
+            windows: [UsageWindow(label: "balance", usedPercent: 40, used: nil, total: nil, resetsAt: nil)],
+            expiryDate: nil, errorMessage: nil)
+        let balanceRings = RingRenderer.menuBarRings(for: balancePlan)
+        #expect(balanceRings.count == 1)
+        #expect(balanceRings.first?.tone == .balance)
     }
 
     @Test("Writes menu-bar style strip for visual inspection")
     func writesMenuBarStylesPNG() throws {
         // One row per DisplayMode so a human can eyeball the combos.
         let modes: [(AppSettings.DisplayMode, String)] = [
-            (.iconOnly, "bar"),
-            (.iconAndPercent, "bar+%"),
+            (.iconOnly, "rings"),
+            (.iconAndPercent, "rings+%"),
             (.percentOnly, "%"),
             (.logoOnly, "logo"),
             (.logoAndPercent, "logo+%"),
-            (.logoAndBar, "logo+bar"),
+            (.logoAndRings, "logo+rings"),
         ]
         let cell = 96
         let strip = NSImage(size: NSSize(width: cell * modes.count, height: cell), flipped: false) { rect in
@@ -494,21 +524,41 @@ struct IconRendererTests {
                 let sub = NSImage(size: NSSize(width: cell, height: cell), flipped: false) { r in
                     NSColor.clear.setFill()
                     r.fill()
+                    let rings: [RingRenderer.Ring] = [
+                        .init(id: "monthly", label: "Monthly", remainingPercent: 69, tone: .monthly),
+                        .init(id: "weekly", label: "Weekly", remainingPercent: 91, tone: .weekly),
+                        .init(id: "session", label: "Session", remainingPercent: 97, tone: .session),
+                    ]
                     let icon: NSImage? = switch mode.0 {
-                    case .iconOnly, .iconAndPercent: IconRenderer.makeBarIcon(remainingPercent: 73, stale: false)
+                    case .iconOnly, .iconAndPercent: IconRenderer.makeRingIcon(rings: rings, stale: false)
                     case .percentOnly: nil
                     case .logoOnly: IconRenderer.makeLogoIcon(tab: .deepseek)
                     case .logoAndPercent: IconRenderer.makeLogoIcon(tab: .deepseek)
-                    case .logoAndBar: IconRenderer.makeLogoAndBarIcon(tab: .deepseek, remainingPercent: 73, stale: false)
+                    case .logoAndRings: IconRenderer.makeLogoAndRingIcon(tab: .deepseek, rings: rings, stale: false)
                     }
-                    // Tint template black for visibility on the light strip.
-                    let tinted = NSImage(size: icon?.size ?? .zero, flipped: false) { tr in
-                        NSColor.black.setFill(); tr.fill()
-                        icon?.draw(in: tr, from: .zero, operation: .destinationIn, fraction: 1)
-                        return true
+                    // The logo-only cell is a template: tint black for visibility.
+                    // Ring cells are full-colour and drawn as-is.
+                    let drawn: NSImage? = if let icon, case .logoOnly = mode.0 {
+                        NSImage(size: icon.size, flipped: false) { tr in
+                            NSColor.black.setFill(); tr.fill()
+                            icon.draw(in: tr, from: .zero, operation: .destinationIn, fraction: 1)
+                            return true
+                        }
+                    } else {
+                        icon
                     }
-                    if let icon {
-                        tinted.draw(in: r.insetBy(dx: 12, dy: 24), from: .zero, operation: .sourceOver, fraction: 1)
+                    if let drawn {
+                        // Keep the aspect: an 18x18 icon stretched into a wide
+                        // cell would read as an ellipse and mislead the eyeball.
+                        let avail = r.insetBy(dx: 12, dy: 28)
+                        let s = min(
+                            avail.width / drawn.size.width,
+                            avail.height / drawn.size.height)
+                        let w = drawn.size.width * s
+                        let h = drawn.size.height * s
+                        drawn.draw(
+                            in: NSRect(x: r.midX - w / 2, y: r.midY - h / 2 + 4, width: w, height: h),
+                            from: .zero, operation: .sourceOver, fraction: 1)
                     }
                     let title = mode.1
                     let attrs: [NSAttributedString.Key: Any] = [
@@ -530,37 +580,47 @@ struct IconRendererTests {
         #expect(FileManager.default.fileExists(atPath: "/tmp/tokenbar_menu_styles.png"))
     }
 
-    @Test("Writes a tinted PNG to /tmp for visual inspection")
-    func writesPNG() throws {
-        // Render several states onto a white strip so a human can eyeball them.
-        let states: [(Double?, Bool, String)] = [
-            (27, false, "27%"),
-            (73, false, "73%"),
-            (nil, true, "no-data/stale"),
-            (100, false, "100%"),
+    @Test("Writes a menu-bar ring strip to /tmp for visual inspection")
+    func writesMenuBarRingsPNG() throws {
+        // Render several states onto a dark strip (like a dark menu bar).
+        let states: [(rings: [RingRenderer.Ring], stale: Bool, label: String)] = [
+            ([
+                .init(id: "monthly", label: "Monthly", remainingPercent: 69, tone: .monthly),
+                .init(id: "weekly", label: "Weekly", remainingPercent: 91, tone: .weekly),
+                .init(id: "session", label: "Session", remainingPercent: 97, tone: .session),
+            ], false, "3 rings"),
+            ([.init(id: "balance", label: "balance", remainingPercent: 73, tone: .balance)], false, "1 ring"),
+            ([], true, "no-data"),
+            ([
+                .init(id: "monthly", label: "Monthly", remainingPercent: 100, tone: .monthly),
+                .init(id: "weekly", label: "Weekly", remainingPercent: 100, tone: .weekly),
+                .init(id: "session", label: "Session", remainingPercent: 100, tone: .session),
+            ], false, "full"),
         ]
-        let cell = 72
+        let cell = 96
         let strip = NSImage(size: NSSize(width: cell * states.count, height: cell), flipped: false) { rect in
-            NSColor.white.setFill()
+            NSColor(calibratedWhite: 0.15, alpha: 1).setFill()
             rect.fill()
             for (i, state) in states.enumerated() {
-                let icon = IconRenderer.makeIcon(remainingPercent: state.0, stale: state.1)
-                // Tint template icon black on white.
-                let tinted = NSImage(size: icon.size, flipped: false) { r in
-                    NSColor.black.setFill(); r.fill()
-                    icon.draw(in: r, from: .zero, operation: .destinationIn, fraction: 1)
-                    return true
-                }
+                let icon = IconRenderer.makeRingIcon(rings: state.rings, stale: state.stale)
                 let cellRect = NSRect(x: i * cell, y: 0, width: cell, height: cell)
-                tinted.draw(in: cellRect.insetBy(dx: 18, dy: 18), from: .zero, operation: .sourceOver, fraction: 1)
+                icon.draw(in: cellRect.insetBy(dx: 18, dy: 18), from: .zero, operation: .sourceOver, fraction: 1)
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium),
+                    .foregroundColor: NSColor.white,
+                ]
+                let size = state.label.size(withAttributes: attrs)
+                state.label.draw(
+                    at: NSPoint(x: cellRect.midX - size.width / 2, y: 6),
+                    withAttributes: attrs)
             }
             return true
         }
         let tiff = strip.tiffRepresentation!
         let rep = NSBitmapImageRep(data: tiff)!
         let png = rep.representation(using: .png, properties: [:])!
-        try png.write(to: URL(fileURLWithPath: "/tmp/tokenbar_icons.png"))
-        #expect(FileManager.default.fileExists(atPath: "/tmp/tokenbar_icons.png"))
+        try png.write(to: URL(fileURLWithPath: "/tmp/tokenbar_rings.png"))
+        #expect(FileManager.default.fileExists(atPath: "/tmp/tokenbar_rings.png"))
     }
 
     @Test("A 100 percent remaining ring is painted as a full ring")
@@ -582,6 +642,53 @@ struct IconRendererTests {
         let fullAlpha = try #require(fullRep.colorAt(x: 50, y: 8)).alphaComponent
         let emptyAlpha = try #require(emptyRep.colorAt(x: 50, y: 8)).alphaComponent
         #expect(fullAlpha > emptyAlpha + 0.4)
+    }
+
+    @Test("The compact menu-bar gauge draws three concentric rings at 18pt")
+    func compactGaugeDrawsThreeRings() throws {
+        let image = RingRenderer.makeMenuBarImage(
+            rings: [
+                .init(id: "monthly", label: "Monthly", remainingPercent: 69, tone: .monthly),
+                .init(id: "weekly", label: "Weekly", remainingPercent: 91, tone: .weekly),
+                .init(id: "session", label: "Session", remainingPercent: 97, tone: .session),
+            ],
+            stale: false,
+            size: 18)
+        let rep = NSBitmapImageRep(data: try #require(image.tiffRepresentation))!
+        // The bitmap is 18x18 points, y measured down from the top. At these
+        // remaining values every ring's progress sweeps past the bottom, so
+        // the bottom centre of each expected radius (outer 7.35, middle 4.65,
+        // inner 1.95) must be opaque.
+        func pixel(radius: CGFloat) -> NSColor? {
+            rep.colorAt(x: 9, y: Int((9 + radius).rounded()))
+        }
+        for radius: CGFloat in [7.35, 4.65, 1.95] {
+            let alpha = pixel(radius: radius)?.alphaComponent ?? 0
+            #expect(alpha > 0.5, "radius \(radius) should be on a ring (got alpha \(alpha))")
+        }
+        // A corner pixel is far from every ring and must stay background.
+        let corner = rep.colorAt(x: 0, y: 0)?.alphaComponent ?? 1
+        #expect(corner < 0.1, "corner should be background (got alpha \(corner))")
+        // Outer (monthly violet-blue) vs inner (session mint-green) hues differ.
+        func normalizedGreen(_ color: NSColor?) -> CGFloat {
+            guard let c = color?.usingColorSpace(.sRGB) else { return 0 }
+            let peak = max(c.redComponent, c.greenComponent, c.blueComponent, 0.01)
+            return c.greenComponent / peak
+        }
+        let outerGreen = normalizedGreen(pixel(radius: 7.35))
+        let innerGreen = normalizedGreen(pixel(radius: 1.95))
+        #expect(
+            innerGreen - outerGreen > 0.2,
+            "inner session ring should be greener than the outer monthly one")
+    }
+
+    @Test("Empty compact gauge still draws faint placeholder tracks")
+    func compactGaugeEmptyDrawsTracks() throws {
+        let image = RingRenderer.makeMenuBarImage(rings: [], stale: true, size: 18)
+        let rep = NSBitmapImageRep(data: try #require(image.tiffRepresentation))!
+        // Bottom centre of the outer track (radius 7.35pt, y down from top).
+        let alpha = try #require(rep.colorAt(x: 9, y: 16)).alphaComponent
+        #expect(alpha > 0.05, "empty gauge should still show faint tracks")
     }
 
     @Test("Status-item hover tracking uses AppKit selector names")

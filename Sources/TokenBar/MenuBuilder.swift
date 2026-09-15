@@ -493,8 +493,7 @@ private final class SummaryMeterView: NSView {
         IconRenderer.drawCapsuleBar(
             remainingPercent: remainingPercent,
             stale: isStale,
-            in: bounds,
-            style: .accentGradient)
+            in: bounds)
     }
 }
 
