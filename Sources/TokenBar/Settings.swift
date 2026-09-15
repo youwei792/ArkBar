@@ -62,12 +62,12 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    /// Menu-bar display layout. Mirrors CodexBar's menu-bar style options:
-    /// a meter capsule, the provider logo, the remaining percent, or combos.
+    /// Menu-bar display layout. The gauge is the concentric ring meter shared
+    /// with the plan cards; the provider logo is the brand glyph.
     enum DisplayMode: String, CaseIterable {
-        /// Just the meter capsule, e.g. `▮▮▮░░░░░░░`.
+        /// Just the ring gauge (monthly outer, weekly middle, session inner).
         case iconOnly
-        /// Meter capsule followed by the remaining percent, e.g. `▮▮ 73%`.
+        /// Ring gauge followed by the remaining percent, e.g. rings + `73%`.
         case iconAndPercent
         /// Just the remaining percent text, e.g. `73%`.
         case percentOnly
@@ -75,8 +75,8 @@ final class AppSettings: ObservableObject {
         case logoOnly
         /// Provider logo followed by the remaining percent, e.g. `🐋 73%`.
         case logoAndPercent
-        /// Provider logo followed by the meter capsule.
-        case logoAndBar
+        /// Provider logo followed by the ring gauge.
+        case logoAndRings
 
         var displayName: String {
             switch self {
@@ -85,7 +85,7 @@ final class AppSettings: ObservableObject {
             case .percentOnly: L(.displayPercentOnly)
             case .logoOnly: L(.displayLogoOnly)
             case .logoAndPercent: L(.displayLogoAndPercent)
-            case .logoAndBar: L(.displayLogoAndBar)
+            case .logoAndRings: L(.displayLogoAndRings)
             }
         }
     }
@@ -453,7 +453,12 @@ final class AppSettings: ObservableObject {
         let modeRaw = defaults.string(forKey: Keys.sourceMode) ?? SourceMode.auto.rawValue
         self.sourceMode = SourceMode(rawValue: modeRaw) ?? .auto
         let displayRaw = defaults.string(forKey: Keys.displayMode) ?? DisplayMode.iconAndPercent.rawValue
-        self.displayMode = DisplayMode(rawValue: displayRaw) ?? .iconAndPercent
+        if displayRaw == "logoAndBar" {
+            // Renamed when the capsule meter became the ring gauge.
+            self.displayMode = .logoAndRings
+        } else {
+            self.displayMode = DisplayMode(rawValue: displayRaw) ?? .iconAndPercent
+        }
         let langRaw = defaults.string(forKey: Keys.language) ?? Language.system.rawValue
         self.language = Language(rawValue: langRaw) ?? .system
         let tabRaw = defaults.string(forKey: Keys.selectedTab) ?? ProviderTab.ark.rawValue

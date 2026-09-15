@@ -296,7 +296,7 @@ enum LKey: String {
     case displayPercentOnly = "display.percentOnly"
     case displayLogoOnly = "display.logoOnly"
     case displayLogoAndPercent = "display.logoAndPercent"
-    case displayLogoAndBar = "display.logoAndBar"
+    case displayLogoAndRings = "display.logoAndRings"
     case menuBarValue = "display.menuBarValue"
     case displayValuePercent = "display.value.percent"
     case displayValueBalance = "display.value.balance"
@@ -656,12 +656,12 @@ final class L10n: ObservableObject {
         add(.apiKeyNoWindow, "API Key 有效，但未返回用量窗口。", "API key is valid, but no usage window was returned.")
 
         // Display mode display names
-        add(.displayIconOnly, "进度条", "Meter bar")
-        add(.displayIconAndPercent, "进度条 + 百分比", "Meter bar + percent")
+        add(.displayIconOnly, "圆环", "Rings")
+        add(.displayIconAndPercent, "圆环 + 百分比", "Rings + percent")
         add(.displayPercentOnly, "仅百分比", "Percent only")
         add(.displayLogoOnly, "仅 Logo", "Logo only")
         add(.displayLogoAndPercent, "Logo + 百分比", "Logo + percent")
-        add(.displayLogoAndBar, "Logo + 进度条", "Logo + meter bar")
+        add(.displayLogoAndRings, "Logo + 圆环", "Logo + rings")
         add(.menuBarValue, "菜单栏显示", "Menu bar shows")
         add(.displayValuePercent, "剩余百分比", "Remaining percent")
         add(.displayValueBalance, "余额（含货币符号）", "Balance with currency")

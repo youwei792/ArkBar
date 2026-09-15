@@ -4,6 +4,8 @@
 
 TokenBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding/Agent Plan、OpenCode Go、DeepSeek、APINebula 中转站、智谱（Z.ai）、Kimi For Coding、GrokPool 网关与 LongCat (longcat.chat) 的用量；不会显示 Dock 图标。
 
+> 仓库名为 `ArkBar`；面向用户的产品、Swift Package、可执行文件与 `.app` 名称均为 `TokenBar`。当前源码与本地打包版本号为 `0.1.0`（Unreleased）；截至 2026-09-01，远端没有 Git tag 或 GitHub Release。下述步骤仅用于从源码运行或本地开发打包，不代表已有正式发布安装包。
+
 ## 特性
 
 - 面向 macOS 14+ 的原生 AppKit 界面。
@@ -19,7 +21,7 @@ TokenBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding
 - 支持在 Ark、OpenCode Go、DeepSeek、APINebula、智谱（Z.ai）、Kimi、GrokPool 与 LongCat 之间即时切换，并隔离各边的刷新状态与错误。
 - **概览**标签一览所有可见 Provider 的剩余百分比与胶囊进度条；点击某行进入对应完整卡片。可在「设置 → 通用」开关。
 - 每个 Provider 可在自己的设置页中独立**显示/隐藏**，隐藏后从切换器移除并停止后台刷新。
-- 菜单栏样式可选：进度条、进度条 + 百分比、仅百分比、仅 Logo、Logo + 百分比、Logo + 进度条；Logo 16pt、百分比使用系统字号，与 CodexBar 对齐。
+- 菜单栏样式可选：圆环、圆环 + 百分比、仅百分比、仅 Logo、Logo + 百分比、Logo + 圆环；Logo 16pt、百分比使用系统字号。圆环与卡片同源：三窗口套餐显示每月（外）/ 每周（中）/ 5 小时（内）三环同心，余额类单窗口 Provider 显示单环。
 - DeepSeek 与 APINebula 可在各自设置页选择菜单栏显示「剩余百分比」还是「余额（含货币符号）」：DeepSeek 按接口返回的币种显示 `¥`（CNY）或 `$`（USD），APINebula 固定人民币 `¥`，均保留两位小数；GrokPool 在「成功率百分比」与「24h 费用（`$`）」之间选择。余额/费用模式下状态栏自动加宽以容纳金额。
 - 支持跟随系统、简体中文和 English。
 - 不含遥测；OpenCode/APINebula 浏览器接入只在用户明确操作时读取认证 Cookie。会话与 API Key 写入本机 Keychain，并镜像到应用支持目录下的凭据文件缓存，常规重启不弹钥匙串。
@@ -31,8 +33,8 @@ TokenBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding
 要求：macOS 14+、Swift 6.0，以及任一受支持的数据源。
 
 ```bash
-git clone https://github.com/youwei792/TokenBar.git
-cd TokenBar
+git clone https://github.com/youwei792/ArkBar.git
+cd ArkBar
 swift build
 .build/debug/TokenBar
 ```
@@ -96,7 +98,7 @@ export LONGCAT_MANUAL_COOKIE='...'
 ## 如何理解界面
 
 - 所有核心百分比都表示**剩余**，不是已用。
-- 菜单栏胶囊按「绑定约束」取值（与 CodexBar 一致）：默认显示当前所选标签的 Session / 5 小时剩余量；但若更长周期窗口（每周/每月）已完全用尽，则改显该耗尽窗口——例如周额度没了而 Session 还是 100% 时，菜单栏如实显示 0% 而不是误导性的 100%。在**概览**模式下显示所有可见 Provider 中剩余最低（最紧急）的那个。显示样式可在“设置 → 外观 → 显示模式”中选择进度条、百分比与 Provider Logo 的组合。
+- 菜单栏圆环按「绑定约束」取值（与 CodexBar 一致）：默认显示当前所选标签的 Session / 5 小时剩余量；但若更长周期窗口（每周/每月）已完全用尽，则改显该耗尽窗口——例如周额度没了而 Session 还是 100% 时，菜单栏如实显示 0% 而不是误导性的 100%。在**概览**模式下显示所有可见 Provider 中剩余最低（最紧急）的那个。显示样式可在“设置 → 外观 → 显示模式”中选择圆环、百分比与 Provider Logo 的组合。
 - 切换器最前为可选的「概览」；Provider 较多时切换器自动收成仅图标（完整名称在 tooltip）。
 - 圆环中心显示会话（或 5 小时）剩余量；每一圈也按自己的**剩余**量填充，因此 100% 会显示为满环。
 - 圆环右侧依次为会话、每周、每月剩余量；每项配有自身的重置倒计时。
