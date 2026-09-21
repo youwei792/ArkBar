@@ -62,11 +62,24 @@ cp "$ROOT/THIRD_PARTY_NOTICES.md" "$RESOURCES/THIRD_PARTY_NOTICES.md"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$CONTENTS/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$CONTENTS/Info.plist"
 
-echo "=== Ad-hoc codesign ==="
-# Remove any pre-existing signature, then sign ad-hoc with the current identity.
-codesign --force --deep --sign - "$APP_DST" 2>&1 || {
-    echo "WARN: codesign failed; bundle will still run but may trigger Gatekeeper on first launch." >&2
-}
+echo "=== Codesign ==="
+# Sign with a STABLE identity when one is available. Ad-hoc (`--sign -`) mints a
+# new signature on every build, which invalidates the Full Disk Access and
+# browser-cookie Keychain grants the user approved — the app would need
+# re-authorization after every rebuild. A stable identity keeps those grants.
+SIGN_IDENTITY="${TOKENBAR_SIGN_IDENTITY:-Apple Development: 1751121595@qq.com (CBDAK7YPZ4)}"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
+    echo "Signing with: $SIGN_IDENTITY"
+    codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DST" 2>&1 || {
+        echo "WARN: stable signing failed; falling back to ad-hoc." >&2
+        codesign --force --deep --sign - "$APP_DST" 2>&1 || true
+    }
+else
+    echo "No stable identity '$SIGN_IDENTITY' found; signing ad-hoc."
+    echo "TIP: to stop repeated Full Disk Access / Keychain re-authorization,"
+    echo "     create a codesigning identity and pass TOKENBAR_SIGN_IDENTITY."
+    codesign --force --deep --sign - "$APP_DST" 2>&1 || true
+fi
 
 echo "=== Verifying bundle ==="
 codesign --verify --deep --strict "$APP_DST" 2>&1 || true

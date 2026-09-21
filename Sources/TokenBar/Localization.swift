@@ -110,6 +110,9 @@ enum LKey: String {
     case tabKimi = "tab.kimi"
     case tabGrokPool = "tab.grokPool"
     case tabLongCat = "tab.longcat"
+    case tabAliyun = "tab.aliyun"
+    case tabStepFun = "tab.stepfun"
+    case tabSenseNova = "tab.sensenova"
     case tabSummary = "tab.summary"
     case showProvider = "settings.showProvider"
     case showSummary = "settings.showSummary"
@@ -130,6 +133,22 @@ enum LKey: String {
     case settingsKimi = "settings.kimi"
     case settingsGrokPool = "settings.grokPool"
     case settingsLongCat = "settings.longcat"
+    case settingsAliyun = "settings.aliyun"
+    case settingsStepFun = "settings.stepFun"
+    case settingsSenseNova = "settings.senseNova"
+    case settingsReminder = "settings.reminder"
+    case settingsGeneralSubtitle = "settings.generalSubtitle"
+    case settingsArkSubtitle = "settings.arkSubtitle"
+    case settingsOpenCodeSubtitle = "settings.openCodeSubtitle"
+    case settingsDeepSeekSubtitle = "settings.deepseekSubtitle"
+    case settingsNebulaSubtitle = "settings.nebulaSubtitle"
+    case settingsZaiSubtitle = "settings.zaiSubtitle"
+    case settingsKimiSubtitle = "settings.kimiSubtitle"
+    case settingsGrokPoolSubtitle = "settings.grokPoolSubtitle"
+    case settingsLongCatSubtitle = "settings.longcatSubtitle"
+    case settingsAliyunSubtitle = "settings.aliyunSubtitle"
+    case settingsReminderSubtitle = "settings.reminderSubtitle"
+    case settingsDiagnosticsSubtitle = "settings.diagnosticsSubtitle"
     case settingsDiagnostics = "settings.diagnostics"
     case sectionAppearance = "settings.sectionAppearance"
     case sectionBehavior = "settings.sectionBehavior"
@@ -145,12 +164,18 @@ enum LKey: String {
     case refreshKimi = "settings.refreshKimi"
     case refreshGrokPool = "settings.refreshGrokPool"
     case refreshLongCat = "settings.refreshLongCat"
+    case refreshAliyun = "settings.refreshAliyun"
+    case refreshStepFun = "settings.refreshStepFun"
+    case refreshSenseNova = "settings.refreshSenseNova"
     case openDeepSeekPlatform = "menu.openDeepSeekPlatform"
     case openNebulaConsole = "menu.openNebulaConsole"
     case openZaiConsole = "menu.openZaiConsole"
     case openKimiConsole = "menu.openKimiConsole"
     case openGrokPoolConsole = "menu.openGrokPoolConsole"
     case openLongCatConsole = "menu.openLongCatConsole"
+    case openAliyunConsole = "menu.openAliyunConsole"
+    case openStepFunConsole = "menu.openStepFunConsole"
+    case openSenseNovaConsole = "menu.openSenseNovaConsole"
     case openCodeCookieSource = "settings.openCodeCookieSource"
     case openCodeCookieAutomatic = "settings.openCodeCookieAutomatic"
     case openCodeCookieManual = "settings.openCodeCookieManual"
@@ -158,6 +183,8 @@ enum LKey: String {
     case openCodeManualHint = "settings.openCodeManualHint"
     case openCodeAuthoritativeHint = "settings.openCodeAuthoritativeHint"
     case reimportBrowserSession = "settings.reimportBrowserSession"
+    case reimportStepFunBrowserSession = "settings.reimportStepFunBrowserSession"
+    case reimportSenseNovaBrowserSession = "settings.reimportSenseNovaBrowserSession"
     case saveCookie = "settings.saveCookie"
     case lastSuccessfulUpdate = "settings.lastSuccessfulUpdate"
     case noSuccessfulUpdate = "settings.noSuccessfulUpdate"
@@ -181,6 +208,9 @@ enum LKey: String {
     case productNebula = "product.nebula"
     case productGrokPool = "product.grokPool"
     case productLongCat = "product.longcat"
+    case productAliyunCodingPlan = "product.aliyunCodingPlan"
+    case productStepFunCodingPlan = "product.stepfunCodingPlan"
+    case productSenseNovaCodingPlan = "product.sensenovaCodingPlan"
     case windowSession = "window.session"
     case window5Hour = "window.5hour"
     case windowWeekly = "window.weekly"
@@ -250,6 +280,7 @@ enum LKey: String {
     case errorOpenCodeCookieInvalid = "error.openCodeCookieInvalid"
     case errorOpenCodeBrowserSessionMissing = "error.openCodeBrowserSessionMissing"
     case errorOpenCodeBrowserAuthorizationRequired = "error.openCodeBrowserAuthorizationRequired"
+    case errorOpenCodeNeedsFullDiskAccess = "error.openCodeNeedsFullDiskAccess"
     case errorDeepSeekMissingCredentials = "error.deepSeekMissingCredentials"
     case errorDeepSeekInvalidPlatformToken = "error.deepSeekInvalidPlatformToken"
     case errorNebulaMissingCredentials = "error.nebulaMissingCredentials"
@@ -268,6 +299,16 @@ enum LKey: String {
     case errorLongcatInvalidSession = "error.longcatInvalidSession"
     case errorLongcatBrowserSessionMissing = "error.longcatBrowserSessionMissing"
     case errorLongcatBrowserAuthorizationRequired = "error.longcatBrowserAuthorizationRequired"
+    case errorAliyunMissingCredentials = "error.aliyunMissingCredentials"
+    case errorAliyunInvalidToken = "error.aliyunInvalidToken"
+    case errorAliyunNotActivated = "error.aliyunNotActivated"
+    case errorStepFunMissingCredentials = "error.stepFunMissingCredentials"
+    case errorStepFunInvalidSession = "error.stepFunInvalidSession"
+    case errorStepFunBrowserSessionMissing = "error.stepFunBrowserSessionMissing"
+    case errorSenseNovaMissingCredentials = "error.senseNovaMissingCredentials"
+    case errorSenseNovaInvalidSession = "error.senseNovaInvalidSession"
+    case errorSenseNovaNotSupported = "error.senseNovaNotSupported"
+    case errorSenseNovaBrowserSessionMissing = "error.senseNovaBrowserSessionMissing"
     case errorProbeModels = "error.probeModels"
     case apiKeyNoHeaders = "apiKey.noHeaders"
     case apiKeyNoWindow = "apiKey.noWindow"
@@ -289,6 +330,42 @@ enum LKey: String {
     case longCatCookiePlaceholder = "longcat.cookiePlaceholder"
     case longCatCredentialsHint = "longcat.credentialsHint"
     case longCatBrowserSession = "longcat.browserSession"
+
+    // Alibaba Cloud (阿里云百炼 Coding Plan)
+    case aliyunAPIKeyLabel = "aliyun.apiKeyLabel"
+    case aliyunCredentialsHint = "aliyun.credentialsHint"
+    case aliyunPendingHint = "aliyun.pendingHint"
+    case stepFunCredentialsHint = "stepfun.credentialsHint"
+    case stepFunAPIKeyLabel = "stepfun.apiKeyLabel"
+    case stepFunManualCookiePlaceholder = "stepfun.manualCookiePlaceholder"
+    case senseNovaManualCookiePlaceholder = "sensenova.manualCookiePlaceholder"
+    case senseNovaCredentialsHint = "sensenova.credentialsHint"
+    case senseNovaAPIKeyLabel = "sensenova.apiKeyLabel"
+
+    // Subscription expiry reminders
+    case reminderHeader = "reminder.header"
+    case reminderDaysLeft = "reminder.daysLeft"
+    case reminderQuotaLeft = "reminder.quotaLeft"
+    case reminderExpiresToday = "reminder.expiresToday"
+    case reminderBodyQuota = "reminder.bodyQuota"
+    case reminderEnabledLabel = "reminder.enabledLabel"
+    case reminderDaysLabel = "reminder.daysLabel"
+    case reminderDaysOption = "reminder.daysOption"
+    case reminderNotifyLabel = "reminder.notifyLabel"
+    case reminderNotifyHint = "reminder.notifyHint"
+    case reminderRuleHint = "reminder.ruleHint"
+    case reminderManualSection = "reminder.manualSection"
+    case reminderManualNamePlaceholder = "reminder.manualNamePlaceholder"
+    case reminderManualNotePlaceholder = "reminder.manualNotePlaceholder"
+    case reminderManualExpiryLabel = "reminder.manualExpiryLabel"
+    case reminderManualAdd = "reminder.manualAdd"
+    case reminderManualEmpty = "reminder.manualEmpty"
+    case reminderManualDelete = "reminder.manualDelete"
+    case reminderSectionTitle = "reminder.sectionTitle"
+    case reminderManualNamePrompt = "reminder.manualNamePrompt"
+    case reminderManualNotePrompt = "reminder.manualNotePrompt"
+    case refreshAll = "settings.refreshAll"
+    case refreshProviderMenu = "settings.refreshProviderMenu"
 
     // Display mode display names
     case displayIconOnly = "display.iconOnly"
@@ -362,6 +439,9 @@ final class L10n: ObservableObject {
         case .nebula: t(.productNebula)
         case .grokPool: t(.productGrokPool)
         case .longcat: t(.productLongCat)
+        case .aliyunCodingPlan: t(.productAliyunCodingPlan)
+        case .stepfunCodingPlan: t(.productStepFunCodingPlan)
+        case .senseNovaCodingPlan: t(.productSenseNovaCodingPlan)
         }
     }
 
@@ -480,6 +560,9 @@ final class L10n: ObservableObject {
         add(.tabKimi, "Kimi", "Kimi")
         add(.tabGrokPool, "GrokPool", "GrokPool")
         add(.tabLongCat, "LongCat", "LongCat")
+        add(.tabAliyun, "阿里云", "Alibaba Cloud")
+        add(.tabStepFun, "阶跃", "StepFun")
+        add(.tabSenseNova, "商汤", "SenseNova")
         add(.tabSummary, "概览", "Overview")
         add(.showSummary, "在菜单栏显示概览", "Show overview in menu bar")
         add(.showProvider, "在菜单栏显示", "Show in menu bar")
@@ -500,6 +583,22 @@ final class L10n: ObservableObject {
         add(.settingsKimi, "Kimi For Coding", "Kimi For Coding")
         add(.settingsGrokPool, "GrokPool 网关", "GrokPool Gateway")
         add(.settingsLongCat, "LongCat", "LongCat")
+        add(.settingsAliyun, "阿里云 Coding Plan", "Alibaba Cloud Coding Plan")
+        add(.settingsStepFun, "阶跃 Step Plan", "StepFun Step Plan")
+        add(.settingsSenseNova, "商汤 Token Plan", "SenseNova Token Plan")
+        add(.settingsReminder, "订阅提醒", "Expiry Reminders")
+        add(.settingsGeneralSubtitle, "外观、刷新、语言与操作", "Appearance, refresh, language, and actions")
+        add(.settingsArkSubtitle, "火山方舟 Coding / Agent 套餐用量", "Volcengine Ark Coding / Agent plan usage")
+        add(.settingsOpenCodeSubtitle, "从 OpenCode Go 订阅页读取的配额", "Quota read from the OpenCode Go subscription page")
+        add(.settingsDeepSeekSubtitle, "余额与平台用量明细", "Balance and platform usage detail")
+        add(.settingsNebulaSubtitle, "中转站余额与调用日志", "Relay balance and request log")
+        add(.settingsZaiSubtitle, "智谱 GLM Coding Plan 额度窗口", "Zhipu GLM Coding Plan quota windows")
+        add(.settingsKimiSubtitle, "Kimi For Coding 会员配额与共享总池", "Kimi For Coding membership quota and shared pool")
+        add(.settingsGrokPoolSubtitle, "网关 24 小时运营看板", "Gateway 24-hour operations dashboard")
+        add(.settingsLongCatSubtitle, "Token 资源包剩余额度", "Token package remaining quota")
+        add(.settingsAliyunSubtitle, "百炼 Coding Plan 三档请求额度（开通后生效）", "Bailian Coding Plan request windows (active after activation)")
+        add(.settingsReminderSubtitle, "快到期且额度没用完时提醒你", "Nudges you when a plan expires with quota left")
+        add(.settingsDiagnosticsSubtitle, "运行环境与 arkcli 检查", "Runtime environment and arkcli checks")
         add(.settingsDiagnostics, "诊断", "Diagnostics")
         add(.sectionAppearance, "外观", "Appearance")
         add(.sectionBehavior, "行为", "Behavior")
@@ -515,12 +614,18 @@ final class L10n: ObservableObject {
         add(.refreshKimi, "刷新 Kimi", "Refresh Kimi")
         add(.refreshGrokPool, "刷新 GrokPool", "Refresh GrokPool")
         add(.refreshLongCat, "刷新 LongCat", "Refresh LongCat")
+        add(.refreshAliyun, "刷新阿里云", "Refresh Alibaba Cloud")
+        add(.refreshStepFun, "刷新阶跃", "Refresh StepFun")
+        add(.refreshSenseNova, "刷新商汤", "Refresh SenseNova")
         add(.openDeepSeekPlatform, "打开 DeepSeek 平台", "Open DeepSeek Platform")
         add(.openNebulaConsole, "打开 APINebula 控制台", "Open APINebula Console")
         add(.openZaiConsole, "打开智谱用量页", "Open Z.ai Usage")
         add(.openKimiConsole, "打开 Kimi Code 控制台", "Open Kimi Code Console")
         add(.openGrokPoolConsole, "打开 GrokPool 控制台", "Open GrokPool Console")
         add(.openLongCatConsole, "打开 LongCat 用量页", "Open LongCat Usage")
+        add(.openAliyunConsole, "打开阿里云 Coding Plan 控制台", "Open Alibaba Cloud Coding Plan Console")
+        add(.openStepFunConsole, "打开阶跃控制台", "Open StepFun Console")
+        add(.openSenseNovaConsole, "打开商汤控制台", "Open SenseNova Console")
         add(.openCodeCookieSource, "Cookie 来源", "Cookie source")
         add(.openCodeCookieAutomatic, "自动读取浏览器", "Automatic from browser")
         add(.openCodeCookieManual, "手动 Cookie", "Manual Cookie")
@@ -528,6 +633,8 @@ final class L10n: ObservableObject {
         add(.openCodeManualHint, "仅在自动读取失败时使用。Cookie 会保存在本机钥匙串，不会写入偏好设置或日志。", "Use only when automatic import fails. The Cookie is stored in Keychain, never preferences or logs.")
         add(.openCodeAuthoritativeHint, "圆环只使用 OpenCode Go 网页返回的套餐用量；不会用本地消费记录估算余额。", "Rings use only subscription usage returned by OpenCode Go; local spending history is never used as quota.")
         add(.reimportBrowserSession, "重新读取浏览器登录", "Re-import Browser Session")
+        add(.reimportStepFunBrowserSession, "重新读取浏览器登录", "Re-import Browser Sign-in")
+        add(.reimportSenseNovaBrowserSession, "重新读取浏览器登录", "Re-import Browser Sign-in")
         add(.saveCookie, "保存 Cookie", "Save Cookie")
         add(.lastSuccessfulUpdate, "上次成功更新", "Last successful update")
         add(.noSuccessfulUpdate, "尚未成功更新", "No successful update yet")
@@ -551,6 +658,9 @@ final class L10n: ObservableObject {
         add(.productNebula, "APINebula", "APINebula")
         add(.productGrokPool, "GrokPool", "GrokPool")
         add(.productLongCat, "LongCat", "LongCat")
+        add(.productAliyunCodingPlan, "阿里云 Coding Plan", "Alibaba Cloud Coding Plan")
+        add(.productStepFunCodingPlan, "阶跃 Step Plan", "StepFun Step Plan")
+        add(.productSenseNovaCodingPlan, "商汤 Token Plan", "SenseNova Token Plan")
         add(.windowSession, "会话", "Session")
         add(.window5Hour, "5 小时", "5-hour")
         add(.windowWeekly, "每周", "Weekly")
@@ -633,6 +743,7 @@ final class L10n: ObservableObject {
         add(.errorOpenCodeCookieInvalid, "OpenCode Go 登录已失效。请重新登录浏览器，或更新手动 Cookie。", "The OpenCode Go sign-in expired. Sign in again in the browser or update the manual Cookie.")
         add(.errorOpenCodeBrowserSessionMissing, "没有在浏览器中找到 opencode.ai 登录会话。请先在浏览器登录，或改用手动 Cookie。", "No opencode.ai browser session was found. Sign in in a browser or use a manual Cookie.")
         add(.errorOpenCodeBrowserAuthorizationRequired, "TokenBar 尚未缓存浏览器登录，或原会话已失效。请在 OpenCode Go 设置中点“重新读取浏览器登录”；后台刷新不会主动弹出密码框。", "TokenBar has no cached browser sign-in, or the previous session expired. Click “Re-import Browser Sign-in” in OpenCode Go settings; background refreshes will not show a password prompt.")
+        add(.errorOpenCodeNeedsFullDiskAccess, "检测到 Chrome 已安装但系统不允许 TokenBar 读取其 Cookie。请打开 系统设置 → 隐私与安全性 → 完全磁盘访问权限，添加并允许 TokenBar，然后完全退出并重新打开 TokenBar，再点“重新读取浏览器登录”。", "Chrome is installed but macOS does not allow TokenBar to read its cookies. Grant TokenBar Full Disk Access in System Settings → Privacy & Security, then quit and reopen TokenBar and click “Re-import Browser Sign-in” again.")
         add(.errorDeepSeekMissingCredentials, "未找到 DeepSeek 凭据。可在 DeepSeek 设置中填写，或先在 Chrome 登录 platform.deepseek.com 后刷新。", "No DeepSeek credentials were found. Enter them in the DeepSeek settings, or sign in to platform.deepseek.com in Chrome and refresh.")
         add(.errorDeepSeekInvalidPlatformToken, "DeepSeek 平台会话无效或已过期。请更新 DEEPSEEK_PLATFORM_TOKEN。", "The DeepSeek Platform session is invalid or expired. Update DEEPSEEK_PLATFORM_TOKEN.")
         add(.errorNebulaMissingCredentials, "未配置 APINebula 控制台会话或 API Key。请先在浏览器登录 apinebula.ai，再点“重新读取浏览器登录”。", "No APINebula console session or API key is configured. Sign in at apinebula.ai, then click “Re-import Browser Sign-in”.")
@@ -651,9 +762,55 @@ final class L10n: ObservableObject {
         add(.errorLongcatInvalidSession, "LongCat 登录已失效。请重新登录 longcat.chat，或更新手动 Cookie。", "The LongCat sign-in expired. Sign in again at longcat.chat or update the manual Cookie.")
         add(.errorLongcatBrowserSessionMissing, "没有在浏览器中找到 longcat.chat 登录会话。请先在浏览器登录 LongCat 控制台。", "No longcat.chat browser session was found. Sign in to the LongCat console in a browser first.")
         add(.errorLongcatBrowserAuthorizationRequired, "TokenBar 尚未缓存 LongCat 浏览器登录。请在 LongCat 设置中点“重新读取浏览器登录”。", "TokenBar has no cached LongCat browser sign-in. Click “Re-import Browser Sign-in” in LongCat settings.")
+        add(.errorAliyunMissingCredentials, "未找到阿里云 Coding Plan API Key。", "No Alibaba Cloud Coding Plan API key found.")
+        add(.errorAliyunInvalidToken, "阿里云 Coding Plan API Key 无效。请到百炼控制台「Coding Plan」页面重新获取。", "The Alibaba Cloud Coding Plan API key is invalid. Get a new one from the Bailian console Coding Plan page.")
+        add(.errorAliyunNotActivated, "阿里云 Coding Plan 尚未开通或暂不可用。请在百炼控制台开通（注意开通期限）；开通后刷新即可读取用量。", "The Alibaba Cloud Coding Plan is not activated yet. Activate it in the Bailian console (mind the activation deadline); usage will appear on the next refresh.")
+        add(.errorStepFunMissingCredentials, "未导入阶跃控制台登录会话。请在阶跃设置中点“重新读取浏览器登录”，或粘贴手动 Cookie。", "No StepFun console sign-in has been imported. Click “Re-import Browser Sign-in” in the StepFun settings, or paste a manual Cookie.")
+        add(.errorStepFunInvalidSession, "阶跃控制台登录已失效。请重新读取浏览器登录。", "The StepFun console sign-in expired. Re-import the browser session.")
+        add(.errorStepFunBrowserSessionMissing, "没有在浏览器中找到 stepfun.com 登录会话。请先在浏览器登录阶跃控制台。", "No stepfun.com sign-in session was found in the browser. Sign in to the StepFun console first.")
+        add(.errorSenseNovaMissingCredentials, "未导入商汤控制台登录会话。请在商汤设置中点“重新读取浏览器登录”。", "No SenseNova console sign-in has been imported. Click “Re-import Browser Sign-in” in the SenseNova settings.")
+        add(.errorSenseNovaInvalidSession, "商汤控制台登录已失效。请重新读取浏览器登录。", "The SenseNova console sign-in expired. Re-import the browser session.")
+        add(.errorSenseNovaNotSupported, "商汤 Token Plan 的额度接口尚未确认：App 已探测候选接口并把响应写入 资源库/TokenBar/sensenova-last-response.txt，请把它发给开发者完成适配。", "The SenseNova Token Plan endpoint is not confirmed yet: TokenBar probed the candidate endpoints and wrote the responses to Application Support/TokenBar/sensenova-last-response.txt — send that file to the developer to finish the integration.")
+        add(.errorSenseNovaBrowserSessionMissing, "没有在浏览器中找到 sensenova.cn 登录会话。请先在浏览器登录商汤控制台。", "No sensenova.cn sign-in session was found in the browser. Sign in to the SenseNova console first.")
         add(.errorProbeModels, "所有探测模型均不可用", "All probe models failed")
         add(.apiKeyNoHeaders, "API Key 有效，但响应未返回请求限额头。", "API key is valid, but no request-limit headers were returned.")
         add(.apiKeyNoWindow, "API Key 有效，但未返回用量窗口。", "API key is valid, but no usage window was returned.")
+
+        // Alibaba Cloud (阿里云百炼 Coding Plan)
+        add(.aliyunAPIKeyLabel, "API Key", "API Key")
+        add(.aliyunCredentialsHint, "在百炼控制台「Coding Plan」页面获取专属 API Key（sk-sp- 开头）；也可用环境变量 ALIYUN_CODING_PLAN_API_KEY（与按量计费 sk- Key 不互通）。", "Get the dedicated Coding Plan key (sk-sp-…) from the Bailian console; ALIYUN_CODING_PLAN_API_KEY also works. Not interchangeable with pay-as-you-go sk- keys.")
+        add(.aliyunPendingHint, "用量读取在套餐开通后自动生效；若仍未显示，需把控制台「Coding Plan」页面的网络请求记录交给开发者。", "Usage reading activates automatically once the plan is activated. If it still does not appear, hand the console Coding Plan page network log to the developer.")
+        add(.senseNovaCredentialsHint, "在浏览器登录 https://platform.sensenova.cn/console 后，点“重新读取浏览器登录”导入控制台会话（存 Keychain）；读取浏览器 Cookie 需要 TokenBar 拥有完全磁盘访问权限。Token Plan 的额度接口官方未公开，App 正在通过探测确定接口（探测响应写入资源库 TokenBar/sensenova-last-response.txt）。", "Sign in to https://platform.sensenova.cn/console in a browser, then click “Re-import Browser Sign-in” to capture the console session (stored in Keychain). Reading browser cookies requires Full Disk Access. The Token Plan quota API is not publicly documented; TokenBar probes the candidate endpoints to confirm it (probe responses are written to Application Support/TokenBar/sensenova-last-response.txt).")
+        add(.senseNovaAPIKeyLabel, "API Key（Bearer）", "API Key (Bearer)")
+        add(.stepFunCredentialsHint, "在浏览器登录 https://platform.stepfun.com 后，点“重新读取浏览器登录”导入控制台会话（存 Keychain，自动续期）。阶跃的套餐额度只认控制台会话——API Key 只能调模型、读不了额度（已实测确认），所以 API Key 栏对查用量无效，可留空。", "Sign in to https://platform.stepfun.com in a browser, then click “Re-import Browser Sign-in” to capture the console session (stored in Keychain, auto-rotated). StepFun plan quota is console-session only — API keys can call models but cannot read quota (verified), so the API-key field is not needed for usage tracking.")
+        add(.stepFunAPIKeyLabel, "API Key（Bearer）", "API Key (Bearer)")
+        add(.stepFunManualCookiePlaceholder, "手动 Cookie（可选，从浏览器 DevTools 复制）", "Manual Cookie (optional; copy from browser devtools)")
+        add(.senseNovaManualCookiePlaceholder, "手动 Cookie（可选，从浏览器 DevTools 复制）", "Manual Cookie (optional; copy from browser devtools)")
+
+        // Subscription expiry reminders
+        add(.reminderHeader, "订阅到期（%d）", "Expiring subscriptions (%d)")
+        add(.reminderDaysLeft, "%d 天后到期", "in %d days")
+        add(.reminderQuotaLeft, "剩余 %d%%", "%d%% left")
+        add(.reminderExpiresToday, "今天到期", "Expires today")
+        add(.reminderBodyQuota, "剩余额度 %d%%，抓紧用完", "%d%% quota left — use it before it expires")
+        add(.reminderEnabledLabel, "启用到期提醒", "Enable expiry reminders")
+        add(.reminderDaysLabel, "提前提醒天数", "Remind within")
+        add(.reminderDaysOption, "%d 天", "%d days")
+        add(.reminderNotifyLabel, "同时发送系统通知", "Also send a system notification")
+        add(.reminderNotifyHint, "每个订阅每天最多通知一次。系统通知只在打包后的 App 中显示；源码直接运行时请以下拉菜单中的「订阅到期」为准。", "Each subscription notifies at most once per day. Notifications only appear in the packaged app; when running from source, use the Expiring section in the menu.")
+        add(.reminderRuleHint, "提醒规则：距到期不超过提前天数、且剩余额度 ≥ 50% 时，在下拉菜单显示并提醒抓紧用完；额度基本用完的订阅不再打扰。已接入套餐的到期时间自动读取；手动订阅用于提醒未接入的服务。", "Rule: a subscription shows up here and nags you to use it up when it expires within the lead time and still has ≥50% quota left; nearly exhausted plans stay quiet. Integrated plans contribute their expiry automatically; manual entries cover services TokenBar does not integrate.")
+        add(.reminderManualSection, "手动订阅", "Manual subscriptions")
+        add(.reminderManualNamePlaceholder, "订阅名称", "Subscription name")
+        add(.reminderManualNotePlaceholder, "备注", "Note")
+        add(.reminderManualExpiryLabel, "到期日", "Expiry date")
+        add(.reminderManualAdd, "添加订阅", "Add subscription")
+        add(.reminderManualEmpty, "还没有手动订阅。把 TokenBar 没有接入的订阅（年费服务等）加到这里，到期前会一并提醒。", "No manual subscriptions yet. Add services TokenBar does not integrate (annual plans etc.) to get expiry reminders for them too.")
+        add(.reminderManualDelete, "删除该订阅", "Delete this subscription")
+        add(.reminderSectionTitle, "提醒", "Reminders")
+        add(.reminderManualNamePrompt, "如 OpenCode Go", "e.g. OpenCode Go")
+        add(.reminderManualNotePrompt, "选填", "Optional")
+        add(.refreshAll, "全部刷新", "Refresh All")
+        add(.refreshProviderMenu, "单独刷新", "Refresh One")
 
         // Display mode display names
         add(.displayIconOnly, "圆环", "Rings")

@@ -16,8 +16,10 @@ enum ProviderLogo {
         case .nebula:
             // Official site logo (PNG icon). Template so it adopts the menu tint.
             image = loadResource(named: "ProviderIcon-nebula", extension: "png")
-        case .ark, .opencode, .deepseek, .zai, .kimi, .grokPool, .longcat:
+        case .ark, .opencode, .deepseek, .zai, .kimi, .grokPool, .longcat, .stepfun:
             image = loadResource(named: fileName(for: tab), extension: "svg")
+        case .aliyun, .sensenova:
+            image = loadResource(named: fileName(for: tab), extension: "png")
         }
         if let image {
             cache[tab] = image
@@ -50,6 +52,9 @@ enum ProviderLogo {
         case .kimi: "ProviderIcon-kimi"
         case .grokPool: "ProviderIcon-grokpool"
         case .longcat: "ProviderIcon-longcat"
+        case .aliyun: "ProviderIcon-aliyun"
+        case .stepfun: "ProviderIcon-stepfun"
+        case .sensenova: "ProviderIcon-sensenova"
         }
     }
 

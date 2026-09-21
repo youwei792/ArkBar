@@ -154,6 +154,34 @@ final class AppSettings: ObservableObject {
     @Published var showLongCat: Bool {
         didSet { UserDefaults.standard.set(showLongCat, forKey: Keys.showLongCat) }
     }
+    @Published var showAliyun: Bool {
+        didSet { UserDefaults.standard.set(showAliyun, forKey: Keys.showAliyun) }
+    }
+    @Published var showStepFun: Bool {
+        didSet { UserDefaults.standard.set(showStepFun, forKey: Keys.showStepFun) }
+    }
+    @Published var showSenseNova: Bool {
+        didSet { UserDefaults.standard.set(showSenseNova, forKey: Keys.showSenseNova) }
+    }
+    /// Master switch for the expiry-reminder feature (menu section + notifications).
+    @Published var expiryReminderEnabled: Bool {
+        didSet { UserDefaults.standard.set(expiryReminderEnabled, forKey: Keys.expiryReminderEnabled) }
+    }
+    /// Lead time in days: subscriptions expiring within this window are
+    /// surfaced. One of 3 / 7 / 14 / 30.
+    @Published var expiryReminderDays: Int {
+        didSet { UserDefaults.standard.set(expiryReminderDays, forKey: Keys.expiryReminderDays) }
+    }
+    /// Whether urgent expirations also post a macOS notification (once per
+    /// subscription per day). The menu section shows regardless.
+    @Published var expiryReminderNotify: Bool {
+        didSet { UserDefaults.standard.set(expiryReminderNotify, forKey: Keys.expiryReminderNotify) }
+    }
+    /// Manually tracked subscriptions for providers TokenBar does not
+    /// integrate. Non-sensitive; persisted as JSON in UserDefaults.
+    @Published var manualSubscriptions: [ManualSubscription] {
+        didSet { persistManualSubscriptions() }
+    }
     /// Whether the menu bar shows the remaining percent or the money balance
     /// for balance-based providers (DeepSeek, Nebula).
     @Published var deepseekValueDisplay: BalanceDisplay {
@@ -181,6 +209,9 @@ final class AppSettings: ObservableObject {
         case .kimi: showKimi
         case .grokPool: showGrokPool
         case .longcat: showLongCat
+        case .aliyun: showAliyun
+        case .stepfun: showStepFun
+        case .sensenova: showSenseNova
         }
     }
 
@@ -192,7 +223,7 @@ final class AppSettings: ObservableObject {
         case .deepseek: deepseekValueDisplay == .balance
         case .nebula: nebulaValueDisplay == .balance
         case .grokPool: grokPoolValueDisplay == .balance
-        case .ark, .opencode, .zai, .kimi, .longcat: false
+        case .ark, .opencode, .zai, .kimi, .longcat, .aliyun, .stepfun, .sensenova: false
         }
     }
 
@@ -208,6 +239,9 @@ final class AppSettings: ObservableObject {
         case .kimi: showKimi = visible
         case .grokPool: showGrokPool = visible
         case .longcat: showLongCat = visible
+        case .aliyun: showAliyun = visible
+        case .stepfun: showStepFun = visible
+        case .sensenova: showSenseNova = visible
         }
         if !visible, case .provider(tab) = selectedMenu {
             if showSummary {
@@ -279,6 +313,31 @@ final class AppSettings: ObservableObject {
     /// never persisted to UserDefaults).
     @Published private(set) var longcatCookie: String
 
+    /// Alibaba Cloud (百炼) Coding Plan dedicated API key, `sk-sp-…`
+    /// (Keychain mirror, never persisted to UserDefaults).
+    @Published private(set) var aliyunAPIKey: String
+
+    /// StepFun console session Cookie header (Keychain mirror, never
+    /// persisted to UserDefaults). Managed through the browser import.
+    @Published private(set) var stepFunCookie: String
+
+    /// SenseNova console session Cookie header (Keychain mirror).
+    @Published private(set) var senseNovaCookie: String
+
+    /// StepFun API key (Keychain mirror; the gateway authenticates with
+    /// `Authorization: Bearer`). Console plan credit still needs the browser
+    /// session; the key path reads whatever the gateway exposes.
+    @Published private(set) var stepFunAPIKey: String
+
+    /// SenseNova API key (Keychain mirror; Bearer auth on the token gateway).
+    @Published private(set) var senseNovaAPIKey: String
+
+    /// Manual console Cookie headers (Keychain mirrors). Pasting the Cookie
+    /// header from the browser's devtools once avoids the Full Disk Access /
+    /// Keychain approvals the automatic browser import needs.
+    @Published private(set) var stepFunManualCookie: String
+    @Published private(set) var senseNovaManualCookie: String
+
     var deepseekApiKeyHasValue: Bool { !deepseekApiKey.isEmpty }
     var deepseekPlatformTokenHasValue: Bool { !deepseekPlatformToken.isEmpty }
     var arkCredentialsHaveValue: Bool { !arkAccessKeyID.isEmpty && !arkSecretAccessKey.isEmpty }
@@ -287,6 +346,101 @@ final class AppSettings: ObservableObject {
     var kimiAPIKeyHasValue: Bool { !kimiAPIKey.isEmpty }
     var grokPoolCredentialsHaveValue: Bool { !grokPoolUsername.isEmpty && !grokPoolPassword.isEmpty }
     var longcatCookieHasValue: Bool { !longcatCookie.isEmpty }
+    var aliyunAPIKeyHasValue: Bool { !aliyunAPIKey.isEmpty }
+    var stepFunCookieHasValue: Bool { !stepFunCookie.isEmpty }
+    var stepFunAPIKeyHasValue: Bool { !stepFunAPIKey.isEmpty }
+    var senseNovaAPIKeyHasValue: Bool { !senseNovaAPIKey.isEmpty }
+
+    func setStepFunAPIKey(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: key, provider: "stepfun-apikey")
+        stepFunAPIKey = persisted ? (key ?? "") : (CookieKeychainStore.load(provider: "stepfun-apikey") ?? "")
+    }
+
+    func setStepFunManualCookie(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cookie = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: cookie, provider: "stepfun-manual-cookie")
+        stepFunManualCookie = persisted
+            ? (cookie ?? "")
+            : (CookieKeychainStore.load(provider: "stepfun-manual-cookie") ?? "")
+    }
+
+    func setSenseNovaManualCookie(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cookie = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: cookie, provider: "sensenova-manual-cookie")
+        senseNovaManualCookie = persisted
+            ? (cookie ?? "")
+            : (CookieKeychainStore.load(provider: "sensenova-manual-cookie") ?? "")
+    }
+
+    func setSenseNovaAPIKey(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: key, provider: "sensenova-apikey")
+        senseNovaAPIKey = persisted ? (key ?? "") : (CookieKeychainStore.load(provider: "sensenova-apikey") ?? "")
+    }
+
+    func loadStepFunFromKeychain() {
+        stepFunCookie = CookieKeychainStore.load(provider: "stepfun-browser") ?? ""
+    }
+
+    func setSenseNovaCookie(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cookie = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: cookie, provider: "sensenova-browser")
+        senseNovaCookie = persisted ? (cookie ?? "") : (CookieKeychainStore.load(provider: "sensenova-browser") ?? "")
+    }
+
+    func loadSenseNovaFromKeychain() {
+        senseNovaCookie = CookieKeychainStore.load(provider: "sensenova-browser") ?? ""
+    }
+
+    func setStepFunCookie(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cookie = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: cookie, provider: "stepfun-browser")
+        stepFunCookie = persisted ? (cookie ?? "") : (CookieKeychainStore.load(provider: "stepfun-browser") ?? "")
+    }
+
+    // MARK: - Manual subscriptions
+
+    func addManualSubscription() {
+        // Default to the lead time ahead so a freshly added row immediately
+        // shows up in the reminder list and the user can see the effect.
+        let expiry = Calendar.current.date(
+            byAdding: .day, value: expiryReminderDays, to: Date()) ?? Date()
+        manualSubscriptions.append(ManualSubscription(name: "", expiryDate: expiry, note: ""))
+    }
+
+    func updateManualSubscription(id: String, name: String? = nil,
+                                  expiryDate: Date? = nil, note: String? = nil) {
+        guard let index = manualSubscriptions.firstIndex(where: { $0.id == id }) else { return }
+        if let name { manualSubscriptions[index].name = name }
+        if let expiryDate { manualSubscriptions[index].expiryDate = expiryDate }
+        if let note { manualSubscriptions[index].note = note }
+    }
+
+    func removeManualSubscription(id: String) {
+        manualSubscriptions.removeAll { $0.id == id }
+        ReminderScheduler.clearNotifiedState(forManualID: id)
+    }
+
+    private func persistManualSubscriptions() {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(manualSubscriptions) else { return }
+        UserDefaults.standard.set(data, forKey: Keys.manualSubscriptions)
+    }
+
+    private static func loadManualSubscriptions() -> [ManualSubscription] {
+        guard let data = UserDefaults.standard.data(forKey: Keys.manualSubscriptions) else { return [] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode([ManualSubscription].self, from: data)) ?? []
+    }
 
     func setZaiAPIKey(_ value: String?) {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -412,6 +566,17 @@ final class AppSettings: ObservableObject {
         longcatCookie = CookieKeychainStore.load(provider: "longcat-cookie") ?? ""
     }
 
+    func setAliyunAPIKey(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: key, provider: "aliyun-key")
+        aliyunAPIKey = persisted ? (key ?? "") : (CookieKeychainStore.load(provider: "aliyun-key") ?? "")
+    }
+
+    func loadAliyunFromKeychain() {
+        aliyunAPIKey = CookieKeychainStore.load(provider: "aliyun-key") ?? ""
+    }
+
     func loadOpenCodeCookieFromKeychain() {
         opencodeCookie = CookieKeychainStore.load(provider: "opencode") ?? ""
     }
@@ -434,6 +599,13 @@ final class AppSettings: ObservableObject {
         static let showKimi = "tokenbar.showKimi"
         static let showGrokPool = "tokenbar.showGrokPool"
         static let showLongCat = "tokenbar.showLongCat"
+        static let showAliyun = "tokenbar.showAliyun"
+        static let showStepFun = "tokenbar.showStepFun"
+        static let showSenseNova = "tokenbar.showSenseNova"
+        static let expiryReminderEnabled = "tokenbar.expiryReminderEnabled"
+        static let expiryReminderDays = "tokenbar.expiryReminderDays"
+        static let expiryReminderNotify = "tokenbar.expiryReminderNotify"
+        static let manualSubscriptions = "tokenbar.manualSubscriptions"
         static let longcatCookieSource = "tokenbar.longcatCookieSource"
         static let deepseekValueDisplay = "tokenbar.deepseekValueDisplay"
         static let nebulaValueDisplay = "tokenbar.nebulaValueDisplay"
@@ -476,6 +648,20 @@ final class AppSettings: ObservableObject {
         self.showKimi = defaults.object(forKey: Keys.showKimi) as? Bool ?? true
         self.showGrokPool = defaults.object(forKey: Keys.showGrokPool) as? Bool ?? true
         self.showLongCat = defaults.object(forKey: Keys.showLongCat) as? Bool ?? true
+        self.showAliyun = defaults.object(forKey: Keys.showAliyun) as? Bool ?? true
+        self.showStepFun = defaults.object(forKey: Keys.showStepFun) as? Bool ?? true
+        self.showSenseNova = defaults.object(forKey: Keys.showSenseNova) as? Bool ?? true
+        self.stepFunCookie = CookieKeychainStore.load(provider: "stepfun-browser") ?? ""
+        self.senseNovaCookie = CookieKeychainStore.load(provider: "sensenova-browser") ?? ""
+        self.stepFunAPIKey = CookieKeychainStore.load(provider: "stepfun-apikey") ?? ""
+        self.senseNovaAPIKey = CookieKeychainStore.load(provider: "sensenova-apikey") ?? ""
+        self.stepFunManualCookie = CookieKeychainStore.load(provider: "stepfun-manual-cookie") ?? ""
+        self.senseNovaManualCookie = CookieKeychainStore.load(provider: "sensenova-manual-cookie") ?? ""
+        self.expiryReminderEnabled = defaults.object(forKey: Keys.expiryReminderEnabled) as? Bool ?? true
+        let reminderDays = defaults.object(forKey: Keys.expiryReminderDays) as? Int ?? 7
+        self.expiryReminderDays = [3, 7, 14, 30].contains(reminderDays) ? reminderDays : 7
+        self.expiryReminderNotify = defaults.object(forKey: Keys.expiryReminderNotify) as? Bool ?? true
+        self.manualSubscriptions = Self.loadManualSubscriptions()
         let longcatCookieSourceRaw = defaults.string(forKey: Keys.longcatCookieSource)
             ?? LongCatCookieSource.automatic.rawValue
         self.longcatCookieSource = LongCatCookieSource(rawValue: longcatCookieSourceRaw) ?? .automatic
@@ -510,5 +696,6 @@ final class AppSettings: ObservableObject {
         self.zaiAPIKey = CookieKeychainStore.load(provider: "zai-token") ?? ""
         self.kimiAPIKey = CookieKeychainStore.load(provider: "kimi-key") ?? ""
         self.kimiAuthToken = CookieKeychainStore.load(provider: "kimi-auth") ?? ""
+        self.aliyunAPIKey = CookieKeychainStore.load(provider: "aliyun-key") ?? ""
     }
 }

@@ -73,6 +73,19 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         store.$longcatStatus
             .sink { [weak self] _ in self?.updateIconAndMenu() }
             .store(in: &cancellables)
+        store.$aliyunStatus
+            .sink { [weak self] _ in self?.updateIconAndMenu() }
+            .store(in: &cancellables)
+        store.$stepFunStatus
+            .sink { [weak self] _ in self?.updateIconAndMenu() }
+            .store(in: &cancellables)
+        store.$senseNovaStatus
+            .sink { [weak self] _ in self?.updateIconAndMenu() }
+            .store(in: &cancellables)
+        // Reminder list changes rebuild the menu (the Expiring section).
+        store.reminderScheduler.$items
+            .sink { [weak self] _ in self?.scheduleMenuRebuildIfOpen() }
+            .store(in: &cancellables)
         // Refresh view updates.
         store.$arkLastUpdatedAt
             .sink { [weak self] _ in self?.updateActiveRefreshView() }
@@ -98,6 +111,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         store.$longcatLastUpdatedAt
             .sink { [weak self] _ in self?.updateActiveRefreshView() }
             .store(in: &cancellables)
+        store.$aliyunLastUpdatedAt
+            .sink { [weak self] _ in self?.updateActiveRefreshView() }
+            .store(in: &cancellables)
+        store.$stepFunLastUpdatedAt
+            .sink { [weak self] _ in self?.updateActiveRefreshView() }
+            .store(in: &cancellables)
+        store.$senseNovaLastUpdatedAt
+            .sink { [weak self] _ in self?.updateActiveRefreshView() }
+            .store(in: &cancellables)
         store.$arkIsRefreshing
             .sink { [weak self] _ in self?.updateActiveRefreshView() }
             .store(in: &cancellables)
@@ -120,6 +142,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             .sink { [weak self] _ in self?.updateActiveRefreshView() }
             .store(in: &cancellables)
         store.$longcatIsRefreshing
+            .sink { [weak self] _ in self?.updateActiveRefreshView() }
+            .store(in: &cancellables)
+        store.$aliyunIsRefreshing
+            .sink { [weak self] _ in self?.updateActiveRefreshView() }
+            .store(in: &cancellables)
+        store.$stepFunIsRefreshing
+            .sink { [weak self] _ in self?.updateActiveRefreshView() }
+            .store(in: &cancellables)
+        store.$senseNovaIsRefreshing
             .sink { [weak self] _ in self?.updateActiveRefreshView() }
             .store(in: &cancellables)
         // Selection change.
@@ -184,7 +215,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             settings.$showZai.map { _ in },
             settings.$showKimi.map { _ in },
             settings.$showGrokPool.map { _ in },
-            settings.$showLongCat.map { _ in })
+            settings.$showLongCat.map { _ in },
+            settings.$showAliyun.map { _ in },
+            settings.$showStepFun.map { _ in },
+            settings.$showSenseNova.map { _ in })
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.updateIcon()
@@ -339,7 +373,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         case .grokPool:
             guard let summary = snapshot.plans.first?.grokPool else { return nil }
             return GrokPoolCardView.money(summary.costUSD, symbol: "$")
-        case .ark, .opencode, .zai, .kimi, .longcat:
+        case .ark, .opencode, .zai, .kimi, .longcat, .aliyun, .stepfun, .sensenova:
             return nil
         }
     }
@@ -427,7 +461,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             onRefresh: { [weak self] in self?.refreshFromMenu() },
             onSettings: { [weak self] in self?.showSettings() },
             onQuit: { NSApp.terminate(nil) },
-            allStatuses: store.allStatuses)
+            allStatuses: store.allStatuses,
+            reminders: store.reminderScheduler.items,
+            onReminderTap: { [weak self] item in self?.handleReminderTap(item) })
         MenuBuilder.populate(persistentMenu, with: state)
         activeRefreshView = persistentMenu.items.compactMap { $0.view as? RefreshMenuItemView }.first
     }
@@ -481,11 +517,66 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         scheduleMenuRebuildIfOpen()
     }
 
-    private var preferencesController: PreferencesWindowController?
-    func showSettings() {
-        if preferencesController == nil {
-            preferencesController = PreferencesWindowController(settings: settings, store: store)
+    /// Visual-QA only: opens the status-item menu as if the user clicked it.
+    func popMenuForQA() {
+        statusItem.button?.performClick(nil)
+    }
+
+    /// QA-only entry point that runs the same re-import the settings button
+    /// runs, so its result is observable from stderr.
+    func reimportOpenCodeForQA() {
+        store.reimportOpenCodeBrowserSession()
+    }
+
+    /// QA-only StepFun re-import trigger.
+    func reimportStepFunForQA() {
+        store.reimportStepFunBrowserSession()
+    }
+
+    /// QA-only SenseNova re-import trigger.
+    func reimportSenseNovaForQA() {
+        store.reimportSenseNovaBrowserSession()
+    }
+
+    /// Opens (or focuses) the Settings scene — the only settings window —
+    /// and optionally switches it to a specific pane.
+    func showSettings(initialPane: PreferencesPane? = nil) {
+        if let initialPane {
+            PreferencesRouting.pendingPane = initialPane
         }
-        preferencesController?.show()
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        // A menu-bar accessory's activate() is often denied, which leaves the
+        // scene window visible but behind every other app — indistinguishable
+        // from "settings didn't open". Raise it explicitly.
+        DispatchQueue.main.async { [weak self] in
+            self?.raiseSettingsWindow()
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        // An already-visible window ignores the "appear" path above, so also
+        // publish the pane switch live.
+        if let initialPane {
+            NotificationCenter.default.post(
+                name: PreferencesRouting.openPane,
+                object: initialPane.rawValue)
+        }
+    }
+
+    private func raiseSettingsWindow() {
+        guard let window = NSApp.windows.first(where: {
+            $0.title.contains("Settings") || $0.title.contains("设置")
+        }) else { return }
+        window.orderFrontRegardless()
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    /// Integrated subscriptions jump to their provider tab; manual entries
+    /// open the reminder settings pane where they are managed.
+    private func handleReminderTap(_ item: ExpiryReminderItem) {
+        if let tab = item.tab {
+            settings.selectedMenu = .provider(tab)
+            return
+        }
+        showSettings(initialPane: .reminder)
     }
 }

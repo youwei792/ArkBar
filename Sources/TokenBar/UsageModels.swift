@@ -159,6 +159,9 @@ struct PlanSnapshot: Sendable, Equatable, Identifiable {
         case nebula = "nebula"
         case grokPool = "grok-pool"
         case longcat = "longcat"
+        case aliyunCodingPlan = "aliyun-coding-plan"
+        case stepfunCodingPlan = "stepfun-coding-plan"
+        case senseNovaCodingPlan = "sensenova-coding-plan"
 
         var displayName: String {
             L10n.shared.productName(self)
@@ -168,7 +171,8 @@ struct PlanSnapshot: Sendable, Equatable, Identifiable {
         var isTeam: Bool {
             switch self {
             case .codingPlanTeam, .agentPlanTeam: true
-            case .codingPlan, .agentPlan, .openCodeGo, .deepseek, .nebula, .grokPool, .longcat: false
+            case .codingPlan, .agentPlan, .openCodeGo, .deepseek, .nebula, .grokPool, .longcat,
+                 .aliyunCodingPlan, .stepfunCodingPlan, .senseNovaCodingPlan: false
             }
         }
     }
@@ -295,6 +299,14 @@ enum UsageError: LocalizedError, Sendable {
     case grokPoolInvalidToken
     case longcatMissingCredentials
     case longcatInvalidSession
+    case aliyunMissingCredentials
+    case aliyunInvalidToken
+    case aliyunNotActivated
+    case stepFunMissingCredentials
+    case stepFunInvalidSession
+    case senseNovaMissingCredentials
+    case senseNovaInvalidSession
+    case senseNovaNotSupported
 
     var errorDescription: String? {
         switch self {
@@ -352,6 +364,22 @@ enum UsageError: LocalizedError, Sendable {
             L(.errorLongcatMissingCredentials)
         case .longcatInvalidSession:
             L(.errorLongcatInvalidSession)
+        case .aliyunMissingCredentials:
+            L(.errorAliyunMissingCredentials)
+        case .aliyunInvalidToken:
+            L(.errorAliyunInvalidToken)
+        case .aliyunNotActivated:
+            L(.errorAliyunNotActivated)
+        case .stepFunMissingCredentials:
+            L(.errorStepFunMissingCredentials)
+        case .stepFunInvalidSession:
+            L(.errorStepFunInvalidSession)
+        case .senseNovaMissingCredentials:
+            L(.errorSenseNovaMissingCredentials)
+        case .senseNovaInvalidSession:
+            L(.errorSenseNovaInvalidSession)
+        case .senseNovaNotSupported:
+            L(.errorSenseNovaNotSupported)
         }
     }
 }

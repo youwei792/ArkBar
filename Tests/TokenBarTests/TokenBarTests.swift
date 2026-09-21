@@ -202,6 +202,51 @@ struct VolcAPIDecodeTests {
     }
 }
 
+@Suite("OpenCode Go console status decode")
+struct OpenCodeConsoleStatusTests {
+    /// Real `/console/api/go/status` payload captured 2026-09-21.
+    private static let statusJSON = #"""
+    {"subscriberUserId":"acc_TESTSUBSCRIBER","paymentMethodId":"payment_method_TEST","renewalCurrency":"usd","useBalance":true,"cancelAtPeriodEnd":true,"renewalPending":false,"access":{"startsAt":"2026-09-11T04:39:30.000Z","endsAt":"2026-10-11T04:39:30.000Z","cancelAtPeriodEnd":true,"meters":{"fiveHour":{"startsAt":"2026-09-21T11:59:05.633Z","resetsAt":"2026-09-21T16:59:05.633Z","limitMicroCents":"1200000000","usedMicroCents":"21101705"},"week":{"startsAt":"2026-09-21T00:00:00.000Z","resetsAt":"2026-09-28T00:00:00.000Z","limitMicroCents":"3000000000","usedMicroCents":"70412590"},"month":{"limitMicroCents":"6000000000","usedMicroCents":"3307818513"}}}}
+    """#
+
+    @Test("Console status maps the three meters and the renewal date")
+    func parsesConsoleStatus() throws {
+        let data = Self.statusJSON.data(using: .utf8)!
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let root = try #require(object)
+        let usage = try #require(OpenCodeGoProvider.parseConsoleStatus(root, now: Date()))
+        // fiveHour: 21101705 / 1200000000 = 1.758% used
+        #expect(abs(usage.rolling.usedPercent - 1.758) < 0.01)
+        #expect(usage.rolling.resetsAt != nil)
+        // week: 70412590 / 3000000000 = 2.347% used
+        #expect(abs(usage.weekly!.usedPercent - 2.347) < 0.01)
+        // month: 3307818513 / 6000000000 = 55.13% used, reset = renewal date
+        #expect(abs(usage.monthly!.usedPercent - 55.13) < 0.01)
+        #expect(usage.monthly!.resetsAt == usage.expiryDate)
+        // Renewal 2026-10-11 04:39:30 UTC.
+        let expiry = try #require(usage.expiryDate)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        #expect(calendar.dateComponents([.year, .month, .day], from: expiry).day == 11)
+        #expect(calendar.dateComponents([.year, .month, .day], from: expiry).month == 10)
+    }
+
+    @Test("Non-console payloads return nil")
+    func rejectsForeignShapes() {
+        #expect(OpenCodeGoProvider.parseConsoleStatus(
+            ["access": ["meters": [:]]], now: Date()) == nil)
+        #expect(OpenCodeGoProvider.parseConsoleStatus(
+            ["data": ["whatever": 1]], now: Date()) == nil)
+    }
+
+    @Test("decodeUsagePage routes the console payload through the console parser")
+    func decodeRoutesConsolePayload() throws {
+        let usage = try OpenCodeGoProvider.decodeUsagePage(Self.statusJSON, now: Date())
+        #expect(abs(usage.rolling.usedPercent - 1.758) < 0.01)
+        #expect(usage.expiryDate != nil)
+    }
+}
+
 @Suite("OpenCode Go provider decode")
 struct OpenCodeGoProviderTests {
     @Test("Cookie header keeps only the OpenCode session credential")
@@ -1173,7 +1218,7 @@ struct ProviderVisibilityTests {
     @Test("Hidden providers drop out of the switcher list")
     func visibleTabsFilters() {
         let settings = AppSettings.shared
-        let original = (settings.showArk, settings.showOpenCode, settings.showDeepSeek, settings.showNebula, settings.showZai, settings.showKimi, settings.showGrokPool, settings.showLongCat)
+        let original = (settings.showArk, settings.showOpenCode, settings.showDeepSeek, settings.showNebula, settings.showZai, settings.showKimi, settings.showGrokPool, settings.showLongCat, settings.showAliyun, settings.showStepFun, settings.showSenseNova)
         defer {
             settings.showArk = original.0
             settings.showOpenCode = original.1
@@ -1183,6 +1228,9 @@ struct ProviderVisibilityTests {
             settings.showKimi = original.5
             settings.showGrokPool = original.6
             settings.showLongCat = original.7
+            settings.showAliyun = original.8
+            settings.showStepFun = original.9
+            settings.showSenseNova = original.10
         }
         settings.showArk = false
         settings.showOpenCode = true
@@ -1192,6 +1240,9 @@ struct ProviderVisibilityTests {
         settings.showKimi = false
         settings.showGrokPool = false
         settings.showLongCat = false
+        settings.showAliyun = false
+        settings.showStepFun = false
+        settings.showSenseNova = false
         #expect(settings.visibleTabs == [.opencode, .deepseek])
         #expect(settings.isVisible(.ark) == false)
         #expect(settings.isVisible(.grokPool) == false)
@@ -2267,6 +2318,342 @@ struct LongCatProviderDecodeTests {
     }
 }
 
+
+@Suite("Reminder engine")
+struct ReminderEngineTests {
+    private let now = Date(timeIntervalSince1970: 1_757_000_000)
+
+    private func source(daysFromNow: Int, remaining: Double?) -> PlanReminderSource {
+        let expiry = Calendar.current.date(byAdding: .day, value: daysFromNow, to: now)!
+        return PlanReminderSource(
+            tab: .longcat, planID: "plan-1", expiryDate: expiry, remainingPercent: remaining)
+    }
+
+    @Test("Plan expiring within the lead time with quota left is included")
+    func planIncluded() {
+        let items = ReminderEngine.makeItems(
+            planSources: [source(daysFromNow: 5, remaining: 80)],
+            manual: [], now: now, daysThreshold: 7)
+        #expect(items.count == 1)
+        #expect(items[0].daysUntilExpiry == 5)
+        #expect(items[0].remainingPercent == 80)
+        #expect(items[0].tab == .longcat)
+    }
+
+    @Test("Boundary: exactly the lead time is included, one day past is not")
+    func leadTimeBoundary() {
+        #expect(ReminderEngine.makeItems(
+            planSources: [source(daysFromNow: 7, remaining: 80)],
+            manual: [], now: now, daysThreshold: 7).count == 1)
+        #expect(ReminderEngine.makeItems(
+            planSources: [source(daysFromNow: 8, remaining: 80)],
+            manual: [], now: now, daysThreshold: 7).isEmpty)
+    }
+
+    @Test("Plans below the usage watermark are not nagged; unknown quota still reminds")
+    func quotaGate() {
+        #expect(ReminderEngine.makeItems(
+            planSources: [source(daysFromNow: 3, remaining: 49.9)],
+            manual: [], now: now, daysThreshold: 7).isEmpty)
+        #expect(ReminderEngine.makeItems(
+            planSources: [source(daysFromNow: 3, remaining: 50)],
+            manual: [], now: now, daysThreshold: 7).count == 1)
+        #expect(ReminderEngine.makeItems(
+            planSources: [source(daysFromNow: 3, remaining: nil)],
+            manual: [], now: now, daysThreshold: 7).count == 1)
+    }
+
+    @Test("Overdue integrated plans drop out; overdue manual entries stay visible")
+    func overdueHandling() {
+        let manual = ManualSubscription(
+            name: "某年付服务",
+            expiryDate: Calendar.current.date(byAdding: .day, value: -1, to: now)!)
+        let items = ReminderEngine.makeItems(
+            planSources: [source(daysFromNow: -1, remaining: 80)],
+            manual: [manual], now: now, daysThreshold: 7)
+        #expect(items.count == 1)
+        #expect(items[0].isOverdue)
+        #expect(items[0].tab == nil)
+        #expect(items[0].name == "某年付服务")
+    }
+
+    @Test("Items sort by fewest days first")
+    func sorting() {
+        let items = ReminderEngine.makeItems(
+            planSources: [
+                source(daysFromNow: 6, remaining: 90),
+                source(daysFromNow: 2, remaining: 90),
+            ],
+            manual: [], now: now, daysThreshold: 7)
+        #expect(items.map(\.daysUntilExpiry) == [2, 6])
+    }
+
+    @Test("Unnamed manual drafts stay out of the reminder list")
+    func skipsUnnamedManualEntries() {
+        let drafts = [
+            ManualSubscription(name: "", expiryDate: now, note: ""),
+            ManualSubscription(name: "   ", expiryDate: now, note: ""),
+            ManualSubscription(name: " 有名字的 ", expiryDate: now, note: ""),
+        ]
+        let items = ReminderEngine.makeItems(
+            planSources: [], manual: drafts, now: now, daysThreshold: 7)
+        #expect(items.count == 1)
+        #expect(items[0].name == "有名字的")
+    }
+
+    @Test("Notifications fire only inside the window and once per calendar day")
+    func shouldNotify() {
+        let item = ExpiryReminderItem(
+            id: "plan:longcat:1", name: "LongCat", expiryDate: now,
+            daysUntilExpiry: 3, remainingPercent: 80, tab: .longcat)
+        let overdue = ExpiryReminderItem(
+            id: "plan:longcat:2", name: "LongCat", expiryDate: now,
+            daysUntilExpiry: -1, remainingPercent: 80, tab: .longcat)
+        #expect(ReminderEngine.shouldNotify(item, lastNotifiedDate: nil, now: now))
+        #expect(!ReminderEngine.shouldNotify(overdue, lastNotifiedDate: nil, now: now))
+        // Same-day stamp blocks a repeat.
+        #expect(!ReminderEngine.shouldNotify(item, lastNotifiedDate: now, now: now))
+        // Yesterday's stamp allows a fresh notification.
+        #expect(ReminderEngine.shouldNotify(item, lastNotifiedDate: now - 86_400, now: now))
+    }
+}
+
+@Suite("Manual subscriptions storage")
+struct ManualSubscriptionTests {
+    @Test("Codable round trip preserves id, name, date and note")
+    func roundTrip() throws {
+        let subscription = ManualSubscription(
+            name: "OpenCode Go",
+            expiryDate: Date(timeIntervalSince1970: 1_800_000_000),
+            note: "年付")
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode([subscription])
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode([ManualSubscription].self, from: data)
+        #expect(decoded == [subscription])
+    }
+}
+
+@Suite("Gateway quota headers")
+struct GatewayQuotaHeadersTests {
+    @Test("x-ratelimit request pairs map to the 5-hour ring")
+    func parsesRateLimitHeaders() {
+        let now = Date(timeIntervalSince1970: 1_757_000_000)
+        let quota = GatewayQuotaHeaders.parse([
+            "x-ratelimit-remaining-requests": "5800",
+            "x-ratelimit-limit-requests": "6000",
+            "x-ratelimit-reset-requests": "1800",
+        ], now: now)
+        #expect(quota.windows.count == 1)
+        #expect(quota.windows[0].label == "5-hour")
+        #expect(abs(quota.windows[0].usedPercent - (200.0 / 6000.0 * 100)) < 0.01)
+        #expect(quota.windows[0].resetsAt == now.addingTimeInterval(1800))
+    }
+
+    @Test("Header names are case-insensitive and dumps are sorted")
+    func caseInsensitive() {
+        let quota = GatewayQuotaHeaders.parse([
+            "X-RateLimit-Remaining-Requests": "100",
+            "X-RATELIMIT-LIMIT-REQUESTS": "1000",
+        ])
+        #expect(quota.windows.count == 1)
+        #expect(abs(quota.windows[0].usedPercent - 90) < 0.01)
+        let dump = GatewayQuotaHeaders.dump(["b": "2", "A": "1"])
+        #expect(dump.hasPrefix("A: 1"))
+    }
+
+    @Test("Unrecognized headers yield an empty quota")
+    func emptyForUnknownHeaders() {
+        let quota = GatewayQuotaHeaders.parse(["content-type": "application/json", "date": "Mon"])
+        #expect(quota.windows.isEmpty)
+        #expect(quota.expiryDate == nil)
+    }
+
+    @Test("Expiry headers are parsed")
+    func parsesExpiry() {
+        let quota = GatewayQuotaHeaders.parse([
+            "x-subscription-expires-at": "2026-11-21T00:00:00.000Z",
+        ])
+        #expect(quota.expiryDate != nil)
+    }
+}
+
+@Suite("SenseNova provider decode")
+struct SenseNovaProviderDecodeTests {
+    @Test("Quota payloads map to the session ring and expiry")
+    func parsesQuota() {
+        let json = """
+        {"data":{"credit":{"used":12000,"remaining":48000},"resetTime":"2026-09-21T18:00:00.000Z","expireTime":"2026-11-01T00:00:00.000Z"}}
+        """
+        let quota = SenseNovaProvider.parseQuota(json)
+        #expect(quota != nil)
+        #expect(abs(quota!.usedPercent! - 20) < 0.01)
+        #expect(quota!.remaining == 48000)
+        #expect(quota!.expiryDate != nil)
+        let snapshot = SenseNovaProvider.makeSnapshot(from: quota!, authMethod: "test")
+        #expect(snapshot.plans[0].product == .senseNovaCodingPlan)
+        #expect(snapshot.plans[0].windows.first?.label == "5-hour")
+        #expect(snapshot.plans[0].expiryDate != nil)
+    }
+
+    @Test("Non-quota payloads (login pages) return nil")
+    func rejectsNonQuota() {
+        #expect(SenseNovaProvider.parseQuota("<html>login</html>") == nil)
+        #expect(SenseNovaProvider.parseQuota("{\"code\":\"Unauthorized\"}") == nil)
+    }
+}
+
+@Suite("StepFun console RPC decode")
+struct StepFunConsoleDecodeTests {
+    /// Real `QueryStepPlanRateLimit` payload captured 2026-09-22.
+    private static let rateLimitJSON = #"""
+    {"status":1,"desc":"","five_hour_usage_left_rate":0,"five_hour_usage_reset_time":"0","weekly_usage_left_rate":0,"weekly_usage_reset_time":"0","plan_family":2,"plan_credit_rate_limit":{"subscription_credit_left_rate":0.79621214,"subscription_credit_reset_time":"0","topup_credit_left_rate":0,"credit_buckets":[{"type":1,"credit_total":"1600000000","credit_residual":"1273939435","expire_at":"1792486158","next_reset_at":"0"}]}}
+    """#
+
+    /// Real `GetStepPlanStatus` payload captured 2026-09-22.
+    private static let statusJSON = #"""
+    {"status":1,"desc":"","subscription":{"plan_type":1,"name":"Plus","status":1,"pay_channel":3,"activated_at":"1789894158","expired_at":"1792486158","auto_renew":false,"plan_id":"21","source_channel_code":"","plan_family":2},"agreement":null}
+    """#
+
+    @Test("Plans without 5-hour/weekly windows show only the credit ring")
+    func parsesRateLimit() throws {
+        let usage = try StepFunProvider.parseRateLimit(Self.rateLimitJSON.data(using: .utf8)!)
+        // reset times are "0" → those windows do not apply to this plan.
+        #expect(usage.session == nil)
+        #expect(usage.weekly == nil)
+        // credit: (1600000000 - 1273939435) / 1600000000 = 20.38% used.
+        #expect(abs(usage.credit!.usedPercent - 20.3787853125) < 0.001)
+        #expect(usage.credit!.resetsAt != nil)
+        #expect(usage.topupLeftRate == 0)
+    }
+
+    @Test("Plans that do carry 5-hour/weekly windows show all three rings")
+    func parsesAllWindowsWhenPresent() throws {
+        let json = """
+        {"five_hour_usage_left_rate":0.25,"five_hour_usage_reset_time":"1790020000","weekly_usage_left_rate":0.5,"weekly_usage_reset_time":"1790100000","plan_credit_rate_limit":{"subscription_credit_left_rate":0.9,"credit_buckets":[{"credit_total":"1000","credit_residual":"900"}]}}
+        """
+        let usage = try StepFunProvider.parseRateLimit(json.data(using: .utf8)!)
+        #expect(abs(usage.session!.usedPercent - 75) < 0.01)
+        #expect(usage.session!.resetsAt != nil)
+        #expect(abs(usage.weekly!.usedPercent - 50) < 0.01)
+        #expect(abs(usage.credit!.usedPercent - 10) < 0.01)
+        let provider = StepFunProvider.makeSnapshot(from: usage, authMethod: "test")
+        #expect(provider.plans[0].windows.map(\.label) == ["5-hour", "Weekly", "Monthly"])
+    }
+
+    @Test("Plan status carries the plan name and expiry")
+    func parsesPlanStatus() throws {
+        let status = try StepFunProvider.parsePlanStatus(Self.statusJSON.data(using: .utf8)!)
+        #expect(status.planName == "Plus")
+        #expect(status.expiryDate != nil)
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        let parts = cal.dateComponents([.year, .month, .day], from: status.expiryDate!)
+        #expect(parts.year == 2026 && parts.month == 10 && parts.day == 20)
+    }
+
+    @Test("Snapshot mapping keeps ring order and the expiry badge")
+    func mapsSnapshot() throws {
+        var usage = try StepFunProvider.parseRateLimit(Self.rateLimitJSON.data(using: .utf8)!)
+        let status = try StepFunProvider.parsePlanStatus(Self.statusJSON.data(using: .utf8)!)
+        usage.expiryDate = status.expiryDate
+        usage.planName = status.planName
+        let provider = StepFunProvider.makeSnapshot(from: usage, authMethod: "test")
+        #expect(provider.plans.count == 1)
+        let plan = provider.plans[0]
+        #expect(plan.product == .stepfunCodingPlan)
+        #expect(plan.expiryDate != nil)
+        // This plan only carries the monthly credit bucket.
+        #expect(plan.windows.map(\.label) == ["Monthly"])
+        #expect(plan.windows.map(\.sortRank) == [2])
+    }
+}
+
+@Suite("Alibaba Cloud provider decode")
+struct AliyunProviderDecodeTests {
+    /// Placeholder contract — reconciled with the real console payload in
+    /// stage 2 (docs/aliyun-handoff.md).
+    private static let usageJSON = #"""
+    {
+      "plan": "pro",
+      "expiresAt": "2026-11-21T00:00:00+08:00",
+      "windows": [
+        {"kind": "five_hour", "usedPercent": 12.5, "used": 750, "total": 6000, "resetAt": 1761302400},
+        {"kind": "weekly", "percent": 30, "used": 13500, "total": 45000},
+        {"kind": "monthly", "percent": 8, "used": 7200, "total": 90000}
+      ]
+    }
+    """#
+
+    @Test("Parses the three Coding Plan windows")
+    func parseWindows() throws {
+        let snapshot = try AliyunProvider.parse(data: Self.usageJSON.data(using: .utf8)!)
+        #expect(snapshot.planName == "pro")
+        #expect(snapshot.expiryDate != nil)
+        #expect(snapshot.windows.count == 3)
+        #expect(snapshot.windows[0].kind == .fiveHour)
+        #expect(snapshot.windows[0].usedPercent == 12.5)
+        #expect(snapshot.windows[0].used == 750)
+        #expect(snapshot.windows[0].total == 6000)
+        #expect(snapshot.windows[0].resetsAt != nil)
+        #expect(snapshot.windows[1].kind == .weekly)
+        #expect(snapshot.windows[1].usedPercent == 30)
+        #expect(snapshot.windows[2].kind == .monthly)
+        #expect(snapshot.windows[2].usedPercent == 8)
+    }
+
+    @Test("Unknown window kinds are skipped; an empty result is a parse error")
+    func skipsUnknownKinds() {
+        let data = #"{"windows": [{"kind": "mystery"}]}"#.data(using: .utf8)!
+        #expect(throws: UsageError.self) {
+            try AliyunProvider.parse(data: data)
+        }
+    }
+
+    @Test("Windows map to canonical labels in ring order")
+    func mapping() throws {
+        let snapshot = try AliyunProvider.parse(data: Self.usageJSON.data(using: .utf8)!)
+        let provider = AliyunProvider.makeSnapshot(from: snapshot)
+        #expect(provider.providerName == "阿里云")
+        #expect(provider.authMethod == "apikey")
+        #expect(provider.plans.count == 1)
+        let plan = provider.plans[0]
+        #expect(plan.product == .aliyunCodingPlan)
+        #expect(plan.subscribed)
+        #expect(plan.expiryDate != nil)
+        #expect(plan.windows.map(\.label) == ["5-hour", "Weekly", "Monthly"])
+        #expect(plan.windows.map(\.sortRank) == [0, 1, 2])
+        #expect(plan.windows[0].used == 750)
+        #expect(plan.windows[0].total == 6000)
+        #expect(plan.daysUntilExpiry != nil)
+    }
+
+    @Test("Used percent is clamped into 0...100")
+    func clampedPercent() {
+        let usage = AliyunUsageSnapshot(
+            planName: nil, expiryDate: nil,
+            windows: [AliyunWindowEntry(
+                kind: .fiveHour, usedPercent: 120, used: nil, total: nil, resetsAt: nil)])
+        let provider = AliyunProvider.makeSnapshot(from: usage)
+        #expect(provider.plans[0].windows[0].usedPercent == 100)
+    }
+}
+
+@Suite("Alibaba Cloud credentials")
+struct AliyunCredentialsTests {
+    @Test("Reads the environment variable, unquoting and trimming")
+    func readsEnvironment() {
+        #expect(AliyunCredentialResolver.apiKey(
+            environment: ["ALIYUN_CODING_PLAN_API_KEY": "sk-sp-abc"]) == "sk-sp-abc")
+        #expect(AliyunCredentialResolver.apiKey(
+            environment: ["ALIYUN_CODING_PLAN_API_KEY": "\"sk-sp-abc\""]) == "sk-sp-abc")
+        #expect(AliyunCredentialResolver.apiKey(environment: [:]) == nil)
+        #expect(AliyunCredentialResolver.apiKey(
+            environment: ["ALIYUN_CODING_PLAN_API_KEY": "   "]) == nil)
+    }
+}
 
 // MARK: - Test helpers
 

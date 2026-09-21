@@ -30,6 +30,9 @@ final class UsageStore: ObservableObject {
     @Published private(set) var kimiStatus: LoadStatus = .never
     @Published private(set) var grokPoolStatus: LoadStatus = .never
     @Published private(set) var longcatStatus: LoadStatus = .never
+    @Published private(set) var aliyunStatus: LoadStatus = .never
+    @Published private(set) var stepFunStatus: LoadStatus = .never
+    @Published private(set) var senseNovaStatus: LoadStatus = .never
     @Published private(set) var arkLastUpdatedAt: Date?
     @Published private(set) var opencodeLastUpdatedAt: Date?
     @Published private(set) var deepseekLastUpdatedAt: Date?
@@ -38,6 +41,9 @@ final class UsageStore: ObservableObject {
     @Published private(set) var kimiLastUpdatedAt: Date?
     @Published private(set) var grokPoolLastUpdatedAt: Date?
     @Published private(set) var longcatLastUpdatedAt: Date?
+    @Published private(set) var aliyunLastUpdatedAt: Date?
+    @Published private(set) var stepFunLastUpdatedAt: Date?
+    @Published private(set) var senseNovaLastUpdatedAt: Date?
     @Published private(set) var arkIsRefreshing = false
     @Published private(set) var opencodeIsRefreshing = false
     @Published private(set) var deepseekIsRefreshing = false
@@ -46,6 +52,9 @@ final class UsageStore: ObservableObject {
     @Published private(set) var kimiIsRefreshing = false
     @Published private(set) var grokPoolIsRefreshing = false
     @Published private(set) var longcatIsRefreshing = false
+    @Published private(set) var aliyunIsRefreshing = false
+    @Published private(set) var stepFunIsRefreshing = false
+    @Published private(set) var senseNovaIsRefreshing = false
 
     /// Convenience for the status item: in summary mode, pick the tightest
     /// (lowest remaining percent) provider.
@@ -75,8 +84,13 @@ final class UsageStore: ObservableObject {
     var allStatuses: [ProviderTab: LoadStatus] {
         [.ark: arkStatus, .opencode: opencodeStatus,
          .deepseek: deepseekStatus, .nebula: nebulaStatus, .zai: zaiStatus,
-         .kimi: kimiStatus, .grokPool: grokPoolStatus, .longcat: longcatStatus]
+         .kimi: kimiStatus, .grokPool: grokPoolStatus, .longcat: longcatStatus,
+         .aliyun: aliyunStatus, .stepfun: stepFunStatus, .sensenova: senseNovaStatus]
     }
+
+    /// Expiring-subscription reminders, recomputed whenever any provider
+    /// snapshot or reminder setting changes.
+    let reminderScheduler: ReminderScheduler
 
     /// The "tightest" (lowest remaining percent, most urgent) provider.
     /// Used to drive the status-item icon when in summary mode.
@@ -114,6 +128,9 @@ final class UsageStore: ObservableObject {
     private var kimiProvider: KimiProvider?
     private var grokPoolProvider: GrokPoolProvider?
     private var longcatProvider: LongCatProvider?
+    private var aliyunProvider: AliyunProvider?
+    private var stepFunProvider: StepFunProvider?
+    private var senseNovaProvider: SenseNovaProvider?
     private var timer: Timer?
     private var lastSuccessfulArkSnapshot: ProviderSnapshot?
     private var lastSuccessfulOpenCodeSnapshot: ProviderSnapshot?
@@ -123,10 +140,14 @@ final class UsageStore: ObservableObject {
     private var lastSuccessfulKimiSnapshot: ProviderSnapshot?
     private var lastSuccessfulGrokPoolSnapshot: ProviderSnapshot?
     private var lastSuccessfulLongCatSnapshot: ProviderSnapshot?
+    private var lastSuccessfulAliyunSnapshot: ProviderSnapshot?
+    private var lastSuccessfulStepFunSnapshot: ProviderSnapshot?
+    private var lastSuccessfulSenseNovaSnapshot: ProviderSnapshot?
     private var cancellables = Set<AnyCancellable>()
 
     init(settings: AppSettings = .shared) {
         self.settings = settings
+        self.reminderScheduler = ReminderScheduler(settings: settings)
         rebuildProviders()
 
         settings.$refreshInterval
@@ -202,6 +223,34 @@ final class UsageStore: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in self?.refresh(tab: .longcat) }
             .store(in: &cancellables)
+        settings.$aliyunAPIKey
+            .dropFirst()
+            .sink { [weak self] _ in self?.refresh(tab: .aliyun) }
+            .store(in: &cancellables)
+        // Reminder inputs: settings and any provider snapshot change. All
+        // branches are erased so MergeMany sees one concrete publisher type.
+        Publishers.MergeMany(
+            settings.$expiryReminderEnabled.map { _ in () }.eraseToAnyPublisher(),
+            settings.$expiryReminderDays.map { _ in () }.eraseToAnyPublisher(),
+            settings.$expiryReminderNotify.map { _ in () }.eraseToAnyPublisher(),
+            settings.$manualSubscriptions.map { _ in () }.eraseToAnyPublisher())
+            .dropFirst()
+            .sink { [weak self] _ in self?.updateReminders() }
+            .store(in: &cancellables)
+        Publishers.MergeMany(
+            $arkStatus.map { _ in () }.eraseToAnyPublisher(),
+            $opencodeStatus.map { _ in () }.eraseToAnyPublisher(),
+            $deepseekStatus.map { _ in () }.eraseToAnyPublisher(),
+            $nebulaStatus.map { _ in () }.eraseToAnyPublisher(),
+            $zaiStatus.map { _ in () }.eraseToAnyPublisher(),
+            $kimiStatus.map { _ in () }.eraseToAnyPublisher(),
+            $grokPoolStatus.map { _ in () }.eraseToAnyPublisher(),
+            $longcatStatus.map { _ in () }.eraseToAnyPublisher(),
+            $aliyunStatus.map { _ in () }.eraseToAnyPublisher(),
+            $stepFunStatus.map { _ in () }.eraseToAnyPublisher(),
+            $senseNovaStatus.map { _ in () }.eraseToAnyPublisher())
+            .sink { [weak self] _ in self?.updateReminders() }
+            .store(in: &cancellables)
         // When the selection switches to a provider with no data, refresh it.
         settings.$selectedMenu
             .dropFirst()
@@ -224,6 +273,9 @@ final class UsageStore: ObservableObject {
             case .kimi: publisher = settings.$showKimi.eraseToAnyPublisher()
             case .grokPool: publisher = settings.$showGrokPool.eraseToAnyPublisher()
             case .longcat: publisher = settings.$showLongCat.eraseToAnyPublisher()
+            case .aliyun: publisher = settings.$showAliyun.eraseToAnyPublisher()
+            case .stepfun: publisher = settings.$showStepFun.eraseToAnyPublisher()
+            case .sensenova: publisher = settings.$showSenseNova.eraseToAnyPublisher()
             }
             publisher
                 .dropFirst()
@@ -267,6 +319,9 @@ final class UsageStore: ObservableObject {
         kimiProvider = KimiProvider(settings: settings)
         grokPoolProvider = GrokPoolProvider(settings: settings)
         longcatProvider = LongCatProvider(settings: settings)
+        aliyunProvider = AliyunProvider(settings: settings)
+        stepFunProvider = StepFunProvider(settings: settings)
+        senseNovaProvider = SenseNovaProvider(settings: settings)
     }
 
     /// Ark signed-OpenAPI credentials, in the same precedence the DeepSeek
@@ -291,6 +346,12 @@ final class UsageStore: ObservableObject {
         }
     }
 
+    /// Refresh every visible provider regardless of the current selection —
+    /// the General settings pane's "Refresh All" action.
+    func refreshAll() {
+        refreshAllConfigured()
+    }
+
     func refresh(tab: ProviderTab) {
         switch tab {
         case .ark: refreshArk()
@@ -301,6 +362,9 @@ final class UsageStore: ObservableObject {
         case .kimi: refreshKimi()
         case .grokPool: refreshGrokPool()
         case .longcat: refreshLongCat()
+        case .aliyun: refreshAliyun()
+        case .stepfun: refreshStepFun()
+        case .sensenova: refreshSenseNova()
         }
     }
 
@@ -802,6 +866,213 @@ final class UsageStore: ObservableObject {
         }
     }
 
+    // MARK: - Alibaba Cloud (阿里云百炼 Coding Plan)
+
+    private func refreshAliyun() {
+        guard !aliyunIsRefreshing else { return }
+        guard let provider = aliyunProvider else { return }
+        aliyunIsRefreshing = true
+        switch aliyunStatus {
+        case .ok, .stale: break
+        case .never, .loading, .error: aliyunStatus = .loading
+        }
+        let environment = ProcessInfo.processInfo.environment
+        Task { [weak self] in
+            await self?.runAliyunProvider(provider, environment: environment)
+        }
+    }
+
+    private func runAliyunProvider(_ provider: AliyunProvider, environment: [String: String]) async {
+        do {
+            let snapshot = try await provider.fetch(environment: environment)
+            Self.log("✓ \(provider.displayName): \(snapshot.plans.count) plan(s)")
+            aliyunLastUpdatedAt = Date()
+            lastSuccessfulAliyunSnapshot = snapshot
+            aliyunStatus = .ok(snapshot: snapshot)
+            finishAliyunRefresh()
+        } catch let error as UsageError {
+            Self.log("✗ \(provider.displayName): \(error.errorDescription ?? "Unknown error")")
+            finishAliyunRefresh(error: error.errorDescription ?? "Unknown error")
+        } catch {
+            Self.log("✗ \(provider.displayName): \(error.localizedDescription)")
+            finishAliyunRefresh(error: error.localizedDescription)
+        }
+    }
+
+    private func finishAliyunRefresh(error: String? = nil) {
+        aliyunIsRefreshing = false
+        if let error {
+            if let snapshot = lastSuccessfulAliyunSnapshot {
+                aliyunStatus = .stale(snapshot: snapshot, message: error)
+            } else {
+                aliyunStatus = .error(message: error)
+            }
+        }
+    }
+
+    // MARK: - StepFun (阶跃星辰 Step Plan)
+
+    private func refreshStepFun() {
+        guard !stepFunIsRefreshing else { return }
+        guard let provider = stepFunProvider else { return }
+        stepFunIsRefreshing = true
+        switch stepFunStatus {
+        case .ok, .stale: break
+        case .never, .loading, .error: stepFunStatus = .loading
+        }
+        let environment = ProcessInfo.processInfo.environment
+        Task { [weak self] in
+            await self?.runStepFunProvider(provider, environment: environment)
+        }
+    }
+
+    private func runStepFunProvider(_ provider: StepFunProvider, environment: [String: String]) async {
+        do {
+            let snapshot = try await provider.fetch(environment: environment)
+            Self.log("✓ \(provider.displayName): \(snapshot.plans.count) plan(s)")
+            stepFunLastUpdatedAt = Date()
+            lastSuccessfulStepFunSnapshot = snapshot
+            stepFunStatus = .ok(snapshot: snapshot)
+            finishStepFunRefresh()
+        } catch let error as UsageError {
+            Self.log("✗ \(provider.displayName): \(error.errorDescription ?? "Unknown error")")
+            finishStepFunRefresh(error: error.errorDescription ?? "Unknown error")
+        } catch {
+            Self.log("✗ \(provider.displayName): \(error.localizedDescription)")
+            finishStepFunRefresh(error: error.localizedDescription)
+        }
+    }
+
+    private func finishStepFunRefresh(error: String? = nil) {
+        stepFunIsRefreshing = false
+        if let error {
+            if let snapshot = lastSuccessfulStepFunSnapshot {
+                stepFunStatus = .stale(snapshot: snapshot, message: error)
+            } else {
+                stepFunStatus = .error(message: error)
+            }
+        }
+    }
+
+    func reimportStepFunBrowserSession() {
+        guard !stepFunIsRefreshing else { return }
+        guard let provider = stepFunProvider else { return }
+        stepFunIsRefreshing = true
+        switch stepFunStatus {
+        case .ok, .stale: break
+        case .never, .loading, .error: stepFunStatus = .loading
+        }
+        let environment = ProcessInfo.processInfo.environment
+        let browser = StepFunBrowserSession.browserCandidates().first
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try StepFunBrowserSession.importSessionInteractively(from: browser)
+                }.value
+                await self.runStepFunProvider(provider, environment: environment)
+            } catch {
+                Self.log("✗ StepFun browser import: \(error.localizedDescription)")
+                self.finishStepFunRefresh(error: error.localizedDescription)
+            }
+        }
+    }
+
+    // MARK: - SenseNova (商汤日日新 Token Plan)
+
+    private func refreshSenseNova() {
+        guard !senseNovaIsRefreshing else { return }
+        guard let provider = senseNovaProvider else { return }
+        senseNovaIsRefreshing = true
+        switch senseNovaStatus {
+        case .ok, .stale: break
+        case .never, .loading, .error: senseNovaStatus = .loading
+        }
+        let environment = ProcessInfo.processInfo.environment
+        Task { [weak self] in
+            await self?.runSenseNovaProvider(provider, environment: environment)
+        }
+    }
+
+    private func runSenseNovaProvider(_ provider: SenseNovaProvider, environment: [String: String]) async {
+        do {
+            let snapshot = try await provider.fetch(environment: environment)
+            Self.log("✓ \(provider.displayName): \(snapshot.plans.count) plan(s)")
+            senseNovaLastUpdatedAt = Date()
+            lastSuccessfulSenseNovaSnapshot = snapshot
+            senseNovaStatus = .ok(snapshot: snapshot)
+            finishSenseNovaRefresh()
+        } catch let error as UsageError {
+            Self.log("✗ \(provider.displayName): \(error.errorDescription ?? "Unknown error")")
+            finishSenseNovaRefresh(error: error.errorDescription ?? "Unknown error")
+        } catch {
+            Self.log("✗ \(provider.displayName): \(error.localizedDescription)")
+            finishSenseNovaRefresh(error: error.localizedDescription)
+        }
+    }
+
+    private func finishSenseNovaRefresh(error: String? = nil) {
+        senseNovaIsRefreshing = false
+        if let error {
+            if let snapshot = lastSuccessfulSenseNovaSnapshot {
+                senseNovaStatus = .stale(snapshot: snapshot, message: error)
+            } else {
+                senseNovaStatus = .error(message: error)
+            }
+        }
+    }
+
+    func reimportSenseNovaBrowserSession() {
+        guard !senseNovaIsRefreshing else { return }
+        guard let provider = senseNovaProvider else { return }
+        senseNovaIsRefreshing = true
+        switch senseNovaStatus {
+        case .ok, .stale: break
+        case .never, .loading, .error: senseNovaStatus = .loading
+        }
+        let environment = ProcessInfo.processInfo.environment
+        let browser = SenseNovaBrowserSession.browserCandidates().first
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try SenseNovaBrowserSession.importSessionInteractively(from: browser)
+                }.value
+                await self.runSenseNovaProvider(provider, environment: environment)
+            } catch {
+                Self.log("✗ SenseNova browser import: \(error.localizedDescription)")
+                self.finishSenseNovaRefresh(error: error.localizedDescription)
+            }
+        }
+    }
+
+    // MARK: - Expiry reminders
+
+    /// Recomputes reminder items from every provider snapshot (plans with a
+    /// verified expiry date) plus the user's manual subscriptions.
+    private func updateReminders() {
+        var sources: [PlanReminderSource] = []
+        for (tab, status) in allStatuses {
+            guard let snapshot = status.snapshot else { continue }
+            for plan in snapshot.plans {
+                guard let expiryDate = plan.expiryDate else { continue }
+                // The quota that lapses at expiry is the monthly pool when the
+                // plan has one; fall back to the tightest window.
+                let remaining = plan.windows
+                    .first(where: { $0.sortRank == 2 })?
+                    .remainingPercent ?? plan.tightestWindow?.remainingPercent
+                sources.append(PlanReminderSource(
+                    tab: tab,
+                    planID: plan.id,
+                    expiryDate: expiryDate,
+                    remainingPercent: remaining))
+            }
+        }
+        reminderScheduler.update(
+            planSources: sources,
+            manual: settings.manualSubscriptions)
+    }
+
     func status(for tab: ProviderTab) -> LoadStatus {
         switch tab {
         case .ark: return arkStatus
@@ -812,6 +1083,9 @@ final class UsageStore: ObservableObject {
         case .kimi: return kimiStatus
         case .grokPool: return grokPoolStatus
         case .longcat: return longcatStatus
+        case .aliyun: return aliyunStatus
+        case .stepfun: return stepFunStatus
+        case .sensenova: return senseNovaStatus
         }
     }
 
@@ -825,6 +1099,9 @@ final class UsageStore: ObservableObject {
         case .kimi: return kimiLastUpdatedAt
         case .grokPool: return grokPoolLastUpdatedAt
         case .longcat: return longcatLastUpdatedAt
+        case .aliyun: return aliyunLastUpdatedAt
+        case .stepfun: return stepFunLastUpdatedAt
+        case .sensenova: return senseNovaLastUpdatedAt
         }
     }
 
@@ -838,6 +1115,9 @@ final class UsageStore: ObservableObject {
         case .kimi: return kimiIsRefreshing
         case .grokPool: return grokPoolIsRefreshing
         case .longcat: return longcatIsRefreshing
+        case .aliyun: return aliyunIsRefreshing
+        case .stepfun: return stepFunIsRefreshing
+        case .sensenova: return senseNovaIsRefreshing
         }
     }
 
