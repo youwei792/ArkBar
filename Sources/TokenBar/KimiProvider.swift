@@ -391,7 +391,10 @@ final class KimiProvider: UsageProvider {
             seatID: nil,
             subscribed: true,
             windows: windows,
-            expiryDate: nil,
+            // The shared-pool membership carries its own expire time in the
+            // GetSubscriptionStats response; surface it on the expiry badge
+            // and in the expiry reminders, like OpenCode Go does.
+            expiryDate: snapshot.sharedPool?.expireTime.flatMap(Self.parseDate),
             errorMessage: nil)
 
         return ProviderSnapshot(

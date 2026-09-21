@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import SweetCookieKit
 
-/// Imports only OpenCode's authentication cookie from an existing browser
+/// Imports OpenCode's authentication cookies from an existing browser
 /// session. The extracted credential is cached in TokenBar's Keychain so routine
 /// five-minute refreshes do not repeatedly decrypt the browser cookie store.
 enum OpenCodeGoBrowserSession {
@@ -82,6 +82,12 @@ enum OpenCodeGoBrowserSession {
     @MainActor
     static func browserForInteractiveImport() -> Browser? {
         let available = preferredBrowsers.filter { !client.stores(for: $0).isEmpty }
+        let counts = preferredBrowsers
+            .map { "\($0.displayName)=\(client.stores(for: $0).count)" }
+            .joined(separator: " ")
+        // Diagnostic (names/counts only — never cookie values) so a support
+        // session can see which browsers the process could even enumerate.
+        OpenCodeGoProvider.writeDiagnostic("browsers: \(counts) [webkit-blocked=true]")
         guard !available.isEmpty else { return nil }
 
         if let raw = UserDefaults.standard.string(forKey: browserKey),
@@ -99,6 +105,18 @@ enum OpenCodeGoBrowserSession {
             return inferred
         }
 
+        // Prefer Chromium/Gecko over WebKit: Safari's cookie file requires
+        // Full Disk Access, which a normally-launched menu-bar app never has,
+        // so a Safari pick always fails even when another installed browser
+        // holds the session (e.g. ChatGPT Atlas). Checked before the default-
+        // browser resolution because the system default is often Safari while
+        // the actual session lives in a Chromium browser.
+        if let nonWebKit = available.first(where: {
+            $0.usesChromiumProfileStore || $0.usesGeckoProfileStore
+        }) {
+            return nonWebKit
+        }
+
         if let appURL = NSWorkspace.shared.urlForApplication(
             toOpen: URL(string: "https://opencode.ai")!),
            let defaultBrowser = browser(forApplicationURL: appURL),
@@ -108,6 +126,17 @@ enum OpenCodeGoBrowserSession {
         }
 
         return available.first
+    }
+
+    /// Chrome's (and Safari's) data directories are privacy-protected on
+    /// current macOS: a process without Full Disk Access sees zero cookie
+    /// stores even though the browser is installed and in use. Detecting that
+    /// shape lets the error say what to do instead of "no session found".
+    static func chromiumBlockedByPrivacyControls() -> Bool {
+        guard NSWorkspace.shared.urlForApplication(
+            withBundleIdentifier: "com.google.Chrome") != nil
+        else { return false }
+        return client.stores(for: .chrome).isEmpty
     }
 
     /// Performs the only interactive browser-cookie read in TokenBar.
@@ -124,8 +153,18 @@ enum OpenCodeGoBrowserSession {
             let sources = try client.records(matching: query, in: browser)
             for source in sources where !source.records.isEmpty {
                 let cookies = BrowserCookieClient.makeHTTPCookies(source.records, origin: query.origin)
+                OpenCodeGoProvider.writeDiagnostic(
+                    "import browser=\(source.label) domains=\(query.domains.joined(separator: ",")) "
+                        + "cookies=\(cookies.map(\.name).sorted().joined(separator: ","))")
                 let rawHeader = cookies
-                    .filter { $0.name == "auth" || $0.name == "__Host-auth" }
+                    .filter {
+                        // The legacy `auth` cookie authenticates the old
+                        // server-fn endpoints; the Go usage data now lives
+                        // behind the console app, which authenticates with its
+                        // own session cookie.
+                        $0.name == "auth" || $0.name == "__Host-auth"
+                            || $0.name == "console_session" || $0.name == "__Host-console_session"
+                    }
                     .map { "\($0.name)=\($0.value)" }
                     .joined(separator: "; ")
                 guard let header = OpenCodeGoCookieSupport.requestCookieHeader(from: rawHeader) else {
@@ -137,6 +176,9 @@ enum OpenCodeGoBrowserSession {
             }
         } catch {
             UsageStore.log("OpenCode browser session import failed \(browser.displayName): \(error.localizedDescription)")
+            if Self.chromiumBlockedByPrivacyControls() {
+                throw ImportError.noSession(L(.errorOpenCodeNeedsFullDiskAccess))
+            }
             throw ImportError.noSession("\(browser.displayName): \(error.localizedDescription)")
         }
         throw ImportError.noSession(browser.displayName)

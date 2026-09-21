@@ -2,46 +2,56 @@ import AppKit
 import SwiftUI
 
 /// CodexBar-style settings window: a stable sidebar and one grouped form per
-/// concern. This keeps every control reachable without a single oversized
-/// document whose final sections disappear below the screen.
+/// concern. The UI lives in the SwiftUI `Settings` scene (macOS's own settings
+/// window), so macOS may open it on its own — see `SettingsSceneHost`.
 @MainActor
-final class PreferencesWindowController: NSWindowController {
-    private let settings: AppSettings
-    private let store: UsageStore
+enum PreferencesRouting {
+    /// Pane the window should select the next time its view appears. Needed
+    /// because a posted notification can fire before the scene's view
+    /// subscribes (the window may not even exist yet).
+    static var pendingPane: PreferencesPane?
+    /// Posted to switch the pane of an already-visible window. The `object` is
+    /// the `PreferencesPane` raw value (e.g. "reminder").
+    static let openPane = Notification.Name("tokenbar.openPane")
+}
 
-    init(settings: AppSettings, store: UsageStore) {
-        self.settings = settings
-        self.store = store
+/// Hosts the real settings UI inside the SwiftUI `Settings` scene. macOS opens
+/// that scene on ⌘, and whenever a running menu-bar app is reopened, before
+/// any delegate callback — an empty placeholder is what used to show up as a
+/// blank "TokenBar Settings" window.
+struct SettingsSceneHost: View {
+    @ObservedObject var environment: AppEnvironment
 
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 800, height: 560),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-            backing: .buffered,
-            defer: false)
-        window.title = L(.settingsTitle)
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        window.minSize = NSSize(width: 720, height: 500)
-        window.isReleasedWhenClosed = false
-        window.center()
-        window.contentView = NSHostingView(rootView: PreferencesRootView(
-            settings: settings,
-            store: store))
-
-        super.init(window: window)
+    var body: some View {
+        Group {
+            if let store = environment.store {
+                PreferencesRootView(settings: .shared, store: store)
+            } else {
+                // The scene can be evaluated before applicationDidFinishLaunching
+                // has built the store; keep the window sensibly sized until then.
+                Color.clear.frame(width: 760, height: 520)
+            }
+        }
+        .onAppear(perform: Self.localizeWindowTitle)
+        .onReceive(NotificationCenter.default.publisher(for: L10n.languageDidChange)) { _ in
+            Self.localizeWindowTitle()
+        }
     }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    func show() {
-        NSApp.activate(ignoringOtherApps: true)
-        showWindow(nil)
-        window?.makeKeyAndOrderFront(nil)
+    /// The Settings scene titles its window from the *system* language
+    /// ("TokenBar Settings"), which clashes with the in-app language setting;
+    /// retitle it to match the app's own string table.
+    private static func localizeWindowTitle() {
+        for window in NSApp.windows {
+            let title = window.title
+            if title.contains("Settings") || title.contains("设置") {
+                window.title = L(.settingsTitle)
+            }
+        }
     }
 }
 
-private enum PreferencesPane: String, CaseIterable, Identifiable {
+enum PreferencesPane: String, CaseIterable, Identifiable {
     case general
     case ark
     case openCode
@@ -51,6 +61,10 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
     case kimi
     case grokPool
     case longcat
+    case aliyun
+    case stepfun
+    case sensenova
+    case reminder
     case diagnostics
 
     var id: Self { self }
@@ -66,6 +80,10 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .kimi: L(.settingsKimi)
         case .grokPool: L(.settingsGrokPool)
         case .longcat: L(.settingsLongCat)
+        case .aliyun: L(.settingsAliyun)
+        case .stepfun: L(.settingsStepFun)
+        case .sensenova: L(.settingsSenseNova)
+        case .reminder: L(.settingsReminder)
         case .diagnostics: L(.settingsDiagnostics)
         }
     }
@@ -81,6 +99,10 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .kimi: "sparkles"
         case .grokPool: "bolt"
         case .longcat: "cat"
+        case .aliyun: "cloud.fill"
+        case .stepfun: "stairs"
+        case .sensenova: "sparkle.magnifyingglass"
+        case .reminder: "bell"
         case .diagnostics: "stethoscope"
         }
     }
@@ -97,16 +119,19 @@ private enum PreferencesPane: String, CaseIterable, Identifiable {
         case .kimi: .kimi
         case .grokPool: .grokPool
         case .longcat: .longcat
-        case .general, .diagnostics: nil
+        case .aliyun: .aliyun
+        case .stepfun: .stepfun
+        case .sensenova: .sensenova
+        case .general, .reminder, .diagnostics: nil
         }
     }
 }
 
-private struct PreferencesRootView: View {
+struct PreferencesRootView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var store: UsageStore
     @ObservedObject private var l10n = L10n.shared
-    @State private var selection: PreferencesPane? = .general
+    @State private var selection: PreferencesPane? = nil
 
     var body: some View {
         HStack(spacing: 0) {
@@ -120,22 +145,32 @@ private struct PreferencesRootView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .windowBackgroundColor))
         }
-        .environment(\.locale, l10n.locale)
-        .frame(minWidth: 720, minHeight: 500)
+            .environment(\.locale, l10n.locale)
+            .frame(minWidth: 720, minHeight: 500)
+            .onAppear {
+                if let pending = PreferencesRouting.pendingPane {
+                    selection = pending
+                    PreferencesRouting.pendingPane = nil
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(
+                for: PreferencesRouting.openPane))
+            { notification in
+                if let raw = notification.object as? String,
+                   let pane = PreferencesPane(rawValue: raw)
+                {
+                    selection = pane
+                }
+            }
     }
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("TokenBar")
-                    .font(.system(size: 20, weight: .bold))
-                Text(L(.settingsTitle))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 46)
-            .padding(.bottom, 14)
+            Text(L(.settingsTitle))
+                .font(.system(size: 16, weight: .semibold))
+                .padding(.horizontal, 18)
+                .padding(.top, 44)
+                .padding(.bottom, 12)
 
             List(selection: $selection) {
                 ForEach(PreferencesPane.allCases) { pane in
@@ -187,6 +222,14 @@ private struct PreferencesRootView: View {
             GrokPoolPreferencesPane(settings: settings, store: store)
         case .longcat:
             LongCatPreferencesPane(settings: settings, store: store)
+        case .aliyun:
+            AliyunPreferencesPane(settings: settings, store: store)
+        case .stepfun:
+            StepFunPreferencesPane(settings: settings, store: store)
+        case .sensenova:
+            SenseNovaPreferencesPane(settings: settings, store: store)
+        case .reminder:
+            ReminderPreferencesPane(settings: settings)
         case .diagnostics:
             DiagnosticsPreferencesPane()
         }
@@ -201,15 +244,38 @@ private struct PreferencesRootView: View {
 
 private struct PreferencesPaneContainer<Content: View>: View {
     let title: String
+    var symbol: String? = nil
+    var subtitle: String? = nil
     @ViewBuilder let content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(title)
-                .font(.system(size: 22, weight: .bold))
-                .padding(.horizontal, 24)
-                .padding(.top, 42)
-                .padding(.bottom, 14)
+            HStack(alignment: .center, spacing: 12) {
+                if let symbol {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(Color.secondary.opacity(0.12))
+                            .frame(width: 36, height: 36)
+                        Image(systemName: symbol)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 17, weight: .semibold))
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 30)
+            .padding(.bottom, 12)
 
             Divider()
 
@@ -224,7 +290,7 @@ private struct GeneralPreferencesPane: View {
     @ObservedObject var store: UsageStore
 
     var body: some View {
-        PreferencesPaneContainer(title: L(.settingsGeneral)) {
+        PreferencesPaneContainer(title: L(.settingsGeneral), symbol: "gearshape") {
             Form {
                 Section(L(.sectionAppearance)) {
                     Picker(L(.displayMode), selection: $settings.displayMode) {
@@ -247,37 +313,31 @@ private struct GeneralPreferencesPane: View {
                             Text(interval.displayName).tag(interval)
                         }
                     }
+                    .pickerStyle(.menu)
                     Toggle(L(.refreshWhenMenuOpens), isOn: $settings.refreshWhenMenuOpens)
                         .toggleStyle(.switch)
                 }
 
                 Section(L(.sectionActions)) {
-                    HStack(spacing: 12) {
+                    // Five side-by-side buttons truncated every provider name
+                    // ("刷新 A…"); a single full-width action plus a menu of
+                    // per-provider refreshes keeps every label readable.
+                    HStack(spacing: 8) {
                         Button {
-                            store.refresh(tab: .ark)
+                            store.refreshAll()
                         } label: {
-                            Label(L(.refreshArk), systemImage: "arrow.clockwise")
+                            Label(L(.refreshAll), systemImage: "arrow.clockwise")
                         }
-                        Button {
-                            store.refresh(tab: .opencode)
-                        } label: {
-                            Label(L(.refreshOpenCode), systemImage: "arrow.clockwise")
+                        .buttonStyle(.bordered)
+
+                        Menu(L(.refreshProviderMenu)) {
+                            ForEach(settings.visibleTabs, id: \.self) { tab in
+                                Button(tab.displayName) {
+                                    store.refresh(tab: tab)
+                                }
+                            }
                         }
-                        Button {
-                            store.refresh(tab: .deepseek)
-                        } label: {
-                            Label(L(.refreshDeepSeek), systemImage: "arrow.clockwise")
-                        }
-                        Button {
-                            store.refresh(tab: .zai)
-                        } label: {
-                            Label(L(.refreshZai), systemImage: "arrow.clockwise")
-                        }
-                        Button {
-                            store.refresh(tab: .kimi)
-                        } label: {
-                            Label(L(.refreshKimi), systemImage: "arrow.clockwise")
-                        }
+                        .fixedSize()
                     }
                 }
             }
@@ -300,7 +360,7 @@ private struct ArkPreferencesPane: View {
     }
 
     var body: some View {
-        PreferencesPaneContainer(title: L(.settingsArk)) {
+        PreferencesPaneContainer(title: L(.settingsArk), symbol: "chart.donut", subtitle: L(.settingsArkSubtitle)) {
             Form {
                 Section(L(.sectionDisplay)) {
                     Toggle(L(.showProvider), isOn: Binding(
@@ -391,7 +451,7 @@ private struct OpenCodePreferencesPane: View {
     }
 
     var body: some View {
-        PreferencesPaneContainer(title: L(.settingsOpenCode)) {
+        PreferencesPaneContainer(title: L(.settingsOpenCode), symbol: "terminal", subtitle: L(.settingsOpenCodeSubtitle)) {
             Form {
                 Section(L(.sectionDisplay)) {
                     Toggle(L(.showProvider), isOn: Binding(
@@ -491,7 +551,7 @@ private struct DeepSeekPreferencesPane: View {
     }
 
     var body: some View {
-        PreferencesPaneContainer(title: L(.settingsDeepSeek)) {
+        PreferencesPaneContainer(title: L(.settingsDeepSeek), symbol: "fish", subtitle: L(.settingsDeepSeekSubtitle)) {
             Form {
                 Section(L(.sectionDisplay)) {
                     Toggle(L(.showProvider), isOn: Binding(
@@ -580,7 +640,7 @@ private struct NebulaPreferencesPane: View {
     }
 
     var body: some View {
-        PreferencesPaneContainer(title: L(.settingsNebula)) {
+        PreferencesPaneContainer(title: L(.settingsNebula), symbol: "cloud", subtitle: L(.settingsNebulaSubtitle)) {
             Form {
                 Section(L(.sectionDisplay)) {
                     Toggle(L(.showProvider), isOn: Binding(
@@ -679,7 +739,7 @@ private struct ZaiPreferencesPane: View {
     }
 
     var body: some View {
-        PreferencesPaneContainer(title: L(.settingsZai)) {
+        PreferencesPaneContainer(title: L(.settingsZai), symbol: "sparkles", subtitle: L(.settingsZaiSubtitle)) {
             Form {
                 Section(L(.sectionDisplay)) {
                     Toggle(L(.showProvider), isOn: Binding(
@@ -749,7 +809,7 @@ private struct GrokPoolPreferencesPane: View {
     }
 
     var body: some View {
-        PreferencesPaneContainer(title: L(.settingsGrokPool)) {
+        PreferencesPaneContainer(title: L(.settingsGrokPool), symbol: "bolt", subtitle: L(.settingsGrokPoolSubtitle)) {
             Form {
                 Section(L(.sectionDisplay)) {
                     Toggle(L(.showProvider), isOn: Binding(
@@ -834,7 +894,7 @@ private struct LongCatPreferencesPane: View {
     }
 
     var body: some View {
-        PreferencesPaneContainer(title: L(.settingsLongCat)) {
+        PreferencesPaneContainer(title: L(.settingsLongCat), symbol: "cat", subtitle: L(.settingsLongCatSubtitle)) {
             Form {
                 Section(L(.sectionDisplay)) {
                     Toggle(L(.showProvider), isOn: Binding(
@@ -932,7 +992,7 @@ private struct KimiPreferencesPane: View {
     }
 
     var body: some View {
-        PreferencesPaneContainer(title: L(.settingsKimi)) {
+        PreferencesPaneContainer(title: L(.settingsKimi), symbol: "sparkles", subtitle: L(.settingsKimiSubtitle)) {
             Form {
                 Section(L(.sectionDisplay)) {
                     Toggle(L(.showProvider), isOn: Binding(
@@ -1024,6 +1084,434 @@ private struct KimiPreferencesPane: View {
     }
 }
 
+private struct AliyunPreferencesPane: View {
+    @ObservedObject var settings: AppSettings
+    @ObservedObject var store: UsageStore
+    @State private var apiKeyField: String
+
+    init(settings: AppSettings, store: UsageStore) {
+        self.settings = settings
+        self.store = store
+        _apiKeyField = State(initialValue: settings.aliyunAPIKey)
+    }
+
+    var body: some View {
+        PreferencesPaneContainer(title: L(.settingsAliyun), symbol: "cloud.fill", subtitle: L(.settingsAliyunSubtitle)) {
+            Form {
+                // Key field and Save share one row (a Save button floating on
+                // its own line below the field is a web-form habit); the
+                // explanatory text is a section footer, not a second card.
+                Section {
+                    Toggle(L(.showProvider), isOn: Binding(
+                        get: { settings.showAliyun },
+                        set: { settings.setVisible(.aliyun, $0) }))
+                        .toggleStyle(.switch)
+
+                    HStack(spacing: 8) {
+                        SecureField(
+                            L(.aliyunAPIKeyLabel),
+                            text: $apiKeyField,
+                            prompt: Text("sk-sp-…"))
+                            .onSubmit(saveAPIKey)
+                        Button(L(.saveCredential), action: saveAPIKey)
+                            .buttonStyle(.bordered)
+                    }
+
+                    ProviderStatusRows(
+                        status: store.aliyunStatus,
+                        isRefreshing: store.aliyunIsRefreshing,
+                        lastUpdatedAt: store.aliyunLastUpdatedAt)
+                } header: {
+                    Text(L(.sectionConnection))
+                } footer: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(L(.aliyunCredentialsHint))
+                        Text(L(.aliyunPendingHint))
+                    }
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                }
+
+                Section(L(.sectionActions)) {
+                    HStack(spacing: 8) {
+                        Button {
+                            store.refresh(tab: .aliyun)
+                        } label: {
+                            Label(
+                                store.aliyunIsRefreshing ? L(.refreshing) : L(.refreshAliyun),
+                                systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            NSWorkspace.shared.open(AliyunConsole.dashboardURL)
+                        } label: {
+                            Label(L(.openAliyunConsole), systemImage: "safari")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        }
+    }
+
+    private func saveAPIKey() {
+        settings.setAliyunAPIKey(apiKeyField)
+    }
+}
+
+private struct StepFunPreferencesPane: View {
+    @ObservedObject var settings: AppSettings
+    @ObservedObject var store: UsageStore
+    @State private var apiKeyField: String
+    @State private var manualCookieField: String
+
+    init(settings: AppSettings, store: UsageStore) {
+        self.settings = settings
+        self.store = store
+        _apiKeyField = State(initialValue: settings.stepFunAPIKey)
+        _manualCookieField = State(initialValue: settings.stepFunManualCookie)
+    }
+
+    var body: some View {
+        PreferencesPaneContainer(title: L(.settingsStepFun), symbol: "stairs", subtitle: "阶跃 Step Plan 月度 Credit 额度") {
+            Form {
+                Section(L(.sectionDisplay)) {
+                    Toggle(L(.showProvider), isOn: Binding(
+                        get: { settings.showStepFun },
+                        set: { settings.setVisible(.stepfun, $0) }))
+                        .toggleStyle(.switch)
+                }
+
+                Section(L(.sectionConnection)) {
+                    HStack(spacing: 8) {
+                        SecureField(L(.stepFunAPIKeyLabel), text: $apiKeyField)
+                            .onSubmit(saveAPIKey)
+                        Button(L(.saveCredential), action: saveAPIKey)
+                            .buttonStyle(.bordered)
+                    }
+                    HStack(spacing: 8) {
+                        SecureField(L(.stepFunManualCookiePlaceholder), text: $manualCookieField)
+                            .onSubmit(saveManualCookie)
+                        Button(L(.saveCookie), action: saveManualCookie)
+                            .buttonStyle(.bordered)
+                    }
+
+                    Button {
+                        store.reimportStepFunBrowserSession()
+                    } label: {
+                        Label(
+                            store.stepFunIsRefreshing
+                                ? L(.refreshingStatus)
+                                : L(.reimportStepFunBrowserSession),
+                            systemImage: "person.crop.circle.badge.arrow.trianglehead.counterclockwise")
+                    }
+                    .disabled(store.stepFunIsRefreshing)
+
+                    if let source = StepFunBrowserSession.cachedSession()?.sourceLabel {
+                        Label(String(format: L(.browserSession), source), systemImage: "globe")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+
+                    ProviderStatusRows(
+                        status: store.stepFunStatus,
+                        isRefreshing: store.stepFunIsRefreshing,
+                        lastUpdatedAt: store.stepFunLastUpdatedAt)
+
+                    Label(L(.stepFunCredentialsHint), systemImage: "key")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+
+                Section(L(.sectionActions)) {
+                    Button {
+                        store.refresh(tab: .stepfun)
+                    } label: {
+                        Label(
+                            store.stepFunIsRefreshing ? L(.refreshing) : L(.refreshStepFun),
+                            systemImage: "arrow.clockwise")
+                    }
+                    Button {
+                        NSWorkspace.shared.open(URL(string: "https://platform.stepfun.com/account-overview")!)
+                    } label: {
+                        Label(L(.openStepFunConsole), systemImage: "safari")
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        }
+    }
+
+    private func saveAPIKey() {
+        settings.setStepFunAPIKey(apiKeyField)
+        store.refresh(tab: .stepfun)
+    }
+
+    private func saveManualCookie() {
+        settings.setStepFunManualCookie(manualCookieField)
+        store.refresh(tab: .stepfun)
+    }
+}
+
+private struct SenseNovaPreferencesPane: View {
+    @ObservedObject var settings: AppSettings
+    @ObservedObject var store: UsageStore
+    @State private var apiKeyField: String
+    @State private var manualCookieField: String
+
+    init(settings: AppSettings, store: UsageStore) {
+        self.settings = settings
+        self.store = store
+        _apiKeyField = State(initialValue: settings.senseNovaAPIKey)
+        _manualCookieField = State(initialValue: settings.senseNovaManualCookie)
+    }
+
+    var body: some View {
+        PreferencesPaneContainer(title: L(.settingsSenseNova), symbol: "sparkle.magnifyingglass", subtitle: "日日新 Token Plan（公测免费：60,000 积分/5 小时）") {
+            Form {
+                Section(L(.sectionDisplay)) {
+                    Toggle(L(.showProvider), isOn: Binding(
+                        get: { settings.showSenseNova },
+                        set: { settings.setVisible(.sensenova, $0) }))
+                        .toggleStyle(.switch)
+                }
+
+                Section(L(.sectionConnection)) {
+                    HStack(spacing: 8) {
+                        SecureField(L(.senseNovaAPIKeyLabel), text: $apiKeyField)
+                            .onSubmit(saveAPIKey)
+                        Button(L(.saveCredential), action: saveAPIKey)
+                            .buttonStyle(.bordered)
+                    }
+                    HStack(spacing: 8) {
+                        SecureField(L(.senseNovaManualCookiePlaceholder), text: $manualCookieField)
+                            .onSubmit(saveManualCookie)
+                        Button(L(.saveCookie), action: saveManualCookie)
+                            .buttonStyle(.bordered)
+                    }
+
+                    Button {
+                        store.reimportSenseNovaBrowserSession()
+                    } label: {
+                        Label(
+                            store.senseNovaIsRefreshing
+                                ? L(.refreshingStatus)
+                                : L(.reimportSenseNovaBrowserSession),
+                            systemImage: "person.crop.circle.badge.arrow.trianglehead.counterclockwise")
+                    }
+                    .disabled(store.senseNovaIsRefreshing)
+
+                    if let source = SenseNovaBrowserSession.cachedSession()?.sourceLabel {
+                        Label(String(format: L(.browserSession), source), systemImage: "globe")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+
+                    ProviderStatusRows(
+                        status: store.senseNovaStatus,
+                        isRefreshing: store.senseNovaIsRefreshing,
+                        lastUpdatedAt: store.senseNovaLastUpdatedAt)
+
+                    Label(L(.senseNovaCredentialsHint), systemImage: "key")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+
+                Section(L(.sectionActions)) {
+                    Button {
+                        store.refresh(tab: .sensenova)
+                    } label: {
+                        Label(
+                            store.senseNovaIsRefreshing ? L(.refreshing) : L(.refreshSenseNova),
+                            systemImage: "arrow.clockwise")
+                    }
+                    Button {
+                        NSWorkspace.shared.open(URL(string: "https://platform.sensenova.cn/console")!)
+                    } label: {
+                        Label(L(.openSenseNovaConsole), systemImage: "safari")
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        }
+    }
+
+    private func saveAPIKey() {
+        settings.setSenseNovaAPIKey(apiKeyField)
+        store.refresh(tab: .sensenova)
+    }
+
+    private func saveManualCookie() {
+        settings.setSenseNovaManualCookie(manualCookieField)
+        store.refresh(tab: .sensenova)
+    }
+}
+
+private struct ReminderPreferencesPane: View {
+    @ObservedObject var settings: AppSettings
+
+    private let dayOptions = [3, 7, 14, 30]
+
+    var body: some View {
+        PreferencesPaneContainer(title: L(.settingsReminder), symbol: "bell", subtitle: L(.settingsReminderSubtitle)) {
+            Form {
+                // Hints are a section footer, not a second card: the previous
+                // two-label card looked like a web callout and pushed the
+                // manual-subscription list below the fold.
+                Section {
+                    Toggle(L(.reminderEnabledLabel), isOn: $settings.expiryReminderEnabled)
+                        .toggleStyle(.switch)
+                    Picker(L(.reminderDaysLabel), selection: $settings.expiryReminderDays) {
+                        ForEach(dayOptions, id: \.self) { days in
+                            Text(String(format: L(.reminderDaysOption), days)).tag(days)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    Toggle(L(.reminderNotifyLabel), isOn: $settings.expiryReminderNotify)
+                        .toggleStyle(.switch)
+                } header: {
+                    Text(L(.reminderSectionTitle))
+                } footer: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(L(.reminderRuleHint))
+                        Text(L(.reminderNotifyHint))
+                    }
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                }
+
+                Section(L(.reminderManualSection)) {
+                    if settings.manualSubscriptions.isEmpty {
+                        Text(L(.reminderManualEmpty))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    ForEach(settings.manualSubscriptions) { subscription in
+                        ManualSubscriptionRow(
+                            subscription: subscription,
+                            onCommit: { name, expiry, note in
+                                settings.updateManualSubscription(
+                                    id: subscription.id,
+                                    name: name,
+                                    expiryDate: expiry,
+                                    note: note)
+                            },
+                            onDelete: {
+                                settings.removeManualSubscription(id: subscription.id)
+                            })
+                    }
+
+                    Button {
+                        settings.addManualSubscription()
+                    } label: {
+                        Label(L(.reminderManualAdd), systemImage: "plus")
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        }
+    }
+}
+
+/// One manual-subscription editor. The text fields bind to local @State and
+/// commit through `onCommit`; binding them directly to the @Published array
+/// rebuilt the whole Form on every keystroke and swallowed the input. This
+/// mirrors the State + save pattern the credential fields use.
+private struct ManualSubscriptionRow: View {
+    @State private var name: String
+    @State private var note: String
+    @State private var expiryDate: Date
+
+    private let onCommit: (_ name: String, _ expiry: Date, _ note: String) -> Void
+    private let onDelete: () -> Void
+
+    init(subscription: ManualSubscription,
+         onCommit: @escaping (_ name: String, _ expiry: Date, _ note: String) -> Void,
+         onDelete: @escaping () -> Void)
+    {
+        _name = State(initialValue: subscription.name)
+        _note = State(initialValue: subscription.note)
+        _expiryDate = State(initialValue: subscription.expiryDate)
+        self.onCommit = onCommit
+        self.onDelete = onDelete
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                DatePicker(
+                    L(.reminderManualExpiryLabel),
+                    selection: $expiryDate,
+                    displayedComponents: .date)
+                    .datePickerStyle(.field)
+                // A grouped Form ignores .textFieldStyle(.roundedBorder) for
+                // custom rows, so the bordered value box is drawn explicitly —
+                // label outside, bordered value inside, matching the date
+                // field above it.
+                labeledField(
+                    L(.reminderManualNamePlaceholder),
+                    text: $name,
+                    prompt: L(.reminderManualNamePrompt))
+                labeledField(
+                    L(.reminderManualNotePlaceholder),
+                    text: $note,
+                    prompt: L(.reminderManualNotePrompt))
+            }
+            Button(action: onDelete) {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.plain)
+            .frame(width: 20, height: 20)
+            .help(L(.reminderManualDelete))
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(.quaternary.opacity(0.4)))
+        .onChange(of: name) { _, _ in commit() }
+        .onChange(of: note) { _, _ in commit() }
+        .onChange(of: expiryDate) { _, _ in commit() }
+    }
+
+    /// Label outside the box, bordered editable value inside — the same
+    /// reading as the `.field`-style date picker above.
+    private func labeledField(_ label: String, text: Binding<String>, prompt: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .frame(width: 62, alignment: .leading)
+            TextField("", text: text, prompt: Text(prompt))
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(Color(nsColor: .textBackgroundColor)))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.18), lineWidth: 1))
+        }
+    }
+
+    private func commit() {
+        onCommit(name, expiryDate, note)
+    }
+}
+
 private struct ProviderStatusRows: View {
     let status: UsageStore.LoadStatus
     let isRefreshing: Bool
@@ -1071,6 +1559,11 @@ private struct ProviderStatusRows: View {
                 .foregroundStyle(detailColor)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color(nsColor: .controlBackgroundColor)))
         }
     }
 
@@ -1126,7 +1619,7 @@ private struct DiagnosticsPreferencesPane: View {
     @State private var isChecking = false
 
     var body: some View {
-        PreferencesPaneContainer(title: L(.settingsDiagnostics)) {
+        PreferencesPaneContainer(title: L(.settingsDiagnostics), symbol: "stethoscope", subtitle: L(.settingsDiagnosticsSubtitle)) {
             Form {
                 Section(L(.sectionDiagnostics)) {
                     DiagnosticValueRow(label: L(.arkcliPath), value: arkcliPath)

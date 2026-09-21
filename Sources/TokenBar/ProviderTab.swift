@@ -13,6 +13,9 @@ enum ProviderTab: String, CaseIterable, Sendable {
     case kimi
     case grokPool
     case longcat
+    case aliyun
+    case stepfun
+    case sensenova
 
     var displayName: String {
         switch self {
@@ -24,6 +27,9 @@ enum ProviderTab: String, CaseIterable, Sendable {
         case .kimi: L(.tabKimi)
         case .grokPool: L(.tabGrokPool)
         case .longcat: L(.tabLongCat)
+        case .aliyun: L(.tabAliyun)
+        case .stepfun: L(.tabStepFun)
+        case .sensenova: L(.tabSenseNova)
         }
     }
 }

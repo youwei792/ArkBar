@@ -2,7 +2,7 @@
 
 [简体中文](README.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
 
-TokenBar is a native macOS menu-bar app for Volcengine Ark Coding/Agent Plan, OpenCode Go, DeepSeek, APINebula relay, Z.ai (Zhipu GLM), Kimi For Coding, GrokPool gateway, and LongCat (longcat.chat) usage. It keeps the quota you have **left** visible without a Dock icon.
+TokenBar is a native macOS menu-bar app for Volcengine Ark Coding/Agent Plan, OpenCode Go, DeepSeek, APINebula relay, Z.ai (Zhipu GLM), Kimi For Coding, GrokPool gateway, LongCat (longcat.chat), Alibaba Cloud (百炼) Coding Plan, StepFun Step Plan, and SenseNova Token Plan usage — and it nags you when a subscription is about to expire with quota left. It keeps the quota you have **left** visible without a Dock icon.
 
 > The repository is named `ArkBar`; the user-facing product, Swift package, executable, and `.app` bundle are all named `TokenBar`. The current source and local-package version is `0.1.0` (Unreleased). As of September 1, 2026, the remote repository has no Git tag or GitHub Release. The steps below are for source builds and local development packages only, not a published installer.
 
@@ -18,7 +18,8 @@ TokenBar is a native macOS menu-bar app for Volcengine Ark Coding/Agent Plan, Op
 - APINebula balance and usage logs are console APIs: credentials come from the browser sign-in session (imported explicitly in Settings and cached in Keychain), with an optional API key fallback.
 - GrokPool (grok2api admin gateway) monitoring: sign in with the administrator account (`POST /api/admin/v1/auth/login`) for a short-lived access token and read the **24-hour dashboard** (`GET /api/admin/v1/dashboard?period=24h`): request counts/success rate, billed cost, input/cached/output/reasoning tokens, active accounts, and the top model. The success ring = successful request share; fully isolated from the APINebula tab (separate settings and state). Billing converts at grok2api's 10^10 ticks = $1.
 - LongCat (longcat.chat) monitoring: usage endpoints live behind the longcat.chat console (not api.longcat.chat) and authenticate with a browser sign-in session. The remaining-quota ring = remaining-token share of the active token pack; beside the ring are total / used (with used percent) / remaining (with remaining percent), plus an optional fuel-pack balance and nearest-expiry countdown below the ring.
-- Instant Ark/OpenCode Go/DeepSeek/APINebula/Z.ai/Kimi/GrokPool/LongCat switching with isolated refresh and error state.
+- Instant Ark/OpenCode Go/DeepSeek/APINebula/Z.ai/Kimi/GrokPool/LongCat/Alibaba Cloud/StepFun/SenseNova switching with isolated refresh and error state.
+- **Expiry reminders**: an "Expiring subscriptions" section at the top of the Overview menu lists every integrated plan with a verified expiry date (OpenCode Go renewal, LongCat pack expiry, …) plus user-managed manual entries, color-coded by days left. The nag only fires when a plan expires within the lead time (3/7/14/30 days, default 7) and still holds ≥50% quota, so nearly exhausted plans stay quiet. Optional macOS notifications de-duplicate to one per subscription per day (they only appear in the packaged app; when running from source the in-menu section is authoritative). Manage the toggle, lead time, and manual list in **Settings → Expiry Reminders**.
 - An **Overview** tab lists every visible provider's remaining percent with a teal→blue capsule meter; click a row to open that provider's full card. Toggle it in **Settings → General**.
 - Each provider can be independently shown/hidden from its own settings pane; hidden providers leave the switcher and stop refreshing.
 - Menu-bar styles: rings, rings + percent, percent only, logo only, logo + percent, and logo + rings. Logo glyphs are 16pt and percent text uses the system font size. The rings mirror the cards: three-window plans show monthly (outer) / weekly (middle) / 5-hour (inner) concentric rings, while single-window balance providers show one ring.
@@ -79,6 +80,9 @@ In **Auto** mode, TokenBar prefers explicitly configured credentials, then falls
 | Kimi For Coding | API key optional (entered in **Settings → Kimi For Coding**, stored in Keychain + file cache; `KIMI_CODE_API_KEY` environment fallback); choose **Re-import Browser Sign-in** to also read the shared pool from the `www.kimi.com` session | Reads the Code membership quota from `api.kimi.com/coding/v1/usages`: total weekly quota (weekly ring) plus a 5-hour rate-limit window (session ring); the browser session also reads `GetSubscriptionStats` from `www.kimi.com` and maps the **shared Kimi Code + Kimi Work pool** to the monthly ring. Credential precedence: settings > environment. |
 | GrokPool (grok2api gateway) | Administrator username and password entered in **Settings → GrokPool Gateway** (stored in Keychain + file cache); optional `GROKPOOL_USERNAME` / `GROKPOOL_PASSWORD` environment fallback; base URL defaults to `https://grok.axonlume.com` | Signs in as the gateway administrator (`POST /api/admin/v1/auth/login`) for a short-lived Bearer access token, then reads the 24-hour dashboard (`GET /api/admin/v1/dashboard?period=24h`): requests and success rate, billed cost (10^10 ticks = $1), the input/cached/output/reasoning token split, active accounts, and the top model. The token refreshes automatically every 15 minutes and 401s trigger a re-login. |
 | LongCat (longcat.chat) | Choose **Re-import Browser Sign-in** in **Settings → LongCat** to import the `longcat.chat` session (stored in Keychain + file cache); multi-browser fallback across Chrome / Arc / Safari / Edge / Brave / Firefox; optional manual Cookie header or `LONGCAT_MANUAL_COOKIE` environment fallback | Usage endpoints live behind the longcat.chat console (not api.longcat.chat). Reads the active token pack from `POST /api/pay/quota/metering/token-packs/summary` (`data.currentLot`: `totalToken` / `consumedToken` / `remainingToken` / `expireTime`); the remaining ring = remaining-token share. Optionally reads pending fuel packs for a supplementary balance and the nearest expiry. Credential precedence: manual Cookie > browser session > environment. |
+| Alibaba Cloud (百炼) Coding Plan | Enter the dedicated API key (starts with `sk-sp-`) in **Settings → Alibaba Cloud Coding Plan** (stored in Keychain + file cache); `ALIYUN_CODING_PLAN_API_KEY` environment fallback | The Pro plan's three request windows (5-hour 6,000 rolling / weekly 45,000 reset Monday / monthly 90,000 reset on the subscription day) map to the session / weekly / monthly rings, with absolute request counts. Note: Alibaba documents no public quota API, so before activation the tab honestly shows "not activated yet"; after activation it works automatically, and if usage still does not appear the console API needs a capture-and-adapt pass (docs/aliyun-handoff.md). The `sk-sp-` key is not interchangeable with pay-as-you-go `sk-` keys. |
+| StepFun | Click “Re-import Browser Sign-in” in **Settings → StepFun Step Plan** to capture the console session (cookie auth, auto-rotated; requires Full Disk Access) | Console Connect-RPC: rotates the session via `RefreshToken`, then queries `QueryStepPlanRateLimit` + `GetStepPlanStatus`. The Plus plan shows a single monthly-credit ring (plus the expiry badge); plans with 5-hour/weekly windows show all three rings automatically. API keys cannot read plan quota (vendor restriction). |
+| SenseNova | Click “Re-import Browser Sign-in” in **Settings → SenseNova Token Plan** to capture the console session | Token Plan free beta (dual credit pools: general + Flash-Lite, each with weekly balance / 5-hour window / weekly quota). **Endpoint confirmation in progress (frozen)**: session import works; the quota endpoint awaits one capture — probe responses are written to `sensenova-last-response.txt`. |
 
 See the official [Ark CLI installation guide](https://github.com/volcengine/ark-cli) for the current CLI setup.
 
@@ -92,6 +96,7 @@ export KIMI_CODE_API_KEY='...'
 export GROKPOOL_USERNAME='...'
 export GROKPOOL_PASSWORD='...'
 export LONGCAT_MANUAL_COOKIE='...'
+export ALIYUN_CODING_PLAN_API_KEY='...'
 .build/debug/TokenBar
 ```
 
@@ -116,6 +121,8 @@ export LONGCAT_MANUAL_COOKIE='...'
 ## Subscription-expiry data
 
 Quota reset time is not subscription expiry. TokenBar displays a plan-expiry badge only when a provider exposes a verified order end date. The currently supported `arkcli usage plan` response does not provide that value, so TokenBar intentionally hides the badge instead of guessing from a reset time or local profile cache.
+
+Expiry dates also feed the **Expiry Reminders** feature: integrated plans (e.g. OpenCode Go renewal dates, LongCat pack expiries) are picked up automatically, and services TokenBar does not integrate can be added manually (name + expiry date + note) in **Settings → Expiry Reminders**.
 
 ## Privacy
 

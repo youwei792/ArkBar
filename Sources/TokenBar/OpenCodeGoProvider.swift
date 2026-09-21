@@ -3,14 +3,17 @@ import Foundation
 import FoundationNetworking
 #endif
 
-/// Fetches the authoritative OpenCode Go subscription page. Authentication can
+/// Fetches the authoritative OpenCode Go subscription usage. Authentication can
 /// come from an automatically imported browser session or a manually supplied
-/// Cookie header. Only `auth` cookies are sent, redirects never leave
-/// `opencode.ai`, and no local cost estimate is ever presented as plan quota.
+/// Cookie header. The usage data comes from the console app's JSON API
+/// (`/console/api/go/status`), which authenticates with the `console_session`
+/// cookie; redirects never leave `opencode.ai`, and no local cost estimate is
+/// ever presented as plan quota.
 final class OpenCodeGoProvider: UsageProvider {
     let displayName = "OpenCode Go"
 
     private static let baseURL = URL(string: "https://opencode.ai")!
+    private static let userReferer = URL(string: "https://opencode.ai/")!
     private static let serverURL = URL(string: "https://opencode.ai/_server")!
     private static let workspacesServerID = "def39973159c7f0483d8793a822b8dbb10d067e12c65455fcb4608459ba0234f"
     private static let userAgent =
@@ -96,61 +99,65 @@ final class OpenCodeGoProvider: UsageProvider {
         credential: Credential,
         workspaceOverride: String) async throws -> ProviderSnapshot
     {
-        let workspaceID: String
-        if let override = Self.normalizeWorkspaceID(workspaceOverride) {
-            workspaceID = override
-        } else {
-            workspaceID = try await resolveWorkspaceID(cookieHeader: credential.cookieHeader)
+        // The old `/workspace/<id>/go` page is now a client-rendered console
+        // shell with no usage data in the HTML; the numbers come from the
+        // console app's JSON API instead.
+        var orgID = Self.normalizeWorkspaceID(workspaceOverride)
+        if orgID == nil {
+            orgID = try? await resolveWorkspaceID(cookieHeader: credential.cookieHeader)
         }
-
-        let page = try await fetchUsagePage(
-            workspaceID: workspaceID,
-            cookieHeader: credential.cookieHeader)
-        let usage = try Self.decodeUsagePage(page, now: Date())
+        let text = try await fetchGoStatus(
+            cookieHeader: credential.cookieHeader,
+            orgID: orgID)
+        let usage = try Self.decodeUsagePage(text, now: Date())
         return Self.makeProviderSnapshot(usage, authMethod: credential.sourceLabel)
     }
 
-    // MARK: - Request safety
-
-    /// This delegate deliberately rejects a redirect to another host. A session
-    /// header is credential material and must never follow an arbitrary redirect.
-    private final class RedirectGuard: NSObject, URLSessionTaskDelegate {
-        func urlSession(
-            _: URLSession,
-            task: URLSessionTask,
-            willPerformHTTPRedirection _: HTTPURLResponse,
-            newRequest request: URLRequest,
-            completionHandler: @escaping (URLRequest?) -> Void)
-        {
-            guard let source = task.originalRequest?.url,
-                  let destination = request.url,
-                  source.host?.lowercased() == destination.host?.lowercased(),
-                  destination.scheme?.lowercased() == "https"
-            else {
-                completionHandler(nil)
-                return
-            }
-            completionHandler(request)
+    /// GETs the console Go-status JSON. 401/403 surfaces as an expired session
+    /// so the automatic path can guide the user to re-import the browser login
+    /// (the console cookie rotates independently of the legacy `auth` cookie).
+    private func fetchGoStatus(cookieHeader: String, orgID: String?) async throws -> String {
+        guard let url = URL(string: "https://opencode.ai/console/api/go/status") else {
+            throw UsageError.parseFailed("Invalid OpenCode Go status URL.")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.timeoutInterval = 20
+        request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("https://opencode.ai/console", forHTTPHeaderField: "Referer")
+        // The console API is org-scoped; the SPA sends the selected org id in
+        // x-org-id.
+        if let orgID { request.setValue(orgID, forHTTPHeaderField: "x-org-id") }
+        do {
+            let text = try await responseText(for: request)
+            if Self.looksSignedOut(text) { throw UsageError.openCodeCookieInvalid }
+            return text
+        } catch {
+            Self.writeDiagnostic("fetch status error: \(error.localizedDescription) org=\(orgID ?? "nil")")
+            throw error
         }
     }
 
+    /// Resolves the workspace/org id from the legacy server-fn endpoint (still
+    /// alive and cookie-authenticated) so the console call can scope itself.
     private func resolveWorkspaceID(cookieHeader: String) async throws -> String {
         let getText = try await fetchServerText(
             serverID: Self.workspacesServerID,
             args: nil,
             method: "GET",
-            referer: Self.baseURL,
+            referer: Self.userReferer,
             cookieHeader: cookieHeader)
         if Self.looksSignedOut(getText) { throw UsageError.openCodeCookieInvalid }
         if let id = Self.parseWorkspaceIDs(from: getText).first { return id }
 
-        // CodexBar keeps this fallback because the server endpoint has returned
-        // different shapes to different deployments over time.
         let postText = try await fetchServerText(
             serverID: Self.workspacesServerID,
             args: "[]",
             method: "POST",
-            referer: Self.baseURL,
+            referer: Self.userReferer,
             cookieHeader: cookieHeader)
         if Self.looksSignedOut(postText) { throw UsageError.openCodeCookieInvalid }
         if let id = Self.parseWorkspaceIDs(from: postText).first { return id }
@@ -183,8 +190,6 @@ final class OpenCodeGoProvider: UsageProvider {
         request.setValue(Self.baseURL.absoluteString, forHTTPHeaderField: "Origin")
         request.setValue(referer.absoluteString, forHTTPHeaderField: "Referer")
         request.setValue("text/javascript, application/json;q=0.9, */*;q=0.8", forHTTPHeaderField: "Accept")
-        request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
-        request.setValue("no-cache", forHTTPHeaderField: "Pragma")
         if method != "GET", let args {
             request.httpBody = Data(args.utf8)
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -192,33 +197,31 @@ final class OpenCodeGoProvider: UsageProvider {
         return try await responseText(for: request)
     }
 
-    private func fetchUsagePage(workspaceID: String, cookieHeader: String) async throws -> String {
-        guard var components = URLComponents(
-            string: "https://opencode.ai/workspace/\(workspaceID)/go")
-        else {
-            throw UsageError.parseFailed("Invalid OpenCode Go workspace URL.")
+    // MARK: - Request safety
+
+    /// This delegate deliberately rejects a redirect to another host. A session
+    /// header is credential material and must never follow an arbitrary redirect.
+    private final class RedirectGuard: NSObject, URLSessionTaskDelegate {
+        func urlSession(
+            _: URLSession,
+            task: URLSessionTask,
+            willPerformHTTPRedirection _: HTTPURLResponse,
+            newRequest request: URLRequest,
+            completionHandler: @escaping (URLRequest?) -> Void)
+        {
+            guard let source = task.originalRequest?.url,
+                  let destination = request.url,
+                  source.host?.lowercased() == destination.host?.lowercased(),
+                  destination.scheme?.lowercased() == "https"
+            else {
+                completionHandler(nil)
+                return
+            }
+            completionHandler(request)
         }
-        components.queryItems = [
-            URLQueryItem(name: "tokenbar_refresh", value: String(Int(Date().timeIntervalSince1970))),
-        ]
-        guard let url = components.url else {
-            throw UsageError.parseFailed("Invalid OpenCode Go workspace URL.")
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        request.timeoutInterval = 20
-        request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
-        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
-        request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
-        request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
-        request.setValue("no-cache", forHTTPHeaderField: "Pragma")
-        let text = try await responseText(for: request)
-        if Self.looksSignedOut(text) { throw UsageError.openCodeCookieInvalid }
-        return text
     }
 
-    private func responseText(for request: URLRequest) async throws -> String {
+                private func responseText(for request: URLRequest) async throws -> String {
         let data: Data
         let response: URLResponse
         do {
@@ -261,13 +264,58 @@ final class OpenCodeGoProvider: UsageProvider {
 
     static func decodeUsagePage(_ text: String, now: Date) throws -> ParsedUsage {
         if let data = text.data(using: .utf8),
+           let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+           let console = parseConsoleStatus(object, now: now)
+        {
+            return console
+        }
+        if let data = text.data(using: .utf8),
            let object = try? JSONSerialization.jsonObject(with: data),
            let parsed = parseJSON(object, now: now, depth: 0, inheritedExpiry: nil)
         {
             return parsed
         }
         if let parsed = parseRegex(text, now: now) { return parsed }
+        let head = String(text.prefix(400)).replacingOccurrences(of: "\n", with: " ")
+        UsageStore.log("OCGO parse-fail len=\(text.count) head=\(head)")
+        Self.writeDiagnostic("parse-fail len=\(text.count)\n\(head)")
         throw UsageError.parseFailed("OpenCode Go response is missing subscription usage fields.")
+    }
+
+    /// Parses the console app's `/console/api/go/status` payload: the current
+    /// Go subscription with three usage meters measured in micro-cents.
+    ///
+    /// Shape (captured 2026-09-21):
+    /// `{"access":{"endsAt":"...","meters":{"fiveHour":{...usedMicroCents,
+    /// limitMicroCents, resetsAt},"week":{...},"month":{...}}}}`. The month
+    /// meter carries no resetsAt; the access period end is when it renews.
+    static func parseConsoleStatus(_ root: [String: Any], now: Date) -> ParsedUsage? {
+        guard let access = root["access"] as? [String: Any],
+              let meters = access["meters"] as? [String: Any]
+        else { return nil }
+
+        func meter(_ key: String) -> ParsedWindow? {
+            guard let meter = meters[key] as? [String: Any],
+                  let used = doubleValue(from: meter["usedMicroCents"]),
+                  let limit = doubleValue(from: meter["limitMicroCents"]),
+                  limit > 0
+            else { return nil }
+            return ParsedWindow(
+                usedPercent: min(100, max(0, used / limit * 100)),
+                resetsAt: meter["resetsAt"].flatMap(dateValue(from:)))
+        }
+
+        guard let rolling = meter("fiveHour") else { return nil }
+        let expiry = access["endsAt"].flatMap(dateValue(from:))
+        let monthly = meter("month").map {
+            ParsedWindow(usedPercent: $0.usedPercent, resetsAt: $0.resetsAt ?? expiry)
+        }
+        return ParsedUsage(
+            rolling: rolling,
+            weekly: meter("week"),
+            monthly: monthly,
+            expiryDate: expiry,
+            updatedAt: now)
     }
 
     private static func parseJSON(
@@ -563,7 +611,12 @@ final class OpenCodeGoProvider: UsageProvider {
 /// Normalises a pasted `Cookie:` header and retains only the credentials that
 /// OpenCode Go itself needs. Tracking / preference cookies never leave the app.
 enum OpenCodeGoCookieSupport {
-    private static let allowedNames: Set<String> = ["auth", "__Host-auth"]
+    /// The console app authenticates its JSON API with its own session cookie
+    /// ("console_session" / "__Host-console_session"); the legacy "auth" cookie
+    /// still authenticates the old server-fn endpoints.
+    private static let allowedNames: Set<String> = [
+        "auth", "__Host-auth", "console_session", "__Host-console_session",
+    ]
 
     static func requestCookieHeader(from raw: String?) -> String? {
         guard var raw else { return nil }
@@ -586,5 +639,22 @@ enum OpenCodeGoCookieSupport {
         }
         guard !pairs.isEmpty else { return nil }
         return pairs.map { "\($0.0)=\($0.1)" }.joined(separator: "; ")
+    }
+}
+
+extension OpenCodeGoProvider {
+    /// Persists the last console-API response head to the app support directory
+    /// so a support session can see the payload shape without stderr access
+    /// (Finder-launched apps have no console). Never contains credentials.
+    static func writeDiagnostic(_ text: String) {
+        guard let dir = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("TokenBar", isDirectory: true)
+        else { return }
+        try? FileManager.default.createDirectory(
+            at: dir, withIntermediateDirectories: true)
+        try? text.write(
+            to: dir.appendingPathComponent("opencode-last-response.txt"),
+            atomically: true, encoding: .utf8)
     }
 }

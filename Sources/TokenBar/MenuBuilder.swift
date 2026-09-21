@@ -31,6 +31,12 @@ enum MenuBuilder {
         /// All provider statuses for the summary view.
         var allStatuses: [ProviderTab: UsageStore.LoadStatus] = [:]
 
+        /// Subscriptions nearing expiry, shown at the top of the overview.
+        var reminders: [ExpiryReminderItem] = []
+        /// Invoked when a reminder row is clicked; integrated items select
+        /// their provider tab, manual items open reminder settings.
+        var onReminderTap: ((ExpiryReminderItem) -> Void)? = nil
+
         var refreshErrorMessage: String? {
             switch status {
             case let .error(message), let .stale(_, message): message
@@ -102,6 +108,18 @@ enum MenuBuilder {
                 menu.addItem(actionItem(L(.openLongCatConsole), action: {
                     NSWorkspace.shared.open(URL(string: "https://longcat.chat/platform/usage")!)
                 }))
+            case .aliyun:
+                menu.addItem(actionItem(L(.openAliyunConsole), action: {
+                    NSWorkspace.shared.open(AliyunConsole.dashboardURL)
+                }))
+            case .stepfun:
+                menu.addItem(actionItem(L(.openStepFunConsole), action: {
+                    NSWorkspace.shared.open(URL(string: "https://platform.stepfun.com/account-overview")!)
+                }))
+            case .sensenova:
+                menu.addItem(actionItem(L(.openSenseNovaConsole), action: {
+                    NSWorkspace.shared.open(URL(string: "https://platform.sensenova.cn/console")!)
+                }))
             }
         }
         menu.addItem(actionItem(L(.settings), action: state.onSettings))
@@ -113,6 +131,9 @@ enum MenuBuilder {
 
     @MainActor
     private static func populateSummary(_ menu: NSMenu, state: State) {
+        if !state.reminders.isEmpty {
+            populateReminders(menu, state: state)
+        }
         var hasContent = false
         for tab in state.visibleTabs {
             let loadStatus = state.allStatuses[tab] ?? .never
@@ -131,6 +152,28 @@ enum MenuBuilder {
         if !hasContent {
             menu.addItem(loadingItem(text: L(.noProvider)))
         }
+    }
+
+    // MARK: - Reminder section
+
+    @MainActor
+    private static func populateReminders(_ menu: NSMenu, state: State) {
+        let header = NSMenuItem()
+        header.view = ReminderHeaderView(
+            text: String(format: L(.reminderHeader), state.reminders.count),
+            width: cardWidth)
+        header.isEnabled = false
+        menu.addItem(header)
+
+        for item in state.reminders {
+            let row = NSMenuItem()
+            row.view = ReminderRowView(item: item, width: cardWidth) {
+                state.onReminderTap?(item)
+            }
+            row.isEnabled = false
+            menu.addItem(row)
+        }
+        menu.addItem(.separator())
     }
 
     // MARK: - Provider branch (existing logic)
@@ -446,7 +489,7 @@ final class SummaryRowView: NSView {
         case .grokPool:
             guard let summary = snapshot.plans.first?.grokPool else { return nil }
             return GrokPoolCardView.money(summary.costUSD, symbol: "$")
-        case .ark, .opencode, .zai, .kimi, .longcat:
+        case .ark, .opencode, .zai, .kimi, .longcat, .aliyun, .stepfun, .sensenova:
             return nil
         }
     }
@@ -494,6 +537,136 @@ private final class SummaryMeterView: NSView {
             remainingPercent: remainingPercent,
             stale: isStale,
             in: bounds)
+    }
+}
+
+// MARK: - Reminder section views
+
+/// Section header above the expiring-subscription rows.
+@MainActor
+private final class ReminderHeaderView: NSView {
+    override var isFlipped: Bool { true }
+
+    init(text: String, width: CGFloat) {
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 24))
+        wantsLayer = true
+
+        let icon = NSImageView(frame: NSRect(x: 14, y: 5, width: 13, height: 13))
+        icon.image = NSImage(systemSymbolName: "bell.fill", accessibilityDescription: text)
+        icon.image?.isTemplate = true
+        icon.contentTintColor = .secondaryLabelColor
+        icon.symbolConfiguration = .init(pointSize: 11, weight: .semibold)
+        addSubview(icon)
+
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = .secondaryLabelColor
+        label.frame = NSRect(x: 32, y: 4, width: width - 46, height: 15)
+        addSubview(label)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+/// One expiring subscription: urgency dot, name, countdown and remaining
+/// quota. Tapping navigates to the provider (or reminder settings for
+/// manual entries).
+@MainActor
+final class ReminderRowView: NSView {
+    override var isFlipped: Bool { true }
+
+    private let onTap: () -> Void
+    private let hoverView = NSVisualEffectView()
+
+    init(item: ExpiryReminderItem, width: CGFloat, onTap: @escaping () -> Void) {
+        self.onTap = onTap
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 32))
+        wantsLayer = true
+
+        hoverView.material = .selection
+        hoverView.blendingMode = .withinWindow
+        hoverView.state = .active
+        hoverView.isEmphasized = true
+        hoverView.wantsLayer = true
+        hoverView.layer?.cornerRadius = 8
+        hoverView.isHidden = true
+        hoverView.frame = bounds.insetBy(dx: 6, dy: 1)
+        addSubview(hoverView)
+
+        let dot = NSView(frame: NSRect(x: 16, y: 12, width: 8, height: 8))
+        dot.wantsLayer = true
+        dot.layer?.cornerRadius = 4
+        dot.layer?.backgroundColor = Self.urgencyColor(days: item.daysUntilExpiry).cgColor
+        addSubview(dot)
+
+        let nameField = NSTextField(labelWithString: item.name)
+        nameField.font = .systemFont(ofSize: 12, weight: .medium)
+        nameField.textColor = .labelColor
+        nameField.lineBreakMode = .byTruncatingTail
+        nameField.toolTip = item.name
+        nameField.frame = NSRect(x: 30, y: 8, width: 130, height: 16)
+        addSubview(nameField)
+
+        let dayText = item.isOverdue
+            ? L(.expired)
+            : (item.daysUntilExpiry == 0
+                ? L(.reminderExpiresToday)
+                : String(format: L(.reminderDaysLeft), item.daysUntilExpiry))
+        var detailParts = [dayText]
+        if let remaining = item.remainingPercent {
+            detailParts.append(String(format: L(.reminderQuotaLeft), Int(remaining.rounded())))
+        }
+        let detailField = NSTextField(labelWithString: detailParts.joined(separator: " · "))
+        detailField.font = .systemFont(ofSize: 11)
+        detailField.textColor = Self.urgencyColor(days: item.daysUntilExpiry)
+        detailField.alignment = .right
+        detailField.lineBreakMode = .byClipping
+        detailField.frame = NSRect(x: 164, y: 9, width: width - 164 - 14, height: 15)
+        addSubview(detailField)
+
+        let recognizer = NSClickGestureRecognizer(target: self, action: #selector(handleClick(_:)))
+        recognizer.buttonMask = 0x1
+        addGestureRecognizer(recognizer)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// Same color ladder as the plan-card expiry badge so both surfaces
+    /// read identically.
+    static func urgencyColor(days: Int) -> NSColor {
+        switch days {
+        case ..<0: return .systemRed
+        case 0...3: return .systemOrange
+        case 4...7: return .systemYellow
+        default: return .systemTeal
+        }
+    }
+
+    @objc private func handleClick(_ recognizer: NSClickGestureRecognizer) {
+        guard recognizer.state == .ended else { return }
+        onTap()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hoverView.isHidden = false
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hoverView.isHidden = true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self, userInfo: nil))
+    }
+
+    override func layout() {
+        super.layout()
+        hoverView.frame = bounds.insetBy(dx: 6, dy: 1)
     }
 }
 

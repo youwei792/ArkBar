@@ -2,7 +2,7 @@
 
 [English](README.en.md) · [安全报告](SECURITY.md) · [更新日志](CHANGELOG.md)
 
-TokenBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding/Agent Plan、OpenCode Go、DeepSeek、APINebula 中转站、智谱（Z.ai）、Kimi For Coding、GrokPool 网关与 LongCat (longcat.chat) 的用量；不会显示 Dock 图标。
+TokenBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding/Agent Plan、OpenCode Go、DeepSeek、APINebula 中转站、智谱（Z.ai）、Kimi For Coding、GrokPool 网关、LongCat (longcat.chat)、阿里云百炼 Coding Plan、阶跃星辰 Step Plan 与商汤日日新 Token Plan 的用量，并在订阅快到期且额度没用完时提醒你；不会显示 Dock 图标。
 
 > 仓库名为 `ArkBar`；面向用户的产品、Swift Package、可执行文件与 `.app` 名称均为 `TokenBar`。当前源码与本地打包版本号为 `0.1.0`（Unreleased）；截至 2026-09-01，远端没有 Git tag 或 GitHub Release。下述步骤仅用于从源码运行或本地开发打包，不代表已有正式发布安装包。
 
@@ -18,7 +18,8 @@ TokenBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding
 - APINebula 余额与日志是控制台接口：凭据来自浏览器登录会话（设置页显式导入并缓存到 Keychain），可选 API Key 兜底。
 - GrokPool（grok2api 管理员网关）监控：以管理员账号登录（`POST /api/admin/v1/auth/login`）换取短期访问令牌，读取 **24h 运营看板**（`GET /api/admin/v1/dashboard?period=24h`）：请求数/成功率、计费费用、输入/缓存/输出/推理 token、活跃账号数与常用模型。成功率圆环 = 成功请求占比；与 APINebula 标签页完全隔离（独立设置与状态）。计费按 grok2api 的 10^10 ticks = $1 换算。
 - LongCat (longcat.chat) 监控：用量接口在 longcat.chat 控制台（非 api.longcat.chat），以浏览器登录会话认证。剩余额度圆环 = 当前 token pack 的剩余 Token 占比；环右侧展示总额/已用/已用百分比与剩余/剩余百分比，以及可选的 fuel pack 余额与最近过期倒计时。
-- 支持在 Ark、OpenCode Go、DeepSeek、APINebula、智谱（Z.ai）、Kimi、GrokPool 与 LongCat 之间即时切换，并隔离各边的刷新状态与错误。
+- 支持在 Ark、OpenCode Go、DeepSeek、APINebula、智谱（Z.ai）、Kimi、GrokPool、LongCat、阿里云、阶跃与商汤之间即时切换，并隔离各边的刷新状态与错误。
+- **订阅到期提醒**：概览菜单顶部列出即将到期的订阅（已接入套餐自动读取验证过的到期时间，也可手动添加未接入的订阅），按剩余天数着色；距到期不超过提前天数（可选 3/7/14/30 天，默认 7 天）且剩余额度 ≥50% 时才提醒"抓紧用完"，额度基本用完的订阅不再打扰。可选系统通知（每个订阅每天最多一条；需打包后的 App 运行才显示，源码运行时以下拉菜单为准）。在「设置 → 订阅提醒」管理开关、提前天数与手动订阅列表。
 - **概览**标签一览所有可见 Provider 的剩余百分比与胶囊进度条；点击某行进入对应完整卡片。可在「设置 → 通用」开关。
 - 每个 Provider 可在自己的设置页中独立**显示/隐藏**，隐藏后从切换器移除并停止后台刷新。
 - 菜单栏样式可选：圆环、圆环 + 百分比、仅百分比、仅 Logo、Logo + 百分比、Logo + 圆环；Logo 16pt、百分比使用系统字号。圆环与卡片同源：三窗口套餐显示每月（外）/ 每周（中）/ 5 小时（内）三环同心，余额类单窗口 Provider 显示单环。
@@ -72,13 +73,16 @@ lipo -archs TokenBar
 | `arkcli` SSO（推荐） | `npm install -g @volcengine/ark-cli`，随后执行 `arkcli auth login volc-sso` | 可读取 `arkcli usage plan` 提供的个人版/团队版 Coding 与 Agent Plan 用量。 |
 | Volcengine AK/SK | 三选一：在“设置 → Ark 套餐”填写 Access Key / Secret Key（存 Keychain + 文件缓存）、环境变量 `VOLCENGINE_ACCESS_KEY_ID` 和 `VOLCENGINE_SECRET_ACCESS_KEY` | 仅 Coding Plan，用 Volcengine V4 签名请求读取。IAM 长期密钥不会过期：填一次只读子账号密钥对即可免去 arkcli SSO 约 48 小时一轮的重新登录。凭据优先级：设置值 > 环境变量。 |
 | Ark API Key | `ARK_API_KEY`；可选 `ARK_MODEL_ID` | 仅单个请求限额窗口。探测会发送最小 API 请求，可能消耗请求额度。 |
-| OpenCode Go | 在“设置 → OpenCode Go”中明确点击“重新读取浏览器登录”，或选择手动 Cookie | 从 `opencode.ai` 的订阅页面读取其返回的套餐用量；不会用本地消费记录估算余额。 |
+| OpenCode Go | 在“设置 → OpenCode Go”中明确点击“重新读取浏览器登录”，或选择手动 Cookie；读取 Chrome/Safari Cookie 需要在 系统设置 中授予 TokenBar 完全磁盘访问权限 | 从 OpenCode 控制台的 JSON 接口 `GET /console/api/go/status` 读取三档用量（5 小时 / 周 / 月，micro-cents 计量），并取 `access.endsAt` 作为订阅到期时间；不会用本地消费记录估算余额。 |
 | DeepSeek | 三选一：设置页填写 API Key / Platform Token（存 Keychain）、环境变量 `DEEPSEEK_API_KEY` / `DEEPSEEK_PLATFORM_TOKEN`，或让 Chrome 登录 platform.deepseek.com 后自动读取 | 余额来自 `api.deepseek.com/user/balance`（或平台钱包）；今日/每月费用、Token、请求次数与分类明细来自平台 `usage/amount` + `usage/cost`。凭据优先级：设置值 > 环境变量 > Chrome 会话。 |
 | APINebula（中转站） | 在“设置 → APINebula 中转”中显式点击“重新读取浏览器登录”（控制台会话缓存到 Keychain）；可选填 API Key | 余额/累计已用来自控制台 `api/user/self`；今日/每月费用、Token、请求次数与缓存读/未缓存/输出分类来自 `api/log/self` 使用日志（缓存 token 位于日志 `other` 字段）。余额与日志是控制台接口，API Key 仅保证 `/v1` 模型调用。 |
 | 智谱（Z.ai） | 在“设置 → 智谱 Coding Plan”中填写 API Key（存 Keychain + 文件缓存）；可选环境变量 `Z_AI_API_KEY` 兜底；API 区域可选 Global（`api.z.ai`）或 BigModel 国内站（`open.bigmodel.cn`），默认国内站 | 读取 `api/monitor/usage/quota/limit` 返回的 Coding Plan 额度窗口：5 小时 + 每周（session/weekly 环），部分套餐另有每月 MCP 时间窗口（monthly 环）。凭据优先级：设置值 > 环境变量。 |
 | Kimi For Coding | API Key 可选（在“设置 → Kimi For Coding”填写，存 Keychain + 文件缓存；环境变量 `KIMI_CODE_API_KEY` 兜底）；在“设置 → Kimi For Coding”点“重新读取浏览器登录”导入 `www.kimi.com` 会话后可额外读取共享总池 | 读取 `api.kimi.com/coding/v1/usages` 的 Code 会员配额：总配额（每周，weekly 环）+ 5 小时限流窗口（session 环）；浏览器会话另读取 `www.kimi.com` 的 `GetSubscriptionStats`，把 **Kimi Code + Kimi Work 共享总池**映射为 monthly 环。凭据优先级：设置值 > 环境变量。 |
 | GrokPool（grok2api 网关） | 在“设置 → GrokPool 网关”填写**管理员账号密码**（存 Keychain + 文件缓存）；可选环境变量 `GROKPOOL_USERNAME` / `GROKPOOL_PASSWORD` 兜底；Base URL 默认 `https://grok.axonlume.com` | 以管理员身份登录（`POST /api/admin/v1/auth/login`）获取短期 Bearer 访问令牌，读取 24h 运营看板（`GET /api/admin/v1/dashboard?period=24h`）：请求数与成功率、计费费用（10^10 ticks = $1）、输入/缓存/输出/推理 token 拆分、活跃账号数与常用模型。令牌每 15 分钟自动重新获取，401 时自动重登。 |
 | LongCat (longcat.chat) | 在“设置 → LongCat”点“重新读取浏览器登录”导入 `longcat.chat` 会话（存 Keychain + 文件缓存）；支持 Chrome / Arc / Safari / Edge / Brave / Firefox 多浏览器回退；可选手动粘贴 Cookie 头或环境变量 `LONGCAT_MANUAL_COOKIE` | 用量接口在 longcat.chat 控制台（非 api.longcat.chat）。从 `POST /api/pay/quota/metering/token-packs/summary` 读取当前 token pack（`data.currentLot`：`totalToken` / `consumedToken` / `remainingToken` / `expireTime`），剩余圆环 = 剩余 Token 占比。可选读取 pending fuel pack 作为补充余额与最近过期时间。凭据优先级：手动 Cookie > 浏览器会话 > 环境变量。 |
+| 阿里云百炼 Coding Plan | 在“设置 → 阿里云 Coding Plan”填写专属 API Key（`sk-sp-` 开头，存 Keychain + 文件缓存）；环境变量 `ALIYUN_CODING_PLAN_API_KEY` 兜底 | Pro 档三档请求额度（5 小时 6,000 次滚动 / 每周 45,000 次周一重置 / 每月 90,000 次订阅日重置）映射为 session / weekly / monthly 三环，请求数显示绝对值。注意：官方暂未提供公开用量 API，开通前列表如实显示“尚未开通”；开通后自动生效，若未生效需按 docs/aliyun-handoff.md 抓包适配。该 Key 与按量计费的 sk- Key 不互通。 |
+| 阶跃 StepFun | 在“设置 → 阶跃 Step Plan”点“重新读取浏览器登录”导入控制台会话（cookie 鉴权，自动轮换；需授予完全磁盘访问权限） | 控制台 Connect-RPC：`RefreshToken` 轮换会话后查 `QueryStepPlanRateLimit` + `GetStepPlanStatus`。Plus 套餐仅月度 Credit 一个环（剩余 79% 类）+ 到期徽标；带 5 小时/周窗口的套餐会自动显示三环。API Key 无法读取套餐额度（厂商限制）。 |
+| 商汤日日新 | 在“设置 → 商汤 Token Plan”点“重新读取浏览器登录”导入控制台会话 | Token Plan 公测免费（双积分池：通用 + Flash-Lite，各含周余额/5h 窗口/周额度）。**接口确认中（已冻结）**：会话导入已可用，额度端点待一次抓包定稿，探测响应写入 `sensenova-last-response.txt`。 |
 
 Ark CLI 的最新安装方式请以官方 [Ark CLI 文档](https://github.com/volcengine/ark-cli) 为准。
 
@@ -92,6 +96,7 @@ export KIMI_CODE_API_KEY='...'
 export GROKPOOL_USERNAME='...'
 export GROKPOOL_PASSWORD='...'
 export LONGCAT_MANUAL_COOKIE='...'
+export ALIYUN_CODING_PLAN_API_KEY='...'
 .build/debug/TokenBar
 ```
 
@@ -116,6 +121,8 @@ export LONGCAT_MANUAL_COOKIE='...'
 ## 套餐到期日
 
 配额重置时间不等于套餐到期日。只有数据源提供经过验证的订单终止时间时，TokenBar 才显示到期徽标。当前 `arkcli usage plan` 没有提供该字段，因此应用会隐藏它，不会用重置时间或本地缓存猜测。
+
+到期时间也是「订阅到期提醒」的数据源：已接入套餐（如 OpenCode Go 的续费日、LongCat 资源包到期时间）自动进入提醒列表；未接入的订阅可在「设置 → 订阅提醒」手动添加（名称 + 到期日 + 备注），到期前按规则提醒。
 
 ## 隐私
 
