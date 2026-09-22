@@ -4,28 +4,31 @@ import Foundation
 
 /// SenseNova (商汤日日新) Token Plan usage.
 ///
-/// Stage 1 (probe): the plan page is `https://www.sensenova.cn/token-plan`
-/// (free beta: 60,000 credits / 5 hours), the console is
-/// `platform.sensenova.cn/console`, and the gateway is
-/// `token.sensenova.cn/v1`. The gateway only exposes model routes — the
-/// quota lives behind the console, whose data endpoints load lazily after
-/// sign-in. Until a logged-in capture fixes the endpoint (see
-/// docs/stepfun-sensenova-handoff.md), the provider imports the console
-/// cookies and probes the candidate endpoints, writing every response to a
-/// diagnostic file so the real contract can be confirmed.
+/// The plan page is `https://www.sensenova.cn/token-plan`, the console is
+/// `platform.sensenova.cn/console`, and the model gateway is
+/// `token.sensenova.cn/v1`. Quota is NOT reachable with the plan API key: the
+/// console's own API (see `probeCandidates`) only accepts the OAuth access
+/// token the console SPA keeps for the signed-in user, and that token can only
+/// be minted through an interactive Hydra login (`iam.sensecoreapi.cn`, SMS
+/// code) — so until that credential path is settled the provider reports the
+/// state honestly instead of inventing numbers. The session import is gated on
+/// a real sign-in cookie, and every probe response lands in
+/// `~/Library/Application Support/TokenBar/sensenova-last-response.txt`.
 final class SenseNovaProvider: UsageProvider {
     let displayName = "商汤"
 
-    /// Ordered candidate endpoints (host + path) for the Token Plan quota.
-    /// The response of each probe lands in the diagnostic file.
+    /// The Token Plan quota lives on the console's own API, discovered from the
+    /// console bundle: the dashboard component fetches
+    /// `${location.origin}/lite/console/v1/tokenplan/pool-usage` (dual credit
+    /// pools) and `…/credit-usage-trend`, through an axios layer that always
+    /// sends `Authorization: Bearer <oauth access token>`. The plan API key is
+    /// rejected there (`Authentication type 'apikey' is not enabled`) and the
+    /// console session cookie alone is not a credential for this API, so the
+    /// probes below exist to record what the endpoint says rather than to
+    /// guess paths any more.
     private static let probeCandidates: [String] = [
-        "https://iam.sensecoreapi.cn/iam/idp/v1/apiKeys",
-        "https://iam.sensecoreapi.cn/iam/idp/v1/users/me",
-        "https://platform.sensenova.cn/api/user/info",
-        "https://api.sensenova.cn/v1/user/info",
-        "https://api.sensenova.cn/v1/token-plan",
-        "https://api.sensenova.cn/v1/token-plan/status",
-        "https://token.sensenova.cn/v1/token-plan",
+        "https://platform.sensenova.cn/lite/console/v1/tokenplan/pool-usage",
+        "https://platform.sensenova.cn/lite/console/v1/tokenplan/credit-usage-trend",
     ]
 
     private static let userAgent =
@@ -66,8 +69,17 @@ final class SenseNovaProvider: UsageProvider {
         } else {
             throw UsageError.senseNovaMissingCredentials
         }
+        // A pasted or imported bag without the Hydra session cookie is not a
+        // sign-in; say so instead of spending requests on it.
+        guard SenseNovaBrowserSession.hasSignInCookie(session.cookieHeader) else {
+            Self.writeDiagnostic(
+                "session has no sign-in cookie (names: "
+                + SenseNovaBrowserSession.cookieNames(session.cookieHeader) + ")")
+            throw UsageError.senseNovaMissingCredentials
+        }
 
-        var log: [String] = []
+        var log: [String] = ["session: \(session.sourceLabel)"]
+        var sawAuthRejection = false
         for urlString in Self.probeCandidates {
             guard let url = URL(string: urlString) else { continue }
             var request = URLRequest(url: url)
@@ -94,19 +106,24 @@ final class SenseNovaProvider: UsageProvider {
             if response.statusCode == 200,
                let text = String(data: response.data, encoding: .utf8),
                text.contains("credit") || text.contains("quota")
-                   || text.contains("usage") || text.contains("tokenPlan")
+                   || text.contains("usage") || text.contains("pools")
             {
                 if let parsed = Self.parseQuota(text) {
                     Self.writeDiagnostic(log.joined(separator: "\n"))
                     return Self.makeSnapshot(from: parsed, authMethod: session.sourceLabel)
                 }
             }
+            // One rejection must not end the chain: the console answers 401 for
+            // every candidate that is not a cookie-authenticated API, and the
+            // real cause only shows up in the accumulated responses.
             if response.statusCode == 401 || response.statusCode == 403 {
-                Self.writeDiagnostic(log.joined(separator: "\n"))
-                throw UsageError.senseNovaInvalidSession
+                sawAuthRejection = true
             }
         }
         Self.writeDiagnostic(log.joined(separator: "\n"))
+        if sawAuthRejection {
+            throw UsageError.senseNovaInvalidSession
+        }
         throw UsageError.senseNovaNotSupported
     }
 

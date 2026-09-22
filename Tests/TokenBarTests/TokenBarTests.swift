@@ -2541,6 +2541,28 @@ struct SenseNovaProviderDecodeTests {
         #expect(SenseNovaProvider.parseQuota("<html>login</html>") == nil)
         #expect(SenseNovaProvider.parseQuota("{\"code\":\"Unauthorized\"}") == nil)
     }
+
+    @Test("A cookie bag only counts as a sign-in when it carries the session cookie")
+    func signInCookieGate() {
+        // The regression: `sensenova.cn` domains also hold analytics cookies,
+        // and a logged-out import used to pass them off as a session.
+        #expect(SenseNovaBrowserSession.hasSignInCookie(
+            "oauth2_authentication_session=abc.def"))
+        #expect(SenseNovaBrowserSession.hasSignInCookie(
+            "Hm_lvt_cef229=1758; gr_user_id=1.2; oauth2_authentication_session=abc.def"))
+        #expect(!SenseNovaBrowserSession.hasSignInCookie(
+            "Hm_lvt_cef229=1758; gr_user_id=1.2"))
+        #expect(!SenseNovaBrowserSession.hasSignInCookie(
+            "oauth2_authentication_csrf=abc"))
+        #expect(!SenseNovaBrowserSession.hasSignInCookie(""))
+    }
+
+    @Test("Diagnostics list cookie names, never values")
+    func cookieNamesAreRedacted() {
+        let names = SenseNovaBrowserSession.cookieNames(
+            "gr_user_id=secret-value; Hm_lvt_x=1")
+        #expect(names == "Hm_lvt_x, gr_user_id")
+    }
 }
 
 @Suite("StepFun console RPC decode")

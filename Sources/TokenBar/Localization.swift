@@ -772,9 +772,6 @@ final class L10n: ObservableObject {
         add(.errorSenseNovaInvalidSession, "商汤控制台登录已失效。请重新读取浏览器登录。", "The SenseNova console sign-in expired. Re-import the browser session.")
         add(.errorSenseNovaNotSupported, "商汤 Token Plan 的额度接口尚未确认：App 已探测候选接口并把响应写入 资源库/TokenBar/sensenova-last-response.txt，请把它发给开发者完成适配。", "The SenseNova Token Plan endpoint is not confirmed yet: TokenBar probed the candidate endpoints and wrote the responses to Application Support/TokenBar/sensenova-last-response.txt — send that file to the developer to finish the integration.")
         add(.errorSenseNovaBrowserSessionMissing, "没有在浏览器中找到 sensenova.cn 登录会话。请先在浏览器登录商汤控制台。", "No sensenova.cn sign-in session was found in the browser. Sign in to the SenseNova console first.")
-        add(.errorProbeModels, "所有探测模型均不可用", "All probe models failed")
-        add(.apiKeyNoHeaders, "API Key 有效，但响应未返回请求限额头。", "API key is valid, but no request-limit headers were returned.")
-        add(.apiKeyNoWindow, "API Key 有效，但未返回用量窗口。", "API key is valid, but no usage window was returned.")
 
         // Alibaba Cloud (阿里云百炼 Coding Plan)
         add(.aliyunAPIKeyLabel, "API Key", "API Key")
