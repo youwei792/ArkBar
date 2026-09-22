@@ -2520,26 +2520,82 @@ struct GatewayQuotaHeadersTests {
 
 @Suite("SenseNova provider decode")
 struct SenseNovaProviderDecodeTests {
-    @Test("Quota payloads map to the session ring and expiry")
-    func parsesQuota() {
-        let json = """
-        {"data":{"credit":{"used":12000,"remaining":48000},"resetTime":"2026-09-21T18:00:00.000Z","expireTime":"2026-11-01T00:00:00.000Z"}}
-        """
-        let quota = SenseNovaProvider.parseQuota(json)
-        #expect(quota != nil)
-        #expect(abs(quota!.usedPercent! - 20) < 0.01)
-        #expect(quota!.remaining == 48000)
-        #expect(quota!.expiryDate != nil)
-        let snapshot = SenseNovaProvider.makeSnapshot(from: quota!, authMethod: "test")
-        #expect(snapshot.plans[0].product == .senseNovaCodingPlan)
-        #expect(snapshot.plans[0].windows.first?.label == "5-hour")
-        #expect(snapshot.plans[0].expiryDate != nil)
+    /// Sanitized `pool-usage` capture (2026-09-23): pool ids replaced, quota
+    /// numbers and labels kept as returned. The console reports a general pool
+    /// plus a model-dedicated pool, each with rolling 5-hour and 7-day windows,
+    /// and every number as a decimal string.
+    private let poolUsageJSON = #"""
+    {"plan":{"id":"free","name":"Free Plan","type":"TOKEN_PLAN_PLAN_TYPE_FREE"},
+     "pools":[
+      {"id":"pool_00000000-0000-4000-8000-000000000001","name":"通用积分池","model_ids":["any-model"],
+       "pool_type":"default",
+       "window_5h":{"limit":"60000","used":"0","remaining":"60000","reset_at":"1790111866"},
+       "window_7d":{"limit":"600000","used":"151348","remaining":"448652","reset_at":"1790342266"},
+       "grant_balance":"0","nearest_grant_expiry":"0","nearest_grant_expiring_balance":"0"},
+      {"id":"pool_00000000-0000-4000-8000-000000000002","name":"Flash-Lite积分池","model_ids":["sensenova-6.7-flash-lite"],
+       "pool_type":"dedicated",
+       "window_5h":{"limit":"60000","used":"30000","remaining":"30000","reset_at":"1790111866"},
+       "window_7d":{"limit":"600000","used":"0","remaining":"600000","reset_at":"1790342266"},
+       "grant_balance":"0","nearest_grant_expiry":"0","nearest_grant_expiring_balance":"0"}]}
+    """#
+
+    @Test("Each credit pool becomes its own plan with 5-hour and weekly rings")
+    func parsesDualCreditPools() throws {
+        let usage = try SenseNovaProvider.parsePoolUsage(
+            Data(poolUsageJSON.utf8))
+        let snapshot = SenseNovaProvider.makeSnapshot(from: usage, authMethod: "Chrome")
+        #expect(snapshot.plans.count == 2)
+
+        let general = try #require(snapshot.plans.first { $0.id == "sensenova-default" })
+        #expect(general.product == .senseNovaCodingPlan)
+        #expect(general.edition == "通用积分池")
+        #expect(general.windows.map(\.label) == ["5-hour", "Weekly"])
+        // used/limit on the weekly pool: 151348 / 600000.
+        let weekly = try #require(general.windows.first { $0.label == "Weekly" })
+        #expect(abs(weekly.usedPercent - 25.22) < 0.05)
+        #expect(abs(weekly.remainingPercent - 74.78) < 0.05)
+        #expect(weekly.total == 600000)
+        #expect(weekly.used == 151348)
+        #expect(weekly.resetsAt?.timeIntervalSince1970 == 1_790_342_266)
+        // A zero `nearest_grant_expiry` is a top-up grant field, never a plan
+        // expiry, so it must not light up the badge.
+        #expect(general.expiryDate == nil)
+
+        let dedicated = try #require(snapshot.plans.first { $0.id == "sensenova-dedicated" })
+        #expect(abs(dedicated.windows[0].usedPercent - 50) < 0.01)
     }
 
-    @Test("Non-quota payloads (login pages) return nil")
-    func rejectsNonQuota() {
-        #expect(SenseNovaProvider.parseQuota("<html>login</html>") == nil)
-        #expect(SenseNovaProvider.parseQuota("{\"code\":\"Unauthorized\"}") == nil)
+    @Test("Quota numbers are accepted as strings or JSON numbers")
+    func acceptsEitherNumberSpelling() throws {
+        let numeric = #"""
+        {"pools":[{"pool_type":"default","window_5h":{"limit":60000,"used":1500,"remaining":58500,"reset_at":0}}]}
+        """#
+        let usage = try SenseNovaProvider.parsePoolUsage(Data(numeric.utf8))
+        let snapshot = SenseNovaProvider.makeSnapshot(from: usage, authMethod: "test")
+        let window = try #require(snapshot.plans.first?.windows.first)
+        #expect(abs(window.usedPercent - 2.5) < 0.01)
+        // reset_at 0 means "no rolling reset", which must not become 1970.
+        #expect(window.resetsAt == nil)
+    }
+
+    @Test("Pools without a usable limit are dropped")
+    func skipsPoolsWithoutLimit() throws {
+        let json = #"""
+        {"pools":[{"pool_type":"default","window_5h":{"limit":"0","used":"0","remaining":"0"}},
+                  {"pool_type":"dedicated","window_7d":{"limit":"600000","used":"1","remaining":"599999"}}]}
+        """#
+        let snapshot = SenseNovaProvider.makeSnapshot(
+            from: try SenseNovaProvider.parsePoolUsage(Data(json.utf8)),
+            authMethod: "test")
+        #expect(snapshot.plans.count == 1)
+        #expect(snapshot.plans[0].id == "sensenova-dedicated")
+    }
+
+    @Test("A malformed payload throws instead of returning an empty plan list")
+    func rejectsMalformedPayload() {
+        #expect(throws: (any Error).self) {
+            try SenseNovaProvider.parsePoolUsage(Data("<html>login</html>".utf8))
+        }
     }
 
     @Test("A cookie bag only counts as a sign-in when it carries the session cookie")
@@ -2912,5 +2968,71 @@ struct LocalizationCompletenessTests {
                 missing.isEmpty,
                 "\(language) is missing \(missing.count) strings: \(missing.map(\.rawValue).prefix(8))")
         }
+    }
+}
+
+@Suite("SenseNova console auth")
+struct SenseNovaConsoleAuthTests {
+    @Test("PKCE challenge matches the RFC 7636 test vector")
+    func pkceChallenge() {
+        // Appendix B.1/B.2 of RFC 7636 — a wrong derivation looks fine locally
+        // and fails at Hydra with an opaque request_forbidden.
+        #expect(
+            SenseNovaConsoleAuth.pkceChallenge(for: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
+                == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")
+    }
+
+    @Test("Seeding keeps only the sign-in cookie")
+    func seedsOnlySessionCookie() {
+        // Replaying a stored *_csrf cookie is what made Hydra answer
+        // "CSRF value from the token does not match".
+        let jar = SenseNovaConsoleAuth.seedJar(from: """
+            oauth2_authentication_session=sess.value, oauth2_consent_csrf=stale, \
+            Hm_lvt_x=1, gr_user_id=2
+            """)
+        #expect(jar.map(\.name) == ["oauth2_authentication_session"])
+        #expect(jar.first?.domain == "platform.sensenova.cn")
+    }
+
+    @Test("Cookie scoping follows domain, path and expiry")
+    func cookieScoping() {
+        let url = URL(string: "https://platform.sensenova.cn/oauth2/auth")!
+        func cookie(_ name: String, domain: String, path: String = "/", expires: Date? = nil) -> HTTPCookie {
+            var properties: [HTTPCookiePropertyKey: Any] = [
+                .name: name, .value: "v", .domain: domain, .path: path,
+            ]
+            if let expires { properties[.expires] = expires }
+            return HTTPCookie(properties: properties)!
+        }
+        let jar = [
+            cookie("session", domain: "platform.sensenova.cn"),
+            cookie("parent", domain: ".sensenova.cn"),
+            cookie("subpath", domain: "platform.sensenova.cn", path: "/console"),
+            cookie("other", domain: "iam.sensecoreapi.cn"),
+            cookie("expired", domain: "platform.sensenova.cn", expires: Date(timeIntervalSince1970: 1)),
+        ]
+        let header = SenseNovaConsoleAuth.cookieHeader(jar, for: url)
+        #expect(header.contains("session=v"))
+        #expect(header.contains("parent=v"))
+        #expect(!header.contains("subpath=v"))
+        #expect(!header.contains("other=v"))
+        #expect(!header.contains("expired=v"))
+    }
+
+    @Test("Token form fields are sorted and percent-encoded")
+    func formEncoding() {
+        let form = SenseNovaConsoleAuth.formUrlEncoded([
+            "redirect_uri": "https://platform.sensenova.cn",
+            "grant_type": "refresh_token",
+        ])
+        #expect(form.hasPrefix("grant_type=refresh_token&"))
+        #expect(form.contains("redirect_uri=https%3A%2F%2Fplatform.sensenova.cn"))
+    }
+
+    @Test("Verifier and challenge are URL-safe and unpadded")
+    func urlSafeRandom() {
+        let value = SenseNovaConsoleAuth.randomURLSafeString(bytes: 48)
+        #expect(!value.contains("+") && !value.contains("/") && !value.contains("="))
+        #expect(value.count == 64)
     }
 }
