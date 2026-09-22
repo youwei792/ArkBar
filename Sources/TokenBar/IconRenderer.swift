@@ -7,9 +7,45 @@ import AppKit
 /// The gauge is intentionally full-colour (not a template image) so the ring
 /// hues match the cards. Because the artwork bakes in the current appearance's
 /// colours, `StatusItemController` re-renders it when the theme changes.
-@MainActor
 enum IconRenderer {
     private static let ringSize: CGFloat = 18
+
+    /// Renders `draw` into a static bitmap (1x + 2x) instead of an
+    /// `NSImage(drawingHandler:)`. Drawing-handler images re-execute their
+    /// closure on every render, and on a layer-backed NSStatusItem button
+    /// that re-execution keeps the menu-bar replicant redrawing in a tight
+    /// loop (measured at ~65% CPU sustained). A bitmap is blitted.
+    /// Dynamic colours (label/tertiaryLabel) resolve against the appearance
+    /// that is current during the bake; callers bake inside
+    /// `performAsCurrentDrawingAppearance` and re-bake on appearance change.
+    static func bakedImage(size: NSSize, template: Bool, _ draw: (NSRect) -> Void) -> NSImage {
+        let image = NSImage(size: size)
+        for scale in [1, 2] {
+            let pixelsWide = max(1, Int((size.width * CGFloat(scale)).rounded()))
+            let pixelsHigh = max(1, Int((size.height * CGFloat(scale)).rounded()))
+            guard let rep = NSBitmapImageRep(
+                bitmapDataPlanes: nil,
+                pixelsWide: pixelsWide,
+                pixelsHigh: pixelsHigh,
+                bitsPerSample: 8,
+                samplesPerPixel: 4,
+                hasAlpha: true,
+                isPlanar: false,
+                colorSpaceName: .deviceRGB,
+                bytesPerRow: 0,
+                bitsPerPixel: 0)
+            else { continue }
+            NSGraphicsContext.saveGraphicsState()
+            let context = NSGraphicsContext(bitmapImageRep: rep)!
+            NSGraphicsContext.current = context
+            context.cgContext.scaleBy(x: CGFloat(scale), y: CGFloat(scale))
+            draw(NSRect(origin: .zero, size: size))
+            NSGraphicsContext.restoreGraphicsState()
+            image.addRepresentation(rep)
+        }
+        image.isTemplate = template
+        return image
+    }
 
     /// Just the ring gauge on an 18×18pt canvas. An empty ring list draws
     /// faint placeholder tracks so "no data" keeps the same gauge shape.
@@ -18,9 +54,10 @@ enum IconRenderer {
     }
 
     /// Just the provider logo, centered in the 18×18 canvas.
+    @MainActor
     static func makeLogoIcon(tab: ProviderTab) -> NSImage {
         let outputSize = NSSize(width: 18, height: 18)
-        let image = NSImage(size: outputSize, flipped: false) { rect in
+        return bakedImage(size: outputSize, template: true) { rect in
             if let logo = ProviderLogo.image(for: tab) {
                 let side: CGFloat = 16
                 logo.draw(
@@ -30,18 +67,16 @@ enum IconRenderer {
                     operation: .sourceOver,
                     fraction: 1)
             }
-            return true
         }
-        image.isTemplate = true
-        return image
     }
 
     /// Logo on the left plus the ring gauge on the right. The logo is tinted
-    /// with the label colour at draw time so it stays legible in both menu-bar
+    /// with the label colour at bake time so it stays legible in both menu-bar
     /// appearances; the rings keep their card hues.
+    @MainActor
     static func makeLogoAndRingIcon(tab: ProviderTab, rings: [RingRenderer.Ring], stale: Bool) -> NSImage {
         let size = NSSize(width: 36, height: 18)
-        let image = NSImage(size: size, flipped: false) { rect in
+        return bakedImage(size: size, template: false) { _ in
             if let logo = ProviderLogo.image(for: tab) {
                 tintedLogo(logo).draw(
                     in: NSRect(x: 0, y: 1, width: 16, height: 16),
@@ -55,9 +90,7 @@ enum IconRenderer {
                 from: .zero,
                 operation: .sourceOver,
                 fraction: 1)
-            return true
         }
-        return image
     }
 
     /// A template logo re-coloured with the current label colour, so it stays

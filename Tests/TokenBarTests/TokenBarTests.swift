@@ -699,13 +699,16 @@ struct IconRendererTests {
             ],
             stale: false,
             size: 18)
-        let rep = NSBitmapImageRep(data: try #require(image.tiffRepresentation))!
-        // The bitmap is 18x18 points, y measured down from the top. At these
-        // remaining values every ring's progress sweeps past the bottom, so
-        // the bottom centre of each expected radius (outer 7.35, middle 4.65,
-        // inner 1.95) must be opaque.
+        // Probe the baked 1x bitmap directly. (tiffRepresentation would
+        // decode a multi-representation image at an unpredictable scale, and
+        // its rows run top-down; the raw rep's colorAt rows run bottom-up.)
+        let rep = try #require(
+            image.representations.first(where: { $0.pixelsWide == 18 }) as? NSBitmapImageRep)
+        // At these remaining values every ring's progress sweeps past the
+        // bottom, so the bottom centre of each expected radius (outer 7.35,
+        // middle 4.65, inner 1.95) must be opaque. Bottom-up rows: y = 9 - r.
         func pixel(radius: CGFloat) -> NSColor? {
-            rep.colorAt(x: 9, y: Int((9 + radius).rounded()))
+            rep.colorAt(x: 9, y: Int((9 - radius).rounded()))
         }
         for radius: CGFloat in [7.35, 4.65, 1.95] {
             let alpha = pixel(radius: radius)?.alphaComponent ?? 0
@@ -730,17 +733,21 @@ struct IconRendererTests {
     @Test("Empty compact gauge still draws faint placeholder tracks")
     func compactGaugeEmptyDrawsTracks() throws {
         let image = RingRenderer.makeMenuBarImage(rings: [], stale: true, size: 18)
-        let rep = NSBitmapImageRep(data: try #require(image.tiffRepresentation))!
-        // Bottom centre of the outer track (radius 7.35pt, y down from top).
-        let alpha = try #require(rep.colorAt(x: 9, y: 16)).alphaComponent
+        let rep = try #require(
+            image.representations.first(where: { $0.pixelsWide == 18 }) as? NSBitmapImageRep)
+        // Bottom centre of the outer track (radius 7.35pt, bottom-up row).
+        let alpha = try #require(rep.colorAt(x: 9, y: 2)).alphaComponent
         #expect(alpha > 0.05, "empty gauge should still show faint tracks")
     }
 
-    @Test("Status-item hover tracking uses AppKit selector names")
+    @Test("Status item has no hover-tracking selectors")
     @MainActor
-    func statusItemTrackingSelectorsExist() {
-        #expect(class_getInstanceMethod(StatusItemController.self, NSSelectorFromString("mouseEntered:")) != nil)
-        #expect(class_getInstanceMethod(StatusItemController.self, NSSelectorFromString("mouseExited:")) != nil)
+    func statusItemHasNoHoverTracking() {
+        // The hover zoom animation was removed with the layer-backed status
+        // button: it fed the menu-bar replicant redraw storm. Guard against
+        // the tracking area coming back.
+        #expect(class_getInstanceMethod(StatusItemController.self, NSSelectorFromString("mouseEntered:")) == nil)
+        #expect(class_getInstanceMethod(StatusItemController.self, NSSelectorFromString("mouseExited:")) == nil)
     }
 }
 

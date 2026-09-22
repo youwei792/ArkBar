@@ -49,14 +49,13 @@ enum RingRenderer {
     /// glyph always mirrors the card's data instead of implying phantom
     /// windows. An empty input draws faint placeholder tracks so "no data"
     /// still reads as the same gauge. No center text and no endpoint dots —
-    /// both would smear at menu-bar size.
+    /// both would smear at menu-bar size. Baked to a static bitmap; see
+    /// `IconRenderer.bakedImage` for why drawing-handler images are avoided.
     static func makeMenuBarImage(rings: [Ring], stale: Bool, size: CGFloat = 18) -> NSImage {
         let outputSize = NSSize(width: size, height: size)
-        let image = NSImage(size: outputSize, flipped: false) { rect in
+        return IconRenderer.bakedImage(size: outputSize, template: false) { rect in
             drawCompact(rings: rings, stale: stale, in: rect)
-            return true
         }
-        return image
     }
 
     /// Rings for the menu-bar gauge, derived from one plan: the dated windows
