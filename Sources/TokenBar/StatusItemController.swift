@@ -17,6 +17,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// The icon is also re-baked on appearance change (see init) because the
     /// gauge bakes the current appearance's colours in.
     private var iconCacheKey: String?
+    /// The light/dark resolution the current icon was baked for. The
+    /// replicant snapshot pass re-resolves the button's effectiveAppearance
+    /// many times per second; only a genuine theme switch re-bakes, or the
+    /// KVO feeds a rebuild→snapshot→appearance-change loop.
+    private var appearanceMatch: NSAppearance.Name?
 
     init(store: UsageStore, settings: AppSettings = .shared) {
         self.store = store
@@ -38,8 +43,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 .dropFirst()
                 .receive(on: RunLoop.main)
                 .sink { [weak self] _ in
-                    self?.iconCacheKey = nil
-                    self?.updateIcon()
+                    // Re-bake only when the light/dark resolution actually
+                    // changes; the status-item snapshot pass flips the
+                    // resolved appearance constantly, and rebuilding for each
+                    // flip re-triggers the snapshot (a ~117Hz feedback loop).
+                    guard let self, let button = self.statusItem.button else { return }
+                    let match = button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
+                    guard match != self.appearanceMatch else { return }
+                    self.appearanceMatch = match
+                    self.iconCacheKey = nil
+                    self.updateIcon()
                 }
                 .store(in: &cancellables)
         }
