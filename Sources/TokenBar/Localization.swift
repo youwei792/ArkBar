@@ -309,6 +309,13 @@ enum LKey: String, CaseIterable {
     case errorSenseNovaInvalidSession = "error.senseNovaInvalidSession"
     case errorSenseNovaNotSupported = "error.senseNovaNotSupported"
     case errorSenseNovaBrowserSessionMissing = "error.senseNovaBrowserSessionMissing"
+    case errorSenseNovaInteractiveAuth = "error.senseNovaInteractiveAuth"
+    case errorSenseNovaAuthRejected = "error.senseNovaAuthRejected"
+    case errorSenseNovaAuthLoop = "error.senseNovaAuthLoop"
+    case errorSenseNovaTokenEndpoint = "error.senseNovaTokenEndpoint"
+    case errorSenseNovaTokenFailed = "error.senseNovaTokenFailed"
+    case errorSenseNovaTokenUnparseable = "error.senseNovaTokenUnparseable"
+    case errorSenseNovaTokenMissing = "error.senseNovaTokenMissing"
     case errorProbeModels = "error.probeModels"
     case apiKeyNoHeaders = "apiKey.noHeaders"
     case apiKeyNoWindow = "apiKey.noWindow"
@@ -772,6 +779,13 @@ final class L10n: ObservableObject {
         add(.errorSenseNovaInvalidSession, "商汤控制台登录已失效。请重新读取浏览器登录。", "The SenseNova console sign-in expired. Re-import the browser session.")
         add(.errorSenseNovaNotSupported, "商汤 Token Plan 的额度接口尚未确认：App 已探测候选接口并把响应写入 资源库/TokenBar/sensenova-last-response.txt，请把它发给开发者完成适配。", "The SenseNova Token Plan endpoint is not confirmed yet: TokenBar probed the candidate endpoints and wrote the responses to Application Support/TokenBar/sensenova-last-response.txt — send that file to the developer to finish the integration.")
         add(.errorSenseNovaBrowserSessionMissing, "没有在浏览器中找到 sensenova.cn 登录会话。请先在浏览器登录商汤控制台。", "No sensenova.cn sign-in session was found in the browser. Sign in to the SenseNova console first.")
+        add(.errorSenseNovaInteractiveAuth, "商汤授权需要浏览器交互确认，无法在后台完成。请在浏览器重新登录控制台后再试。", "SenseNova's sign-in requires interactive approval, which cannot be completed in the background. Sign in to the console in a browser and try again.")
+        add(.errorSenseNovaAuthRejected, "商汤授权未完成：%@", "SenseNova authorization did not complete: %@")
+        add(.errorSenseNovaAuthLoop, "商汤授权跳转链过长，已中止。", "SenseNova's authorization redirect chain never resolved; giving up.")
+        add(.errorSenseNovaTokenEndpoint, "商汤令牌地址无效。", "Invalid SenseNova token endpoint.")
+        add(.errorSenseNovaTokenFailed, "商汤令牌换取失败（HTTP %d）：%@", "SenseNova token exchange failed (HTTP %d): %@")
+        add(.errorSenseNovaTokenUnparseable, "商汤令牌响应无法解析。", "The SenseNova token response could not be parsed.")
+        add(.errorSenseNovaTokenMissing, "商汤令牌响应缺少 access_token。", "The SenseNova token response carried no access_token.")
         add(.errorProbeModels, "所有探测模型均不可用", "All probe models failed")
         add(.apiKeyNoHeaders, "API Key 有效，但响应未返回请求限额头。", "API key is valid, but no request-limit headers were returned.")
         add(.apiKeyNoWindow, "API Key 有效，但未返回用量窗口。", "API key is valid, but no usage window was returned.")

@@ -6,30 +6,21 @@ import Foundation
 ///
 /// The plan page is `https://www.sensenova.cn/token-plan`, the console is
 /// `platform.sensenova.cn/console`, and the model gateway is
-/// `token.sensenova.cn/v1`. Quota is NOT reachable with the plan API key: the
-/// console's own API (see `probeCandidates`) only accepts the OAuth access
-/// token the console SPA keeps for the signed-in user, and that token can only
-/// be minted through an interactive Hydra login (`iam.sensecoreapi.cn`, SMS
-/// code) — so until that credential path is settled the provider reports the
-/// state honestly instead of inventing numbers. The session import is gated on
-/// a real sign-in cookie, and every probe response lands in
-/// `~/Library/Application Support/TokenBar/sensenova-last-response.txt`.
+/// `token.sensenova.cn/v1`. Quota comes from the console's own credit-pool
+/// meter, which accepts only the OAuth bearer token the console SPA uses — the
+/// plan API key is rejected there (`Authentication type 'apikey' is not
+/// enabled`), so `SenseNovaConsoleAuth` mints a token from the imported
+/// sign-in session and keeps it alive on its refresh token. The gateway probe
+/// below stays as the no-sign-in fallback only, since the gateway publishes no
+/// quota headers today.
 final class SenseNovaProvider: UsageProvider {
     let displayName = "商汤"
 
-    /// The Token Plan quota lives on the console's own API, discovered from the
-    /// console bundle: the dashboard component fetches
-    /// `${location.origin}/lite/console/v1/tokenplan/pool-usage` (dual credit
-    /// pools) and `…/credit-usage-trend`, through an axios layer that always
-    /// sends `Authorization: Bearer <oauth access token>`. The plan API key is
-    /// rejected there (`Authentication type 'apikey' is not enabled`) and the
-    /// console session cookie alone is not a credential for this API, so the
-    /// probes below exist to record what the endpoint says rather than to
-    /// guess paths any more.
-    private static let probeCandidates: [String] = [
-        "https://platform.sensenova.cn/lite/console/v1/tokenplan/pool-usage",
-        "https://platform.sensenova.cn/lite/console/v1/tokenplan/credit-usage-trend",
-    ]
+    /// The console dashboard's credit-pool endpoint: one entry per pool
+    /// (general + model-dedicated), each with a rolling 5-hour and 7-day
+    /// window. Discovered from the console bundle, then confirmed against a
+    /// live account.
+    static let poolUsageURL = "https://platform.sensenova.cn/lite/console/v1/tokenplan/pool-usage"
 
     private static let userAgent =
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
@@ -46,19 +37,38 @@ final class SenseNovaProvider: UsageProvider {
     func isAvailable(environment _: [String: String]) -> Bool { true }
 
     func fetch(environment: [String: String]) async throws -> ProviderSnapshot {
-        // API key first: the token gateway accepts Bearer keys; probe
-        // /v1/models and read any quota headers it returns.
+        // The console sign-in is the only source that actually carries Token
+        // Plan quota, so it is tried first; the API-key gateway probe (which
+        // publishes no quota today) only runs when no sign-in is available, so
+        // a working setup spends exactly one request per refresh.
+        let session: SenseNovaBrowserSession.Session?
+        var sessionError = UsageError.senseNovaMissingCredentials
+        do {
+            session = try await resolvedSession()
+        } catch let error as UsageError {
+            session = nil
+            sessionError = error
+        }
+
+        if let session {
+            return try await fetchConsoleQuota(session: session)
+        }
+
         let envKey = environment["SENSENOVA_API_KEY"]
         let apiKey = await MainActor.run {
             Self.trimmed(self.settings.senseNovaAPIKey) ?? Self.trimmed(envKey)
         }
-        if let apiKey {
-            if let quota = try? await fetchGatewayHeaders(apiKey: apiKey),
-               !quota.windows.isEmpty || quota.expiryDate != nil
-            {
-                return Self.makeSnapshotFromHeaders(quota)
-            }
+        if let apiKey,
+           let quota = try? await fetchGatewayHeaders(apiKey: apiKey),
+           !quota.windows.isEmpty || quota.expiryDate != nil
+        {
+            return Self.makeSnapshotFromHeaders(quota)
         }
+        throw sessionError
+    }
+
+    /// The pasted or imported console sign-in, when it really is one.
+    private func resolvedSession() async throws -> SenseNovaBrowserSession.Session {
         let manual = await MainActor.run { self.settings.senseNovaManualCookie }
         let session: SenseNovaBrowserSession.Session
         if let manual = Self.trimmed(manual) {
@@ -69,62 +79,70 @@ final class SenseNovaProvider: UsageProvider {
         } else {
             throw UsageError.senseNovaMissingCredentials
         }
-        // A pasted or imported bag without the Hydra session cookie is not a
-        // sign-in; say so instead of spending requests on it.
+        // A bag without the Hydra session cookie is not a sign-in; say so
+        // instead of spending requests on it.
         guard SenseNovaBrowserSession.hasSignInCookie(session.cookieHeader) else {
             Self.writeDiagnostic(
                 "session has no sign-in cookie (names: "
                 + SenseNovaBrowserSession.cookieNames(session.cookieHeader) + ")")
             throw UsageError.senseNovaMissingCredentials
         }
+        return session
+    }
 
-        var log: [String] = ["session: \(session.sourceLabel)"]
-        var sawAuthRejection = false
-        for urlString in Self.probeCandidates {
-            guard let url = URL(string: urlString) else { continue }
-            var request = URLRequest(url: url)
-            request.httpMethod = "GET"
-            request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-            request.timeoutInterval = 15
-            request.setValue(session.cookieHeader, forHTTPHeaderField: "Cookie")
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
-            request.setValue("https://platform.sensenova.cn/console", forHTTPHeaderField: "Referer")
-            request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
-
-            let response: HTTPResponse
-            do {
-                response = try await transport.response(for: request)
-            } catch {
-                log.append("PROBE \(urlString) network-error")
-                continue
+    /// Console quota for a signed-in session, re-minting the bearer token once
+    /// if Hydra revoked it ahead of its stated expiry.
+    private func fetchConsoleQuota(session: SenseNovaBrowserSession.Session) async throws -> ProviderSnapshot {
+        let tokens = try await SenseNovaConsoleAuth.accessToken(sessionCookie: session.cookieHeader)
+        do {
+            return try await fetchPoolUsage(tokens: tokens, authMethod: session.sourceLabel)
+        } catch let error as UsageError {
+            guard case let .apiError(status, _) = error, status == 401 || status == 403 else {
+                throw error
             }
-            let head = String(data: response.data, encoding: .utf8)?.prefix(400)
-                .replacingOccurrences(of: "\n", with: " ") ?? ""
-            log.append("PROBE \(urlString) http=\(response.statusCode) head=\(head)")
+            UsageStore.log("SenseNova console rejected the token; re-minting")
+            SenseNovaConsoleAuth.invalidateCachedToken()
+            let refreshed = try await SenseNovaConsoleAuth.accessToken(sessionCookie: session.cookieHeader)
+            return try await fetchPoolUsage(tokens: refreshed, authMethod: session.sourceLabel)
+        }
+    }
 
-            // A quota payload carries credit/usage/plan keys.
-            if response.statusCode == 200,
-               let text = String(data: response.data, encoding: .utf8),
-               text.contains("credit") || text.contains("quota")
-                   || text.contains("usage") || text.contains("pools")
-            {
-                if let parsed = Self.parseQuota(text) {
-                    Self.writeDiagnostic(log.joined(separator: "\n"))
-                    return Self.makeSnapshot(from: parsed, authMethod: session.sourceLabel)
-                }
-            }
-            // One rejection must not end the chain: the console answers 401 for
-            // every candidate that is not a cookie-authenticated API, and the
-            // real cause only shows up in the accumulated responses.
+    /// One call per refresh: the console's dual credit-pool meter.
+    private func fetchPoolUsage(tokens: SenseNovaConsoleAuth.Tokens, authMethod: String) async throws -> ProviderSnapshot {
+        guard let url = URL(string: Self.poolUsageURL) else {
+            throw UsageError.parseFailed("Invalid SenseNova console URL.")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.timeoutInterval = 15
+        request.setValue("Bearer \(tokens.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("https://platform.sensenova.cn/console", forHTTPHeaderField: "Referer")
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+
+        let response = try await transport.response(for: request)
+        guard response.statusCode == 200 else {
             if response.statusCode == 401 || response.statusCode == 403 {
-                sawAuthRejection = true
+                // Surfaced as apiError so the caller can tell a rejected token
+                // apart from a transport failure and retry once.
+                throw UsageError.apiError(statusCode: response.statusCode, message: "SenseNova console")
             }
+            let body = String(data: response.data, encoding: .utf8) ?? ""
+            Self.writeDiagnostic("pool-usage http=\(response.statusCode) head=\(body.prefix(400))")
+            throw UsageError.apiError(
+                statusCode: response.statusCode,
+                message: "SenseNova pool-usage: \(body.prefix(200))")
         }
-        Self.writeDiagnostic(log.joined(separator: "\n"))
-        if sawAuthRejection {
-            throw UsageError.senseNovaInvalidSession
+        let usage: PoolUsageResponse
+        do {
+            usage = try JSONDecoder().decode(PoolUsageResponse.self, from: response.data)
+        } catch {
+            Self.writeDiagnostic(
+                "pool-usage unparseable: \(error.localizedDescription) head=\(String(data: response.data, encoding: .utf8)?.prefix(400) ?? "")")
+            throw UsageError.parseFailed("SenseNova pool-usage: \(error.localizedDescription)")
         }
-        throw UsageError.senseNovaNotSupported
+        return Self.makeSnapshot(from: usage, authMethod: authMethod)
     }
 
     // MARK: - API-key gateway probe
@@ -200,111 +218,121 @@ final class SenseNovaProvider: UsageProvider {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    // MARK: - Parsing (placeholder until a capture lands)
+    // MARK: - Credit-pool decoding
 
-    struct QuotaSnapshot: Sendable, Equatable {
-        var usedPercent: Double?
-        var remaining: Double?
-        var total: Double?
-        var resetsAt: Date?
-        var expiryDate: Date?
+    /// Wire numbers arrive as decimal strings; accept either spelling so a
+    /// provider-side format change cannot blank the rings.
+    struct QuotaNumber: Decodable, Sendable {
+        let value: Double?
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            if let text = try? container.decode(String.self) {
+                value = Double(text)
+            } else {
+                value = try? container.decode(Double.self)
+            }
+        }
     }
 
-    /// Tolerant quota extraction across plausible field names. Returns nil
-    /// when nothing quota-like is present (a login page or an error body).
-    static func parseQuota(_ text: String) -> QuotaSnapshot? {
-        guard let data = text.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data),
-              let root = object as? [String: Any]
-        else { return nil }
+    struct PoolUsageResponse: Decodable, Sendable {
+        struct Plan: Decodable, Sendable {
+            let id: String?
+            let name: String?
+        }
 
-        func flatten(_ value: Any, depth: Int = 0) -> [String: Any] {
-            var out: [String: Any] = [:]
-            guard depth < 4 else { return out }
-            if let dict = value as? [String: Any] {
-                for (key, item) in dict {
-                    out[key] = item
-                    out.merge(flatten(item, depth: depth + 1)) { current, _ in current }
-                }
+        struct Window: Decodable, Sendable {
+            let limit: QuotaNumber?
+            let used: QuotaNumber?
+            let remaining: QuotaNumber?
+            let resetAt: QuotaNumber?
+
+            enum CodingKeys: String, CodingKey {
+                case limit, used, remaining
+                case resetAt = "reset_at"
             }
-            return out
         }
 
-        let flat = flatten(root)
-        func number(_ keys: [String]) -> Double? {
-            for key in keys {
-                switch flat[key] {
-                case let number as NSNumber:
-                    return number.doubleValue
-                case let string as String:
-                    if let value = Double(string) { return value }
-                default:
-                    continue
-                }
+        struct Pool: Decodable, Sendable {
+            let id: String?
+            let name: String?
+            let poolType: String?
+            let window5h: Window?
+            let window7d: Window?
+
+            enum CodingKeys: String, CodingKey {
+                case id, name
+                case poolType = "pool_type"
+                case window5h = "window_5h"
+                case window7d = "window_7d"
             }
-            return nil
-        }
-        func date(_ keys: [String]) -> Date? {
-            for key in keys {
-                guard let string = flat[key] as? String else { continue }
-                let formatter = ISO8601DateFormatter()
-                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                if let value = formatter.date(from: string) { return value }
-                formatter.formatOptions = [.withInternetDateTime]
-                if let value = formatter.date(from: string) { return value }
-            }
-            return nil
         }
 
-        let used = number(["used", "usedCredit", "usedCredits", "consumed", "usedQuota"])
-        let remaining = number(["remaining", "remainingCredit", "remainingCredits", "left", "balance"])
-        let total = number(["total", "totalCredit", "totalCredits", "quota", "limit", "capacity"])
-        let percent = number(["usedPercent", "percent", "usagePercent", "ratio"])
-
-        var usedPercent = percent
-        if usedPercent == nil, let used, let total, total > 0 {
-            usedPercent = used / total * 100
-        } else if usedPercent == nil, let used, let remaining {
-            usedPercent = used / (used + remaining) * 100
-        }
-        guard usedPercent != nil || remaining != nil || total != nil else { return nil }
-        return QuotaSnapshot(
-            usedPercent: usedPercent.map { min(100, max(0, $0)) },
-            remaining: remaining,
-            total: total,
-            resetsAt: date(["resetTime", "resetsAt", "resetAt"]),
-            expiryDate: date(["expireTime", "expireAt", "expiresAt", "validUntil"]))
+        let plan: Plan?
+        let pools: [Pool]?
     }
 
-    static func makeSnapshot(from quota: QuotaSnapshot, authMethod: String) -> ProviderSnapshot {
-        let windows: [UsageWindow] = {
-            guard let usedPercent = quota.usedPercent else { return [] }
-            return [UsageWindow(
-                label: "5-hour",
-                usedPercent: usedPercent,
-                used: {
-                    guard let total = quota.total, let remaining = quota.remaining else { return nil }
-                    return Int(max(0, total - remaining))
-                }(),
-                total: quota.total.map { Int($0) },
-                resetsAt: quota.resetsAt)]
-        }()
-        let plan = PlanSnapshot(
-            id: "sensenova-token-plan",
-            product: .senseNovaCodingPlan,
-            edition: "Token Plan",
-            tier: nil,
-            seatID: nil,
-            subscribed: true,
-            windows: windows,
-            expiryDate: quota.expiryDate,
-            errorMessage: nil)
+    static func parsePoolUsage(_ data: Data) throws -> PoolUsageResponse {
+        try JSONDecoder().decode(PoolUsageResponse.self, from: data)
+    }
+
+    /// One plan per credit pool, so the general pool and a model-dedicated pool
+    /// keep their own meters instead of being averaged into one misleading ring.
+    static func makeSnapshot(from usage: PoolUsageResponse, authMethod: String) -> ProviderSnapshot {
+        let plans: [PlanSnapshot] = (usage.pools ?? []).compactMap { pool in
+            var windows: [UsageWindow] = []
+            if let window = pool.window5h {
+                windows.append(Self.window(from: window, label: "5-hour"))
+            }
+            if let window = pool.window7d {
+                windows.append(Self.window(from: window, label: "Weekly"))
+            }
+            windows = windows.filter { ($0.total ?? 0) > 0 }
+            guard !windows.isEmpty else { return nil }
+            return PlanSnapshot(
+                id: "sensenova-\(pool.poolType ?? pool.id ?? "pool")",
+                product: .senseNovaCodingPlan,
+                edition: pool.name,
+                tier: nil,
+                seatID: nil,
+                subscribed: true,
+                windows: windows.sorted { $0.sortRank < $1.sortRank },
+                // `nearest_grant_expiry` is a top-up grant's expiry, not the
+                // subscription's, so it must not drive the plan badge.
+                expiryDate: nil,
+                errorMessage: nil)
+        }
         return ProviderSnapshot(
             providerName: "商汤",
             authMethod: authMethod,
-            plans: [plan],
+            plans: plans,
             updatedAt: Date(),
             errorMessage: nil)
+    }
+
+    private static func window(
+        from source: PoolUsageResponse.Window,
+        label: String) -> UsageWindow
+    {
+        let limit = source.limit?.value
+        let used = source.used?.value
+        let remaining = source.remaining?.value
+        let usedPercent: Double
+        if let limit, limit > 0, let used {
+            usedPercent = min(100, max(0, used / limit * 100))
+        } else if let limit, limit > 0, let remaining {
+            usedPercent = min(100, max(0, (limit - remaining) / limit * 100))
+        } else {
+            usedPercent = 0
+        }
+        return UsageWindow(
+            label: label,
+            usedPercent: usedPercent,
+            used: used.map { Int($0.rounded()) },
+            total: limit.map { Int($0.rounded()) },
+            resetsAt: source.resetAt?.value.flatMap {
+                $0 > 0 ? Date(timeIntervalSince1970: $0) : nil
+            })
     }
 
     static func writeDiagnostic(_ text: String) {
