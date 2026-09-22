@@ -3036,3 +3036,69 @@ struct SenseNovaConsoleAuthTests {
         #expect(value.count == 64)
     }
 }
+
+@Suite("Plan card titles")
+struct PlanCardTitleTests {
+    private static let twoPoolJSON = #"""
+    {"pools":[
+      {"pool_type":"default","name":"通用积分池",
+       "window_5h":{"limit":"60000","used":"0","remaining":"60000","reset_at":"1790111866"}},
+      {"pool_type":"dedicated","name":"Flash-Lite积分池",
+       "window_7d":{"limit":"600000","used":"0","remaining":"600000","reset_at":"1790342266"}}]}
+    """#
+
+    private func textValues(of view: NSView) -> [String] {
+        let own = (view as? NSTextField).map { [$0.stringValue] } ?? []
+        return own + view.subviews.flatMap { textValues(of: $0) }
+    }
+
+    @Test("The edition is only spelled out when it adds something")
+    func titleRule() {
+        let pool = PlanSnapshot(
+            id: "sensenova-default", product: .senseNovaCodingPlan, edition: "通用积分池",
+            tier: nil, seatID: nil, subscribed: true, windows: [], expiryDate: nil,
+            errorMessage: nil)
+        // Compared against the resolved product name so the assertion holds in
+        // either UI language.
+        let name = PlanSnapshot.Product.senseNovaCodingPlan.displayName
+        #expect(PlanCardView.title(for: pool, showsEdition: true) == "\(name) · 通用积分池")
+        // A single pool (or any other provider) keeps the bare product name.
+        #expect(PlanCardView.title(for: pool, showsEdition: false) == name)
+        // Some providers store the product name in `edition` (Kimi, OpenCode);
+        // repeating it would be noise, so an edition already inside the name
+        // is dropped even when the snapshot is ambiguous.
+        let repeated = PlanSnapshot(
+            id: "repeat", product: .senseNovaCodingPlan,
+            edition: PlanSnapshot.Product.senseNovaCodingPlan.displayName,
+            tier: nil, seatID: nil, subscribed: true, windows: [], expiryDate: nil,
+            errorMessage: nil)
+        #expect(PlanCardView.title(for: repeated, showsEdition: true)
+            == PlanCardView.title(for: repeated, showsEdition: false))
+    }
+
+    @Test("Two credit pools of one product render distinguishable cards")
+    @MainActor
+    func menuLabelsAmbiguousPlans() throws {
+        let usage = try SenseNovaProvider.parsePoolUsage(Data(Self.twoPoolJSON.utf8))
+        let snapshot = SenseNovaProvider.makeSnapshot(from: usage, authMethod: "Chrome")
+        #expect(snapshot.plans.count == 2)
+        let menu = MenuBuilder.build(MenuBuilder.State(
+            status: .ok(snapshot: snapshot),
+            selectedMenu: .provider(.sensenova),
+            visibleTabs: [.sensenova],
+            onSelectTab: { _ in },
+            onSelectSummary: nil,
+            lastUpdatedAt: nil,
+            isRefreshing: false,
+            now: Date(),
+            onRefresh: {},
+            onSettings: {},
+            onQuit: {}))
+        let cards = menu.items.compactMap { $0.view as? PlanCardView }
+        #expect(cards.count == 2)
+        let titles = cards.map { textValues(of: $0).first ?? "" }
+        #expect(titles.contains { $0.contains("通用积分池") })
+        #expect(titles.contains { $0.contains("Flash-Lite积分池") })
+        #expect(titles[0] != titles[1])
+    }
+}
