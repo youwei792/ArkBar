@@ -190,17 +190,13 @@ enum MenuBuilder {
         case let .stale(snapshot, message):
             menu.addItem(headerItem(snapshot: snapshot))
             menu.addItem(errorItem(message: "\(L(.staleData))\n\(message)", isWarning: true))
-            for plan in snapshot.plans {
-                menu.addItem(planItem(plan: plan, now: state.now))
-            }
+            addPlanCards(from: snapshot, to: menu, now: state.now)
         case let .ok(snapshot):
             menu.addItem(headerItem(snapshot: snapshot))
             if let message = snapshot.errorMessage, !message.isEmpty {
                 menu.addItem(errorItem(message: message, isWarning: true))
             }
-            for plan in snapshot.plans {
-                menu.addItem(planItem(plan: plan, now: state.now))
-            }
+            addPlanCards(from: snapshot, to: menu, now: state.now)
         }
     }
 
@@ -239,8 +235,24 @@ enum MenuBuilder {
         return item
     }
 
+    /// Adds one card per plan, labeling the edition only when the snapshot
+    /// carries several plans of the same product and the titles would otherwise
+    /// be indistinguishable.
     @MainActor
-    private static func planItem(plan: PlanSnapshot, now: Date) -> NSMenuItem {
+    private static func addPlanCards(from snapshot: ProviderSnapshot, to menu: NSMenu, now: Date) {
+        let sharedProducts = Set(Dictionary(grouping: snapshot.plans, by: \.product)
+            .filter { $0.value.count > 1 }
+            .keys)
+        for plan in snapshot.plans {
+            menu.addItem(planItem(
+                plan: plan,
+                now: now,
+                showsEdition: sharedProducts.contains(plan.product)))
+        }
+    }
+
+    @MainActor
+    private static func planItem(plan: PlanSnapshot, now: Date, showsEdition: Bool = false) -> NSMenuItem {
         let item = NSMenuItem()
         if plan.deepseek != nil {
             item.view = DeepSeekCardView(plan: plan, now: now, width: cardWidth)
@@ -251,7 +263,7 @@ enum MenuBuilder {
         } else if plan.longcat != nil {
             item.view = LongCatCardView(plan: plan, now: now, width: cardWidth)
         } else {
-            item.view = PlanCardView(plan: plan, now: now, width: cardWidth)
+            item.view = PlanCardView(plan: plan, now: now, width: cardWidth, showsEdition: showsEdition)
         }
         item.isEnabled = false
         return item

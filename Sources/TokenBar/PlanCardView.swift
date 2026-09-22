@@ -7,7 +7,7 @@ import AppKit
 /// Layout starts from the top (bounds.height - padding) and works downward.
 ///
 /// Layout:
-///   [Plan Name]                    [tier] [edition] [seat]
+///   [Plan Name · edition]          [expiry badge]
 ///   [ring]  [session  N% used]
 ///           [weekly   N% used]
 ///           [monthly  N% used]
@@ -18,14 +18,21 @@ import AppKit
 final class PlanCardView: NSView {
     private let plan: PlanSnapshot
     private let now: Date
+    private let showsEdition: Bool
 
     private let horizontalPadding: CGFloat = 14
     private let verticalPadding: CGFloat = 12
     private let ringSize: CGFloat = 132
 
-    init(plan: PlanSnapshot, now: Date, width: CGFloat) {
+    /// - Parameter showsEdition: spell the edition out in the title. Only for
+    ///   snapshots that carry several plans of the same product (SenseNova
+    ///   reports one per credit pool), where two identical-looking cards give
+    ///   the user no way to tell them apart. Elsewhere the edition repeats the
+    ///   product ("Kimi For Coding", "Go") and would just be noise.
+    init(plan: PlanSnapshot, now: Date, width: CGFloat, showsEdition: Bool = false) {
         self.plan = plan
         self.now = now
+        self.showsEdition = showsEdition
         let height = Self.computeHeight(plan)
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: height))
         build()
@@ -55,8 +62,18 @@ final class PlanCardView: NSView {
 
     // MARK: - Title row
 
+    static func title(for plan: PlanSnapshot, showsEdition: Bool) -> String {
+        let name = plan.product.displayName
+        guard showsEdition,
+              let edition = plan.edition?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !edition.isEmpty,
+              !name.localizedCaseInsensitiveContains(edition)
+        else { return name }
+        return "\(name) · \(edition)"
+    }
+
     private func buildTitleRow(atY y: inout CGFloat) {
-        let title = plan.product.displayName
+        let title = Self.title(for: plan, showsEdition: showsEdition)
         let titleField = label(title, font: .systemFont(ofSize: 13, weight: .semibold),
                                color: .labelColor)
         let badge = makeExpiryBadge()
