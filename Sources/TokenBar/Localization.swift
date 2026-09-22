@@ -31,7 +31,7 @@ enum Language: String, CaseIterable {
 }
 
 /// Localized string keys. Grouped roughly by surface (menu / settings / status).
-enum LKey: String {
+enum LKey: String, CaseIterable {
     // Menu - actions
     case refreshNow = "menu.refreshNow"
     case openArkcliLogin = "menu.openArkcliLogin"

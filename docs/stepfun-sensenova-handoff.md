@@ -51,20 +51,50 @@
 结论：**API Key 无法读取套餐额度**（三个 RPC 均返回 `api key not permitted for this method`），
 必须走控制台会话；网关 `/v1/models` 响应头也不含额度信息。
 
-### SenseNova：已冻结 ⏸
+### SenseNova：接口已定位，卡在鉴权形态 ⏸
 
-已确认的事实：
-- 控制台 `platform.sensenova.cn/console`，登录态 cookie 为
-  `platform.sensenova.cn` 上的 `oauth2_authentication_session`（OAuth2 架构，
-  数据端点在登录后懒加载的 chunk 里，匿名侧挖不到）。
-- 额度结构（页面实测）：**双积分池**——「通用积分池」与「Flash-Lite专属积分池」，
-  每池含：周余额（本周余额）、5h 窗口可用（used/limit + 重置时间）、周额度（下次重置）。
-- App 内已实现探测版 provider：导入会话成功，7 个候选端点全部未命中，
-  每次探测的响应落在 `~/Library/Application Support/TokenBar/sensenova-last-response.txt`。
+**2026-09-22 进展：额度接口已确认（从控制台前端产物逆向，非猜测）。**
 
-**解冻所需（一次约 1 分钟）**：登录控制台后 F12 → Network → 刷新 → 把返回积分数字的
-请求 URL + 响应 JSON 交给开发者，按 StepFun 同款速度收掉。Computer Use 尝试过自动
-抓取，DevTools 面板自动化成本过高，已放弃该路线。
+- 控制台是 Next.js App Router。仪表盘组件（i18n 命名空间 `consoleDashboard`）请求：
+  `${location.origin}/lite/console/v1/tokenplan/pool-usage`（**双积分池**）与
+  `…/tokenplan/credit-usage-trend`（趋势图）。前端封装在 `Em()` 里，
+  经 axios 拦截器**无条件附加 `Authorization: Bearer <access token>`**。
+- 响应外壳：`{ pools: [ … ] }`（组件直接读 `resp.pools.length` / `pools.map`，以 `pool.id` 作 key）。
+  每个 pool 的字段（从渲染代码提取）：`limit`、`remaining`、
+  `window_5h{limit, remaining, reset_at}`、`window_7d{limit, remaining, reset_at}`、
+  `nearest_grant_expiry`（epoch 秒）、`nearest_grant_expiring_balance`、`grant_balance`。
+- 域配置（bundle 内）：`platform.sensenova.cn` →
+  `signinUrl/callbackUrl=https://platform.sensenova.cn`、`sensecoreIamApi=https://iam.sensecoreapi.cn`、
+  `consoleUrl=https://console.sensecore.cn`；client_id = **`nova`**；
+  scope = `openid offline offline_access`；登录走 Hydra 授权码 + PKCE，
+  token 交换 `POST {signinUrl}/oauth2/token`。
+
+**实测的鉴权结论（都是确定性错误，不是网络问题）：**
+
+| 尝试 | 结果 |
+| --- | --- |
+| 只有控制台 cookie，无 Bearer | `401 code=16 Authorization header is required` |
+| 用已存的 `sk-*` API Key 当 Bearer | `401 Authentication type 'apikey' is not enabled` |
+| 用导入的会话 cookie 跑 PKCE（`/oauth2/auth`） | 302 到 `iam.sensecoreapi.cn` 且带 `login_challenge` → 会话不被识别，要求交互式登录（该登录需要短信验证码） |
+| 读浏览器 localStorage 里的 `access_token` | SPA 按 `nova:<clientId>:login` 存的是 **CryptoJS AES 密文**，且随 access token 过期 |
+
+**同时修掉的两个真 bug**（这才是"获取不到进度"的直接原因）：
+
+1. **导入器接受无登录态的 cookie 包**：`sensenova.cn` 域上同时存在百度统计 `Hm_lvt_*`
+   与 GrowthBook `gr_user_id`，旧代码只判断"cookie 非空"，于是**未登录也能导入"成功"**，
+   之后每个请求都带着垃圾凭据。现在要求 cookie 里必须含 `*authentication_session*`，
+   缓存里缺该 cookie 的旧包也一并作废；诊断文件记录 cookie **名称**（绝不记录值）。
+2. **探测链被第一个 401 打断**：旧代码遇到任一候选返回 401/403 立即抛"登录已失效"，
+   7 个候选只跑了第 1 个（诊断文件里只有 1 行就是这个原因）。现在跑完全部再汇总判定。
+
+**解冻剩余工作**：需要一个可程序化获取的用户级 token。按可行性排序：
+(a) 用户在浏览器真实登录后，用其 `oauth2_authentication_session` 走一遍 PKCE，
+验证 Hydra 是否对 `nova` 客户端免同意放行（若放行，TokenBar 可自持 refresh_token 并存 Keychain，
+与 StepFun 的 token 轮换同构）；(b) 商汤开放"API Key 读套餐额度"；(c) 手动粘贴 access token
+（有效期短，体验差）。当前账号状态下 (a) 无法验证：**Chrome 内该域只有
+`oauth2_authentication_csrf`（登录前置 cookie），没有 `oauth2_authentication_session`**，
+即浏览器本身没有控制台登录态。
+
 
 ## 抓包步骤（两个平台通用）
 

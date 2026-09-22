@@ -2541,6 +2541,28 @@ struct SenseNovaProviderDecodeTests {
         #expect(SenseNovaProvider.parseQuota("<html>login</html>") == nil)
         #expect(SenseNovaProvider.parseQuota("{\"code\":\"Unauthorized\"}") == nil)
     }
+
+    @Test("A cookie bag only counts as a sign-in when it carries the session cookie")
+    func signInCookieGate() {
+        // The regression: `sensenova.cn` domains also hold analytics cookies,
+        // and a logged-out import used to pass them off as a session.
+        #expect(SenseNovaBrowserSession.hasSignInCookie(
+            "oauth2_authentication_session=abc.def"))
+        #expect(SenseNovaBrowserSession.hasSignInCookie(
+            "Hm_lvt_cef229=1758; gr_user_id=1.2; oauth2_authentication_session=abc.def"))
+        #expect(!SenseNovaBrowserSession.hasSignInCookie(
+            "Hm_lvt_cef229=1758; gr_user_id=1.2"))
+        #expect(!SenseNovaBrowserSession.hasSignInCookie(
+            "oauth2_authentication_csrf=abc"))
+        #expect(!SenseNovaBrowserSession.hasSignInCookie(""))
+    }
+
+    @Test("Diagnostics list cookie names, never values")
+    func cookieNamesAreRedacted() {
+        let names = SenseNovaBrowserSession.cookieNames(
+            "gr_user_id=secret-value; Hm_lvt_x=1")
+        #expect(names == "Hm_lvt_x, gr_user_id")
+    }
 }
 
 @Suite("StepFun console RPC decode")
@@ -2869,5 +2891,26 @@ struct ZaiSubscriptionDecodeTests {
         #expect(
             ZaiAPIRegion.bigmodelCN.subscriptionListURL.absoluteString
                 == "https://open.bigmodel.cn/api/biz/subscription/list?pageNum=1&pageSize=9999")
+    }
+}
+
+@Suite("Localization completeness")
+struct LocalizationCompletenessTests {
+    /// `L10n.t` silently falls back to the raw key when a string is missing
+    /// from the table, so a deleted `add(…)` line shows up as `errorProbeModels`
+    /// in the UI instead of failing a build or a test. Sweep every key in both
+    /// languages so that can no longer pass silently.
+    @MainActor
+    @Test("Every LKey resolves to real text in both languages")
+    func allKeysAreTranslatedInBothLanguages() {
+        let previous = L10n.shared.language
+        defer { L10n.shared.language = previous }
+        for language in [Language.zh, .en] {
+            L10n.shared.language = language
+            let missing = LKey.allCases.filter { L10n.t($0) == $0.rawValue }
+            #expect(
+                missing.isEmpty,
+                "\(language) is missing \(missing.count) strings: \(missing.map(\.rawValue).prefix(8))")
+        }
     }
 }
