@@ -36,13 +36,42 @@ final class VolcAPIProvider: UsageProvider {
             throw UsageError.apiError(statusCode: response.statusCode, message: Self.errorSummary(response.data))
         }
 
-        let parsed = try Self.decodeCodingPlanUsage(from: response.data, date: Date())
-        return parsed
+        // Best effort: a subscription lookup failure leaves the rings intact and
+        // simply drops the expiry badge, rather than failing the whole tab.
+        let subscriptions = await fetchSubscriptions()
+        return try Self.decodeCodingPlanUsage(
+            from: response.data, date: Date(), subscriptions: subscriptions)
+    }
+
+    /// `ListSubscribeTrade` carries the order end date that the quota action
+    /// omits. Signed with the same AK/SK and host as the usage call.
+    private func fetchSubscriptions() async -> [VolcSubscription] {
+        var request = URLRequest(
+            url: URL(string: "https://open.volcengineapi.com/?Action=ListSubscribeTrade&Version=2024-01-01")!)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 15
+        request.httpBody = VolcSubscribeTrade.requestBody
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        VolcSigner.sign(
+            request: &request,
+            body: VolcSubscribeTrade.requestBody,
+            credentials: credentials)
+        guard let response = try? await transport.response(for: request),
+              response.statusCode == 200
+        else {
+            return []
+        }
+        return VolcSubscribeTrade.decode(response.data)
     }
 
     // MARK: - Decode (Volcengine OpenAPI shape: { Result: { Status, UpdateTimestamp, QuotaUsage: [...] } })
 
-    static func decodeCodingPlanUsage(from data: Data, date: Date) throws -> ProviderSnapshot {
+    static func decodeCodingPlanUsage(
+        from data: Data,
+        date: Date,
+        subscriptions: [VolcSubscription] = []
+    ) throws -> ProviderSnapshot {
         let payload: CodingPlanUsageResponse
         do {
             payload = try JSONDecoder().decode(CodingPlanUsageResponse.self, from: data)
@@ -77,7 +106,7 @@ final class VolcAPIProvider: UsageProvider {
             seatID: nil,
             subscribed: true,
             windows: windows.sorted { $0.sortRank < $1.sortRank },
-            expiryDate: nil,
+            expiryDate: VolcSubscribeTrade.expiryDate(for: .codingPlan, in: subscriptions),
             errorMessage: nil)
         return ProviderSnapshot(
             providerName: "Ark (AK/SK)",

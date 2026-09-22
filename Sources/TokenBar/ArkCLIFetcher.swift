@@ -8,9 +8,11 @@ import FoundationNetworking
 final class ArkCLIProvider: UsageProvider {
     let displayName = "arkcli"
     private let runner: ArkCLIRunner
+    private let subscribeRunner: ArkCLIRunner
 
-    init(runner: ArkCLIRunner = .live) {
+    init(runner: ArkCLIRunner = .live, subscribeRunner: ArkCLIRunner = .liveSubscribeTrade) {
         self.runner = runner
+        self.subscribeRunner = subscribeRunner
     }
 
     func isAvailable(environment: [String: String]) -> Bool {
@@ -24,19 +26,26 @@ final class ArkCLIProvider: UsageProvider {
         let stdout: Data = try await Task.detached(priority: .utility) {
             try runner.run(environment)
         }.value
-        let snapshot = try Self.decode(stdout: stdout, date: Date())
-
         // `usage plan` reports quota reset windows, but not the order's actual
-        // subscription end date. The profile `expires_at` field is only a local
-        // credential/cache lifetime and can be shorter than a multi-month order.
-        // Never show an estimated expiry: misleading subscription information is
-        // worse than not showing a badge at all.
-        return snapshot
+        // subscription end date — that needs a second `ListSubscribeTrade` call.
+        // The profile `expires_at` field is only a local credential lifetime, so
+        // it is never used: a wrong expiry is worse than no badge at all.
+        // Best effort: a failed lookup keeps the rings and drops the badge.
+        let subscribeRunner = self.subscribeRunner
+        let subscriptions: [VolcSubscription] = await Task.detached(priority: .utility) {
+            guard let data = try? subscribeRunner.run(environment) else { return [] }
+            return VolcSubscribeTrade.decode(data)
+        }.value
+        return try Self.decode(stdout: stdout, date: Date(), subscriptions: subscriptions)
     }
 
     // MARK: - Decoding
 
-    static func decode(stdout: Data, date: Date) throws -> ProviderSnapshot {
+    static func decode(
+        stdout: Data,
+        date: Date,
+        subscriptions: [VolcSubscription] = []
+    ) throws -> ProviderSnapshot {
         let response: ArkcliUsageResponse
         do {
             response = try JSONDecoder().decode(ArkcliUsageResponse.self, from: stdout)
@@ -97,9 +106,7 @@ final class ArkCLIProvider: UsageProvider {
                 seatID: item.seatID,
                 subscribed: true,
                 windows: windows.sorted { $0.sortRank < $1.sortRank },
-                // A quota reset is not a subscription expiry date. arkcli does
-                // not currently return a plan-expiration field here.
-                expiryDate: nil,
+                expiryDate: VolcSubscribeTrade.expiryDate(for: product, in: subscriptions),
                 errorMessage: nil))
         }
 
@@ -135,12 +142,34 @@ final class ArkCLIProvider: UsageProvider {
 // MARK: - arkcli subprocess runner
 
 struct ArkCLIRunner: Sendable {
-    /// Closure that runs `arkcli usage plan --format json` and returns stdout bytes.
-    /// Synchronous on purpose: it blocks on the subprocess. Callers offload it to a
-    /// background context via `Task.detached` so the main actor isn't blocked.
+    /// Closure that runs one arkcli command and returns its stdout bytes.
+    /// Synchronous on purpose: it blocks on the subprocess. Callers offload it
+    /// to a background context via `Task.detached` so the main actor isn't blocked.
     var run: @Sendable ([String: String]) throws -> Data
 
-    static let live = ArkCLIRunner { environment in
+    init(run: @escaping @Sendable ([String: String]) throws -> Data) {
+        self.run = run
+    }
+
+    /// Runner for a fixed arkcli argument string.
+    init(command: String) {
+        self.run = { environment in
+            try Self.execute(command: command, environment: environment)
+        }
+    }
+
+    /// `arkcli usage plan --format json` — the Coding/Agent Plan quota windows.
+    static let live = ArkCLIRunner(command: "usage plan --format json")
+
+    /// `arkcli api trade.list_subscribe` — the raw OpenAPI passthrough that
+    /// carries the subscription order's `EndTime`. Written as the console
+    /// writes it: personal scope, both plan families, every tier.
+    static let liveSubscribeTrade = ArkCLIRunner(command:
+        "api trade.list_subscribe --params "
+        + shellQuote(VolcSubscribeTrade.requestBodyJSON)
+        + " --format json")
+
+    private static func execute(command: String, environment: [String: String]) throws -> Data {
         // Run arkcli through a shell (NOT a login shell). Two reasons:
         // 1. GUI apps inherit a minimal PATH (/usr/bin:/bin:...) that omits homebrew
         //    where arkcli + node live. We pad PATH ourselves below so a non-login
@@ -162,7 +191,7 @@ struct ArkCLIRunner: Sendable {
         // -c = run command string. No -l: avoids platform misdetection from profiles.
         // Use the resolved binary rather than relying on PATH again; this makes
         // ARKCLI_PATH work for packaged GUI apps and custom installations.
-        process.arguments = ["-c", "\(Self.shellQuote(arkcliPath)) usage plan --format json"]
+        process.arguments = ["-c", "\(Self.shellQuote(arkcliPath)) \(command)"]
         // Pad PATH with the common toolchain locations so the non-login shell finds
         // both arkcli and the node interpreter arkcli's shebang needs.
         let extraPATH = [
