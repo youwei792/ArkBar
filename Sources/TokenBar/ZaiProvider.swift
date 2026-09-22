@@ -10,6 +10,10 @@ enum ZaiAPIRegion: String, CaseIterable, Sendable {
     case bigmodelCN = "bigmodel-cn"
 
     private static let quotaPath = "api/monitor/usage/quota/limit"
+    /// Console subscription orders — the same API key that authenticates the
+    /// quota endpoint also authenticates this one, so no browser session is
+    /// needed to read the plan's end date.
+    private static let subscriptionListPath = "api/biz/subscription/list?pageNum=1&pageSize=9999"
 
     var displayName: String {
         switch self {
@@ -27,6 +31,10 @@ enum ZaiAPIRegion: String, CaseIterable, Sendable {
 
     var quotaLimitURL: URL {
         URL(string: baseURLString)!.appendingPathComponent(Self.quotaPath)
+    }
+
+    var subscriptionListURL: URL {
+        URL(string: baseURLString + "/" + Self.subscriptionListPath)!
     }
 
     /// Personal Coding Plan usage dashboard, opened by the menu action.
@@ -129,6 +137,36 @@ private struct ZaiLimitRaw: Decodable {
     let remaining: Int?
     let percentage: Int
     let nextResetTime: Int?
+}
+
+// MARK: - Subscription orders
+
+private struct ZaiSubscriptionListResponse: Decodable {
+    let code: Int
+    let data: [ZaiSubscriptionRaw]?
+    let success: Bool
+
+    var isSuccess: Bool { success && code == 200 }
+}
+
+/// One subscription order from the console's `subscription/list` action.
+///
+/// `nextRenewTime` is what the console labels 有效期至: the end of the paid
+/// period, whether or not auto-renew is on.
+private struct ZaiSubscriptionRaw: Decodable {
+    let status: String?
+    let nextRenewTime: String?
+    let valid: String?
+}
+
+/// A Z.ai Coding Plan order, before the reminder engine filters by status.
+struct ZaiSubscription: Sendable, Equatable {
+    let status: String?
+    let expiryDate: Date?
+
+    var isActive: Bool {
+        status?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "VALID"
+    }
 }
 
 // MARK: - Parsed limit
@@ -234,6 +272,13 @@ final class ZaiProvider: UsageProvider {
 
     private let settings: AppSettings
     private let transport: any HTTPTransport
+    /// Order end dates move at day granularity; the subscription list is
+    /// fetched at most once per TTL (and re-fetched when region or key
+    /// changes).
+    private let subscriptionCache = TTLCache<(
+        region: ZaiAPIRegion,
+        apiKey: String,
+        list: [ZaiSubscription])>(ttl: 12 * 60 * 60)
 
     init(settings: AppSettings, transport: any HTTPTransport = defaultHTTPTransport()) {
         self.settings = settings
@@ -253,6 +298,18 @@ final class ZaiProvider: UsageProvider {
         }
 
         let snapshot = try await fetchQuota(region: region, apiKey: apiKey)
+        // The quota endpoint reports window resets only; the order's end date
+        // comes from the console subscription list. Best effort — a failure
+        // here keeps the rings rendering and only drops the expiry badge.
+        let subscriptions: [ZaiSubscription]
+        if let cached = subscriptionCache.validValue(),
+           cached.region == region, cached.apiKey == apiKey
+        {
+            subscriptions = cached.list
+        } else {
+            subscriptions = await fetchSubscriptions(region: region, apiKey: apiKey)
+            subscriptionCache.store((region: region, apiKey: apiKey, list: subscriptions))
+        }
 
         // Map Z.ai limits into ArkBar's UsageWindow, reusing the canonical
         // labels the Ark providers use so the ring tones and legend line up.
@@ -282,7 +339,7 @@ final class ZaiProvider: UsageProvider {
             seatID: nil,
             subscribed: true,
             windows: windows,
-            expiryDate: nil,
+            expiryDate: Self.expiryDate(in: subscriptions),
             errorMessage: nil)
 
         return ProviderSnapshot(
@@ -316,6 +373,77 @@ final class ZaiProvider: UsageProvider {
                 "Empty Z.ai response. Check the API region (Global vs BigModel CN) and your API key.")
         }
         return try Self.parse(data: response.data)
+    }
+
+    /// Reads the console's subscription orders. Returns an empty list on any
+    /// failure so the quota view never depends on it.
+    private func fetchSubscriptions(region: ZaiAPIRegion, apiKey: String) async -> [ZaiSubscription] {
+        var request = URLRequest(url: region.subscriptionListURL)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "accept")
+        request.timeoutInterval = Self.timeoutSeconds
+        guard let response = try? await transport.response(for: request),
+              response.statusCode == 200
+        else {
+            return []
+        }
+        return Self.parseSubscriptions(from: response.data)
+    }
+
+    /// The plan's expiry: the furthest end date among active orders.
+    static func expiryDate(in subscriptions: [ZaiSubscription]) -> Date? {
+        subscriptions.filter(\.isActive).compactMap(\.expiryDate).max()
+    }
+
+    static func parseSubscriptions(from data: Data) -> [ZaiSubscription] {
+        guard let payload = try? JSONDecoder().decode(
+            ZaiSubscriptionListResponse.self, from: data),
+            payload.isSuccess
+        else { return [] }
+        return (payload.data ?? []).map { order in
+            ZaiSubscription(
+                status: order.status,
+                expiryDate: parsePlanDate(order.nextRenewTime) ?? lastDate(in: order.valid))
+        }
+    }
+
+    /// Z.ai ships plan dates as local calendar strings; the Global site uses
+    /// `2026-10-18` while BigModel CN renders `2026年10月18日`, and the order's
+    /// `valid` range carries full timestamps. All of them mean "that day".
+    static func parsePlanDate(_ raw: String?) -> Date? {
+        guard let value = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty
+        else { return nil }
+        let formats = ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd", "yyyy年MM月dd日"]
+        for format in formats {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = .current
+            formatter.dateFormat = format
+            if let date = formatter.date(from: value) { return date }
+        }
+        // Numeric epoch (seconds or milliseconds), as a string or a bare number.
+        if let epoch = Double(value), epoch > 0 {
+            let seconds = epoch >= 1e11 ? epoch / 1000 : epoch
+            return Date(timeIntervalSince1970: seconds)
+        }
+        return nil
+    }
+
+    /// The console falls back to the *end* of the order's `valid` range when
+    /// `nextRenewTime` is absent, so the last date in the string is the one
+    /// that matters.
+    private static func lastDate(in range: String?) -> Date? {
+        guard let value = range?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty,
+              let expression = try? NSRegularExpression(pattern: #"\d{4}-\d{2}-\d{2}"#)
+        else { return nil }
+        let nsValue = value as NSString
+        let matches = expression.matches(
+            in: value, range: NSRange(location: 0, length: nsValue.length))
+        guard let last = matches.last else { return nil }
+        return parsePlanDate(nsValue.substring(with: last.range))
     }
 
     private static func window(from entry: ZaiLimitEntry, label: String) -> UsageWindow {

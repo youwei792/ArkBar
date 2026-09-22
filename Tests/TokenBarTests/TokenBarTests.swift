@@ -699,13 +699,16 @@ struct IconRendererTests {
             ],
             stale: false,
             size: 18)
-        let rep = NSBitmapImageRep(data: try #require(image.tiffRepresentation))!
-        // The bitmap is 18x18 points, y measured down from the top. At these
-        // remaining values every ring's progress sweeps past the bottom, so
-        // the bottom centre of each expected radius (outer 7.35, middle 4.65,
-        // inner 1.95) must be opaque.
+        // Probe the baked 1x bitmap directly. (tiffRepresentation would
+        // decode a multi-representation image at an unpredictable scale, and
+        // its rows run top-down; the raw rep's colorAt rows run bottom-up.)
+        let rep = try #require(
+            image.representations.first(where: { $0.pixelsWide == 18 }) as? NSBitmapImageRep)
+        // At these remaining values every ring's progress sweeps past the
+        // bottom, so the bottom centre of each expected radius (outer 7.35,
+        // middle 4.65, inner 1.95) must be opaque. Bottom-up rows: y = 9 - r.
         func pixel(radius: CGFloat) -> NSColor? {
-            rep.colorAt(x: 9, y: Int((9 + radius).rounded()))
+            rep.colorAt(x: 9, y: Int((9 - radius).rounded()))
         }
         for radius: CGFloat in [7.35, 4.65, 1.95] {
             let alpha = pixel(radius: radius)?.alphaComponent ?? 0
@@ -730,17 +733,21 @@ struct IconRendererTests {
     @Test("Empty compact gauge still draws faint placeholder tracks")
     func compactGaugeEmptyDrawsTracks() throws {
         let image = RingRenderer.makeMenuBarImage(rings: [], stale: true, size: 18)
-        let rep = NSBitmapImageRep(data: try #require(image.tiffRepresentation))!
-        // Bottom centre of the outer track (radius 7.35pt, y down from top).
-        let alpha = try #require(rep.colorAt(x: 9, y: 16)).alphaComponent
+        let rep = try #require(
+            image.representations.first(where: { $0.pixelsWide == 18 }) as? NSBitmapImageRep)
+        // Bottom centre of the outer track (radius 7.35pt, bottom-up row).
+        let alpha = try #require(rep.colorAt(x: 9, y: 2)).alphaComponent
         #expect(alpha > 0.05, "empty gauge should still show faint tracks")
     }
 
-    @Test("Status-item hover tracking uses AppKit selector names")
+    @Test("Status item has no hover-tracking selectors")
     @MainActor
-    func statusItemTrackingSelectorsExist() {
-        #expect(class_getInstanceMethod(StatusItemController.self, NSSelectorFromString("mouseEntered:")) != nil)
-        #expect(class_getInstanceMethod(StatusItemController.self, NSSelectorFromString("mouseExited:")) != nil)
+    func statusItemHasNoHoverTracking() {
+        // The hover zoom animation was removed with the layer-backed status
+        // button: it fed the menu-bar replicant redraw storm. Guard against
+        // the tracking area coming back.
+        #expect(class_getInstanceMethod(StatusItemController.self, NSSelectorFromString("mouseEntered:")) == nil)
+        #expect(class_getInstanceMethod(StatusItemController.self, NSSelectorFromString("mouseExited:")) == nil)
     }
 }
 
@@ -2681,5 +2688,155 @@ private struct BodyTransport: HTTPTransport {
                 statusCode: statusCode,
                 httpVersion: nil,
                 headerFields: nil)!)
+    }
+}
+
+// MARK: - Subscription expiry (ListSubscribeTrade / subscription-list)
+
+@Suite("VolcSubscribeTrade decode")
+struct VolcSubscribeTradeTests {
+    /// Real `ListSubscribeTrade` response captured 2026-09-22. `EndTime` is the
+    /// Ark console's 结束时间 (2026-09-24 23:59:59 +08:00).
+    private let responseJSON = #"""
+    {"ResponseMetadata":{"Action":"ListSubscribeTrade","Region":"cn-beijing","Service":"ark","Version":"2024-01-01"},
+     "Result":{"InfoList":[{
+       "AutoRenewTimes":1,"BizInfo":"pro","EnableAutoRenew":true,
+       "EndTime":"2026-09-24T15:59:59Z","InstanceID":"Ark_bd2000000869593255106",
+       "PayType":"pre","Period":"monthly","Quantity":1,"RemainAutoRenewNums":-1,
+       "ResourceName":"","ResourceType":"CodingPlan",
+       "StartTime":"2026-07-23T16:12:21Z","Status":"Running"}]}}
+    """#
+
+    private let endTime = Date(timeIntervalSince1970: 1_790_265_599)
+
+    @Test("Parses the order end date for the personal Coding Plan")
+    func parsesCodingPlanExpiry() {
+        let subscriptions = VolcSubscribeTrade.decode(Data(responseJSON.utf8))
+        #expect(subscriptions.count == 1)
+        #expect(VolcSubscribeTrade.expiryDate(for: .codingPlan, in: subscriptions) == endTime)
+        // No Agent Plan order on this account.
+        #expect(VolcSubscribeTrade.expiryDate(for: .agentPlan, in: subscriptions) == nil)
+    }
+
+    @Test("Team editions never borrow the personal order's end date")
+    func ignoresTeamProducts() {
+        let subscriptions = VolcSubscribeTrade.decode(Data(responseJSON.utf8))
+        #expect(VolcSubscribeTrade.expiryDate(for: .codingPlanTeam, in: subscriptions) == nil)
+        #expect(VolcSubscribeTrade.expiryDate(for: .agentPlanTeam, in: subscriptions) == nil)
+    }
+
+    @Test("A finished order is not an active expiry")
+    func ignoresInactiveOrders() {
+        let json = responseJSON.replacingOccurrences(of: "\"Status\":\"Running\"", with: "\"Status\":\"Finished\"")
+        let subscriptions = VolcSubscribeTrade.decode(Data(json.utf8))
+        #expect(subscriptions.count == 1)
+        #expect(VolcSubscribeTrade.expiryDate(for: .codingPlan, in: subscriptions) == nil)
+    }
+
+    @Test("An unexpected payload decodes to no subscriptions")
+    func toleratesGarbage() {
+        #expect(VolcSubscribeTrade.decode(Data("not json".utf8)).isEmpty)
+        #expect(VolcSubscribeTrade.decode(Data(#"{"Result":{"InfoList":[]}}"#.utf8)).isEmpty)
+    }
+
+    @Test("ArkCLIProvider.decode attaches the order end date to the Coding Plan")
+    func arkcliDecodeUsesSubscriptions() throws {
+        let usage = #"""
+        {"viewer":{"auth_method":"sso"},"items":[
+          {"product":"coding-plan","edition":"personal","subscribed":true,"periods":[
+            {"label":"session","percent":8,"reset_at":"2026-09-22T19:00:34+08:00"}]}]}
+        """#
+        let subscriptions = VolcSubscribeTrade.decode(Data(responseJSON.utf8))
+        let snapshot = try ArkCLIProvider.decode(
+            stdout: Data(usage.utf8), date: Date(timeIntervalSince1970: 0), subscriptions: subscriptions)
+        #expect(snapshot.plans.first?.expiryDate == endTime)
+        // Without the subscription lookup the plan stays expiry-free, as before.
+        let bare = try ArkCLIProvider.decode(stdout: Data(usage.utf8), date: Date(timeIntervalSince1970: 0))
+        #expect(bare.plans.first?.expiryDate == nil)
+    }
+
+    @Test("VolcAPIProvider.decode attaches the order end date to the Coding Plan")
+    func volcAPIDecodeUsesSubscriptions() throws {
+        let usage = #"""
+        {"Result":{"Status":"ok","UpdateTimestamp":1717000000000,"QuotaUsage":[
+          {"Level":"session","Percent":73,"ResetTimestamp":1717000000000}]}}
+        """#
+        let subscriptions = VolcSubscribeTrade.decode(Data(responseJSON.utf8))
+        let snapshot = try VolcAPIProvider.decodeCodingPlanUsage(
+            from: Data(usage.utf8), date: Date(timeIntervalSince1970: 0), subscriptions: subscriptions)
+        #expect(snapshot.plans.first?.expiryDate == endTime)
+    }
+}
+
+@Suite("ZaiProvider subscription decode")
+struct ZaiSubscriptionDecodeTests {
+    /// Real `api/biz/subscription/list` payload captured 2026-09-22 (GLM Coding
+    /// Lite, monthly, auto-renew off, 有效期至 2026-10-18).
+    private let listJSON = #"""
+    {"code":200,"msg":"Operation successful","success":true,"data":[{
+      "id":"954590","customerId":"14891774371152173","orderNo":"20260918-ebe7e3d10e6b4c288f0",
+      "productId":"product-a490e5","productName":"GLM Coding Lite","status":"VALID",
+      "purchaseTime":"2026-09-18 17:51:30","valid":"2026-10-18 10:00:00-2026-11-18 10:00:00",
+      "autoRenew":0,"currentPeriod":2,"currentRenewTime":"2026-09-18","nextRenewTime":"2026-10-18",
+      "billingCycle":"monthly","inCurrentPeriod":true,"version":"V3"}]}
+    """#
+
+    private func day(_ year: Int, _ month: Int, _ day: Int) -> Date {
+        var components = DateComponents()
+        components.year = year
+        components.month = month
+        components.day = day
+        return Calendar.current.startOfDay(for: Calendar.current.date(from: components)!)
+    }
+
+    @Test("Reads nextRenewTime as the plan expiry")
+    func readsNextRenewTime() {
+        let subscriptions = ZaiProvider.parseSubscriptions(from: Data(listJSON.utf8))
+        #expect(subscriptions.count == 1)
+        #expect(ZaiProvider.expiryDate(in: subscriptions) == day(2026, 10, 18))
+    }
+
+    @Test("Falls back to the end of the valid range")
+    func fallsBackToValidRange() {
+        let json = listJSON.replacingOccurrences(of: "\"nextRenewTime\":\"2026-10-18\",", with: "")
+        let subscriptions = ZaiProvider.parseSubscriptions(from: Data(json.utf8))
+        #expect(ZaiProvider.expiryDate(in: subscriptions) == day(2026, 11, 18))
+    }
+
+    @Test("Parses the BigModel CN Chinese date format")
+    func parsesChineseDate() {
+        let json = listJSON.replacingOccurrences(of: "\"nextRenewTime\":\"2026-10-18\"",
+                                                 with: "\"nextRenewTime\":\"2026年10月18日\"")
+        let subscriptions = ZaiProvider.parseSubscriptions(from: Data(json.utf8))
+        #expect(ZaiProvider.expiryDate(in: subscriptions) == day(2026, 10, 18))
+    }
+
+    @Test("Only VALID orders count, and the furthest one wins")
+    func filtersByStatus() {
+        let expired = """
+        {"code":200,"success":true,"data":[
+          {"status":"EXPIRED","nextRenewTime":"2026-08-01"},
+          {"status":"VALID","nextRenewTime":"2026-09-01"},
+          {"status":"VALID","nextRenewTime":"2026-12-31"}]}
+        """
+        let subscriptions = ZaiProvider.parseSubscriptions(from: Data(expired.utf8))
+        #expect(ZaiProvider.expiryDate(in: subscriptions) == day(2026, 12, 31))
+        #expect(ZaiProvider.expiryDate(in: [subscriptions[0]]) == nil)
+    }
+
+    @Test("A garbage or empty response leaves the plan without an expiry")
+    func toleratesGarbage() {
+        #expect(ZaiProvider.parseSubscriptions(from: Data("nope".utf8)).isEmpty)
+        #expect(ZaiProvider.expiryDate(in: []) == nil)
+    }
+
+    @Test("The subscription endpoint keeps the region host and its query intact")
+    func subscriptionURLs() {
+        #expect(
+            ZaiAPIRegion.global.subscriptionListURL.absoluteString
+                == "https://api.z.ai/api/biz/subscription/list?pageNum=1&pageSize=9999")
+        #expect(
+            ZaiAPIRegion.bigmodelCN.subscriptionListURL.absoluteString
+                == "https://open.bigmodel.cn/api/biz/subscription/list?pageNum=1&pageSize=9999")
     }
 }

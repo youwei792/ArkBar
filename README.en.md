@@ -120,9 +120,15 @@ export ALIYUN_CODING_PLAN_API_KEY='...'
 
 ## Subscription-expiry data
 
-Quota reset time is not subscription expiry. TokenBar displays a plan-expiry badge only when a provider exposes a verified order end date. The currently supported `arkcli usage plan` response does not provide that value, so TokenBar intentionally hides the badge instead of guessing from a reset time or local profile cache.
+Quota reset time is not subscription expiry. TokenBar displays a plan-expiry badge only when a provider exposes a verified order end date — it never guesses from a reset timestamp or the local credential cache. Verified sources today:
 
-Expiry dates also feed the **Expiry Reminders** feature: integrated plans (e.g. OpenCode Go renewal dates, LongCat pack expiries) are picked up automatically, and services TokenBar does not integrate can be added manually (name + expiry date + note) in **Settings → Expiry Reminders**.
+- **Volcengine Ark Coding / Agent Plan**: the signed OpenAPI action `ListSubscribeTrade` (queried on both the AK/SK and arkcli-SSO paths), taking `EndTime` of the `Status=Running` order — the console's "我的订阅 → 结束时间". Team editions are seat-scoped and never borrow the personal order's date.
+- **Z.ai Coding Plan**: `GET /api/biz/subscription/list` (reuses the existing plan API key, no browser sign-in needed), taking `nextRenewTime` of the `status=VALID` order — the console's "套餐概览 → 有效期至"; the end of the order's `valid` range is the fallback when that field is absent.
+- **OpenCode Go / Kimi / LongCat / StepFun / SenseNova / Alibaba Cloud**: each provider's own renewal or expiry field.
+
+The expiry lookup is best effort: a failure hides the badge and leaves the rings and menu rendering untouched.
+
+Expiry dates also feed the **Expiry Reminders** feature: integrated plans (Ark and Z.ai renewal dates, OpenCode Go renewals, LongCat pack expiries, …) are picked up automatically, and services TokenBar does not integrate can be added manually (name + expiry date + note) in **Settings → Expiry Reminders**.
 
 ## Privacy
 

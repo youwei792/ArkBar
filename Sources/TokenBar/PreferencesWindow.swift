@@ -391,9 +391,9 @@ private struct ArkPreferencesPane: View {
                         .textSelection(.enabled)
 
                     ProviderStatusRows(
-                        status: store.arkStatus,
-                        isRefreshing: store.arkIsRefreshing,
-                        lastUpdatedAt: store.arkLastUpdatedAt)
+                        status: store.status(for: .ark),
+                        isRefreshing: store.isRefreshing(for: .ark),
+                        lastUpdatedAt: store.lastUpdatedAt(for: .ark))
                 }
 
                 Section(L(.sectionActions)) {
@@ -401,7 +401,7 @@ private struct ArkPreferencesPane: View {
                         store.refresh(tab: .ark)
                     } label: {
                         Label(
-                            store.arkIsRefreshing ? L(.refreshing) : L(.refreshArk),
+                            store.isRefreshing(for: .ark) ? L(.refreshing) : L(.refreshArk),
                             systemImage: "arrow.clockwise")
                     }
 
@@ -484,12 +484,12 @@ private struct OpenCodePreferencesPane: View {
                             store.reimportOpenCodeBrowserSession()
                         } label: {
                             Label(
-                                store.opencodeIsRefreshing
+                                store.isRefreshing(for: .opencode)
                                     ? L(.refreshingStatus)
                                     : L(.reimportBrowserSession),
                                 systemImage: "person.crop.circle.badge.arrow.trianglehead.counterclockwise")
                         }
-                        .disabled(store.opencodeIsRefreshing)
+                        .disabled(store.isRefreshing(for: .opencode))
                     }
 
                     TextField(
@@ -503,9 +503,9 @@ private struct OpenCodePreferencesPane: View {
 
                 Section(L(.sectionSubscription)) {
                     ProviderStatusRows(
-                        status: store.opencodeStatus,
-                        isRefreshing: store.opencodeIsRefreshing,
-                        lastUpdatedAt: store.opencodeLastUpdatedAt)
+                        status: store.status(for: .opencode),
+                        isRefreshing: store.isRefreshing(for: .opencode),
+                        lastUpdatedAt: store.lastUpdatedAt(for: .opencode))
 
                     Label(L(.openCodeAuthoritativeHint), systemImage: "checkmark.shield")
                         .font(.caption)
@@ -518,7 +518,7 @@ private struct OpenCodePreferencesPane: View {
                         store.refresh(tab: .opencode)
                     } label: {
                         Label(
-                            store.opencodeIsRefreshing ? L(.refreshing) : L(.refreshOpenCode),
+                            store.isRefreshing(for: .opencode) ? L(.refreshing) : L(.refreshOpenCode),
                             systemImage: "arrow.clockwise")
                     }
                     Button {
@@ -584,9 +584,9 @@ private struct DeepSeekPreferencesPane: View {
                     }
 
                     ProviderStatusRows(
-                        status: store.deepseekStatus,
-                        isRefreshing: store.deepseekIsRefreshing,
-                        lastUpdatedAt: store.deepseekLastUpdatedAt)
+                        status: store.status(for: .deepseek),
+                        isRefreshing: store.isRefreshing(for: .deepseek),
+                        lastUpdatedAt: store.lastUpdatedAt(for: .deepseek))
 
                     Label(L(.deepseekCredentialsHint), systemImage: "key")
                         .font(.caption)
@@ -605,7 +605,7 @@ private struct DeepSeekPreferencesPane: View {
                         store.refresh(tab: .deepseek)
                     } label: {
                         Label(
-                            store.deepseekIsRefreshing ? L(.refreshing) : L(.refreshDeepSeek),
+                            store.isRefreshing(for: .deepseek) ? L(.refreshing) : L(.refreshDeepSeek),
                             systemImage: "arrow.clockwise")
                     }
                     Button {
@@ -675,9 +675,9 @@ private struct NebulaPreferencesPane: View {
                     }
 
                     ProviderStatusRows(
-                        status: store.nebulaStatus,
-                        isRefreshing: store.nebulaIsRefreshing,
-                        lastUpdatedAt: store.nebulaLastUpdatedAt)
+                        status: store.status(for: .nebula),
+                        isRefreshing: store.isRefreshing(for: .nebula),
+                        lastUpdatedAt: store.lastUpdatedAt(for: .nebula))
 
                     Label(L(.nebulaCredentialsHint), systemImage: "key")
                         .font(.caption)
@@ -696,18 +696,18 @@ private struct NebulaPreferencesPane: View {
                         store.reimportNebulaBrowserSession()
                     } label: {
                         Label(
-                            store.nebulaIsRefreshing
+                            store.isRefreshing(for: .nebula)
                                 ? L(.refreshingStatus)
                                 : L(.reimportNebulaBrowserSession),
                             systemImage: "person.crop.circle.badge.arrow.trianglehead.counterclockwise")
                     }
-                    .disabled(store.nebulaIsRefreshing)
+                    .disabled(store.isRefreshing(for: .nebula))
 
                     Button {
                         store.refresh(tab: .nebula)
                     } label: {
                         Label(
-                            store.nebulaIsRefreshing ? L(.refreshing) : L(.refreshNebula),
+                            store.isRefreshing(for: .nebula) ? L(.refreshing) : L(.refreshNebula),
                             systemImage: "arrow.clockwise")
                     }
 
@@ -760,9 +760,9 @@ private struct ZaiPreferencesPane: View {
                     Button(L(.saveCredential), action: saveAPIKey)
 
                     ProviderStatusRows(
-                        status: store.zaiStatus,
-                        isRefreshing: store.zaiIsRefreshing,
-                        lastUpdatedAt: store.zaiLastUpdatedAt)
+                        status: store.status(for: .zai),
+                        isRefreshing: store.isRefreshing(for: .zai),
+                        lastUpdatedAt: store.lastUpdatedAt(for: .zai))
 
                     Label(L(.zaiCredentialsHint), systemImage: "key")
                         .font(.caption)
@@ -776,7 +776,7 @@ private struct ZaiPreferencesPane: View {
                         store.refresh(tab: .zai)
                     } label: {
                         Label(
-                            store.zaiIsRefreshing ? L(.refreshing) : L(.refreshZai),
+                            store.isRefreshing(for: .zai) ? L(.refreshing) : L(.refreshZai),
                             systemImage: "arrow.clockwise")
                     }
                     Button {
@@ -837,9 +837,9 @@ private struct GrokPoolPreferencesPane: View {
                     Button(L(.saveCredential), action: saveCredentials)
 
                     ProviderStatusRows(
-                        status: store.grokPoolStatus,
-                        isRefreshing: store.grokPoolIsRefreshing,
-                        lastUpdatedAt: store.grokPoolLastUpdatedAt)
+                        status: store.status(for: .grokPool),
+                        isRefreshing: store.isRefreshing(for: .grokPool),
+                        lastUpdatedAt: store.lastUpdatedAt(for: .grokPool))
 
                     Label(L(.grokPoolCredentialsHint), systemImage: "key")
                         .font(.caption)
@@ -853,7 +853,7 @@ private struct GrokPoolPreferencesPane: View {
                         store.refresh(tab: .grokPool)
                     } label: {
                         Label(
-                            store.grokPoolIsRefreshing ? L(.refreshing) : L(.refreshGrokPool),
+                            store.isRefreshing(for: .grokPool) ? L(.refreshing) : L(.refreshGrokPool),
                             systemImage: "arrow.clockwise")
                     }
 
@@ -927,12 +927,12 @@ private struct LongCatPreferencesPane: View {
                             store.reimportLongCatBrowserSession()
                         } label: {
                             Label(
-                                store.longcatIsRefreshing
+                                store.isRefreshing(for: .longcat)
                                     ? L(.refreshingStatus)
                                     : L(.reimportLongCatBrowserSession),
                                 systemImage: "person.crop.circle.badge.arrow.trianglehead.counterclockwise")
                         }
-                        .disabled(store.longcatIsRefreshing)
+                        .disabled(store.isRefreshing(for: .longcat))
                     }
 
                     if let source = LongCatBrowserSession.cachedSourceLabel() {
@@ -944,9 +944,9 @@ private struct LongCatPreferencesPane: View {
                     }
 
                     ProviderStatusRows(
-                        status: store.longcatStatus,
-                        isRefreshing: store.longcatIsRefreshing,
-                        lastUpdatedAt: store.longcatLastUpdatedAt)
+                        status: store.status(for: .longcat),
+                        isRefreshing: store.isRefreshing(for: .longcat),
+                        lastUpdatedAt: store.lastUpdatedAt(for: .longcat))
 
                     Label(L(.longCatCredentialsHint), systemImage: "key")
                         .font(.caption)
@@ -960,7 +960,7 @@ private struct LongCatPreferencesPane: View {
                         store.refresh(tab: .longcat)
                     } label: {
                         Label(
-                            store.longcatIsRefreshing ? L(.refreshing) : L(.refreshLongCat),
+                            store.isRefreshing(for: .longcat) ? L(.refreshing) : L(.refreshLongCat),
                             systemImage: "arrow.clockwise")
                     }
                     Button {
@@ -1023,9 +1023,9 @@ private struct KimiPreferencesPane: View {
                     }
 
                     ProviderStatusRows(
-                        status: store.kimiStatus,
-                        isRefreshing: store.kimiIsRefreshing,
-                        lastUpdatedAt: store.kimiLastUpdatedAt)
+                        status: store.status(for: .kimi),
+                        isRefreshing: store.isRefreshing(for: .kimi),
+                        lastUpdatedAt: store.lastUpdatedAt(for: .kimi))
 
                     Label(L(.kimiCredentialsHint), systemImage: "key")
                         .font(.caption)
@@ -1045,19 +1045,19 @@ private struct KimiPreferencesPane: View {
                         refreshWebSessionFlag()
                     } label: {
                         Label(
-                            store.kimiIsRefreshing
+                            store.isRefreshing(for: .kimi)
                                 ? L(.refreshingStatus)
                                 : L(.reimportKimiBrowserSession),
                             systemImage: "person.crop.circle.badge.arrow.trianglehead.counterclockwise")
                     }
-                    .disabled(store.kimiIsRefreshing)
+                    .disabled(store.isRefreshing(for: .kimi))
 
                     Button {
                         store.refresh(tab: .kimi)
                         refreshWebSessionFlag()
                     } label: {
                         Label(
-                            store.kimiIsRefreshing ? L(.refreshing) : L(.refreshKimi),
+                            store.isRefreshing(for: .kimi) ? L(.refreshing) : L(.refreshKimi),
                             systemImage: "arrow.clockwise")
                     }
                     Button {
@@ -1118,9 +1118,9 @@ private struct AliyunPreferencesPane: View {
                     }
 
                     ProviderStatusRows(
-                        status: store.aliyunStatus,
-                        isRefreshing: store.aliyunIsRefreshing,
-                        lastUpdatedAt: store.aliyunLastUpdatedAt)
+                        status: store.status(for: .aliyun),
+                        isRefreshing: store.isRefreshing(for: .aliyun),
+                        lastUpdatedAt: store.lastUpdatedAt(for: .aliyun))
                 } header: {
                     Text(L(.sectionConnection))
                 } footer: {
@@ -1140,7 +1140,7 @@ private struct AliyunPreferencesPane: View {
                             store.refresh(tab: .aliyun)
                         } label: {
                             Label(
-                                store.aliyunIsRefreshing ? L(.refreshing) : L(.refreshAliyun),
+                                store.isRefreshing(for: .aliyun) ? L(.refreshing) : L(.refreshAliyun),
                                 systemImage: "arrow.clockwise")
                         }
                         .buttonStyle(.bordered)
@@ -1204,12 +1204,12 @@ private struct StepFunPreferencesPane: View {
                         store.reimportStepFunBrowserSession()
                     } label: {
                         Label(
-                            store.stepFunIsRefreshing
+                            store.isRefreshing(for: .stepfun)
                                 ? L(.refreshingStatus)
                                 : L(.reimportStepFunBrowserSession),
                             systemImage: "person.crop.circle.badge.arrow.trianglehead.counterclockwise")
                     }
-                    .disabled(store.stepFunIsRefreshing)
+                    .disabled(store.isRefreshing(for: .stepfun))
 
                     if let source = StepFunBrowserSession.cachedSession()?.sourceLabel {
                         Label(String(format: L(.browserSession), source), systemImage: "globe")
@@ -1220,9 +1220,9 @@ private struct StepFunPreferencesPane: View {
                     }
 
                     ProviderStatusRows(
-                        status: store.stepFunStatus,
-                        isRefreshing: store.stepFunIsRefreshing,
-                        lastUpdatedAt: store.stepFunLastUpdatedAt)
+                        status: store.status(for: .stepfun),
+                        isRefreshing: store.isRefreshing(for: .stepfun),
+                        lastUpdatedAt: store.lastUpdatedAt(for: .stepfun))
 
                     Label(L(.stepFunCredentialsHint), systemImage: "key")
                         .font(.caption)
@@ -1236,7 +1236,7 @@ private struct StepFunPreferencesPane: View {
                         store.refresh(tab: .stepfun)
                     } label: {
                         Label(
-                            store.stepFunIsRefreshing ? L(.refreshing) : L(.refreshStepFun),
+                            store.isRefreshing(for: .stepfun) ? L(.refreshing) : L(.refreshStepFun),
                             systemImage: "arrow.clockwise")
                     }
                     Button {
@@ -1302,12 +1302,12 @@ private struct SenseNovaPreferencesPane: View {
                         store.reimportSenseNovaBrowserSession()
                     } label: {
                         Label(
-                            store.senseNovaIsRefreshing
+                            store.isRefreshing(for: .sensenova)
                                 ? L(.refreshingStatus)
                                 : L(.reimportSenseNovaBrowserSession),
                             systemImage: "person.crop.circle.badge.arrow.trianglehead.counterclockwise")
                     }
-                    .disabled(store.senseNovaIsRefreshing)
+                    .disabled(store.isRefreshing(for: .sensenova))
 
                     if let source = SenseNovaBrowserSession.cachedSession()?.sourceLabel {
                         Label(String(format: L(.browserSession), source), systemImage: "globe")
@@ -1318,9 +1318,9 @@ private struct SenseNovaPreferencesPane: View {
                     }
 
                     ProviderStatusRows(
-                        status: store.senseNovaStatus,
-                        isRefreshing: store.senseNovaIsRefreshing,
-                        lastUpdatedAt: store.senseNovaLastUpdatedAt)
+                        status: store.status(for: .sensenova),
+                        isRefreshing: store.isRefreshing(for: .sensenova),
+                        lastUpdatedAt: store.lastUpdatedAt(for: .sensenova))
 
                     Label(L(.senseNovaCredentialsHint), systemImage: "key")
                         .font(.caption)
@@ -1334,7 +1334,7 @@ private struct SenseNovaPreferencesPane: View {
                         store.refresh(tab: .sensenova)
                     } label: {
                         Label(
-                            store.senseNovaIsRefreshing ? L(.refreshing) : L(.refreshSenseNova),
+                            store.isRefreshing(for: .sensenova) ? L(.refreshing) : L(.refreshSenseNova),
                             systemImage: "arrow.clockwise")
                     }
                     Button {

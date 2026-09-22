@@ -9,11 +9,19 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let settings: AppSettings
     private let persistentMenu = NSMenu()
     private var cancellables = Set<AnyCancellable>()
-    private var hoverTrackingArea: NSTrackingArea?
     private weak var activeRefreshView: RefreshMenuItemView?
     private var isMenuOpen = false
     private var pendingMenuRebuild = false
     private var pendingSelectedMenu: MenuSelection?
+    /// Inputs of the last icon build; rebuilds are skipped while unchanged.
+    /// The icon is also re-baked on appearance change (see init) because the
+    /// gauge bakes the current appearance's colours in.
+    private var iconCacheKey: String?
+    /// The light/dark resolution the current icon was baked for. The
+    /// replicant snapshot pass re-resolves the button's effectiveAppearance
+    /// many times per second; only a genuine theme switch re-bakes, or the
+    /// KVO feeds a rebuild→snapshot→appearance-change loop.
+    private var appearanceMatch: NSAppearance.Name?
 
     init(store: UsageStore, settings: AppSettings = .shared) {
         self.store = store
@@ -28,130 +36,39 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         if let button = statusItem.button {
             button.imagePosition = .imageLeft
-            button.wantsLayer = true
             // The ring gauge bakes the current appearance's colours in, so it
             // must be re-rendered when the menu-bar appearance changes
             // (template icons used to re-tint for free).
             button.publisher(for: \.effectiveAppearance)
                 .dropFirst()
                 .receive(on: RunLoop.main)
-                .sink { [weak self] _ in self?.updateIcon() }
+                .sink { [weak self] _ in
+                    // Re-bake only when the light/dark resolution actually
+                    // changes; the status-item snapshot pass flips the
+                    // resolved appearance constantly, and rebuilding for each
+                    // flip re-triggers the snapshot (a ~117Hz feedback loop).
+                    guard let self, let button = self.statusItem.button else { return }
+                    let match = button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
+                    guard match != self.appearanceMatch else { return }
+                    self.appearanceMatch = match
+                    self.iconCacheKey = nil
+                    self.updateIcon()
+                }
                 .store(in: &cancellables)
-            let trackingArea = NSTrackingArea(
-                rect: button.bounds,
-                options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
-                owner: self,
-                userInfo: nil)
-            button.addTrackingArea(trackingArea)
-            hoverTrackingArea = trackingArea
         }
         applyStatusItemLength()
 
-        // Subscribe to all provider status changes so the icon and menu stay
+        // Subscribe to all provider state changes so the icon and menu stay
         // fresh regardless of which tab or summary mode is selected.
-        store.$arkStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
-            .store(in: &cancellables)
-        store.$opencodeStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
-            .store(in: &cancellables)
-        store.$deepseekStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
-            .store(in: &cancellables)
-        store.$nebulaStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
-            .store(in: &cancellables)
-        store.$zaiStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
-            .store(in: &cancellables)
-        store.$kimiStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
-            .store(in: &cancellables)
-        store.$grokPoolStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
-            .store(in: &cancellables)
-        store.$longcatStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
-            .store(in: &cancellables)
-        store.$aliyunStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
-            .store(in: &cancellables)
-        store.$stepFunStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
-            .store(in: &cancellables)
-        store.$senseNovaStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
+        store.$states
+            .sink { [weak self] _ in
+                self?.updateIconAndMenu()
+                self?.updateActiveRefreshView()
+            }
             .store(in: &cancellables)
         // Reminder list changes rebuild the menu (the Expiring section).
         store.reminderScheduler.$items
             .sink { [weak self] _ in self?.scheduleMenuRebuildIfOpen() }
-            .store(in: &cancellables)
-        // Refresh view updates.
-        store.$arkLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$opencodeLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$deepseekLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$nebulaLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$zaiLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$kimiLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$grokPoolLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$longcatLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$aliyunLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$stepFunLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$senseNovaLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$arkIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$opencodeIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$deepseekIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$nebulaIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$zaiIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$kimiIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$grokPoolIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$longcatIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$aliyunIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$stepFunIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$senseNovaIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
             .store(in: &cancellables)
         // Selection change.
         settings.$selectedMenu
@@ -299,26 +216,39 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             for: effectiveStatus, tab: tab, remaining: remaining,
             stale: stale, showBalance: showBalance)
         let rings = menuBarRings(for: effectiveStatus)
+        // Rebuilding the icon marks the status-item replicant dirty and
+        // triggers an AppKit snapshot pass, so identical inputs must not
+        // rebuild. (Before this guard, every rebuild fed the redraw storm.)
+        let ringsKey = rings
+            .map { "\($0.id):\(Int($0.remainingPercent.rounded()))" }
+            .joined(separator: ",")
+        let cacheKey = "\(settings.displayMode.rawValue)|\(tab.rawValue)|\(valueText)|\(stale)|\(ringsKey)"
+        guard cacheKey != iconCacheKey else { return }
+        iconCacheKey = cacheKey
 
-        switch settings.displayMode {
-        case .iconOnly:
-            button.image = IconRenderer.makeRingIcon(rings: rings, stale: stale)
-            button.title = ""
-        case .iconAndPercent:
-            button.image = IconRenderer.makeRingIcon(rings: rings, stale: stale)
-            setPercentTitle(valueText, on: button)
-        case .percentOnly:
-            button.image = nil
-            setPercentTitle(valueText, on: button)
-        case .logoOnly:
-            button.image = IconRenderer.makeLogoIcon(tab: tab)
-            button.title = ""
-        case .logoAndPercent:
-            button.image = IconRenderer.makeLogoIcon(tab: tab)
-            setPercentTitle(valueText, on: button)
-        case .logoAndRings:
-            button.image = IconRenderer.makeLogoAndRingIcon(tab: tab, rings: rings, stale: stale)
-            button.title = ""
+        // Bake under the button's appearance so dynamic colours (track greys,
+        // tinted logo) resolve for the menu bar the icon actually lives in.
+        button.effectiveAppearance.performAsCurrentDrawingAppearance {
+            switch settings.displayMode {
+            case .iconOnly:
+                button.image = IconRenderer.makeRingIcon(rings: rings, stale: stale)
+                button.title = ""
+            case .iconAndPercent:
+                button.image = IconRenderer.makeRingIcon(rings: rings, stale: stale)
+                setPercentTitle(valueText, on: button)
+            case .percentOnly:
+                button.image = nil
+                setPercentTitle(valueText, on: button)
+            case .logoOnly:
+                button.image = IconRenderer.makeLogoIcon(tab: tab)
+                button.title = ""
+            case .logoAndPercent:
+                button.image = IconRenderer.makeLogoIcon(tab: tab)
+                setPercentTitle(valueText, on: button)
+            case .logoAndRings:
+                button.image = IconRenderer.makeLogoAndRingIcon(tab: tab, rings: rings, stale: stale)
+                button.title = ""
+            }
         }
     }
 
@@ -402,30 +332,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         pendingMenuRebuild = false
         pendingSelectedMenu = nil
         updateIcon()
-    }
-
-    @objc(mouseEntered:) func mouseEntered(_ event: NSEvent) {
-        animateStatusButton(hovered: true)
-    }
-
-    @objc(mouseExited:) func mouseExited(_ event: NSEvent) {
-        animateStatusButton(hovered: false)
-    }
-
-    private func animateStatusButton(hovered: Bool) {
-        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
-              let layer = statusItem.button?.layer
-        else { return }
-        let target = hovered
-            ? CATransform3DMakeScale(1.045, 1.045, 1)
-            : CATransform3DIdentity
-        let animation = CABasicAnimation(keyPath: "transform")
-        animation.fromValue = layer.presentation()?.value(forKey: "transform") ?? layer.transform
-        animation.toValue = target
-        animation.duration = 0.16
-        animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        layer.transform = target
-        layer.add(animation, forKey: "tokenbar.statusHover")
     }
 
     private func rebuildMenu(selectedMenu explicitMenu: MenuSelection? = nil) {
