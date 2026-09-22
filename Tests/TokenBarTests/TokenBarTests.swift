@@ -119,6 +119,37 @@ struct ArkCLIDecodeTests {
         #expect(snapshot.menuBarWindow?.remainingPercent == 100)
     }
 
+    @Test("Plans without any session-rank window still show a menu-bar percent")
+    func fallsBackToTightestWhenNoSessionWindow() throws {
+        // StepFun's Step Plan Plus is credit-only: the snapshot carries just a
+        // monthly credit pool, so the status item used to render "–" while the
+        // card right below it showed the percentage.
+        let json = #"""
+        {"viewer":{"auth_method":"sso"},"items":[
+          {"product":"coding-plan","subscribed":true,
+           "periods":[{"label":"weekly","percent":20},{"label":"monthly","percent":60}]}
+        ]}
+        """#
+        let snapshot = try ArkCLIProvider.decode(stdout: json.data(using: .utf8)!, date: Date())
+        #expect(snapshot.sessionWindow == nil)
+        // The tightest (most consumed) window is the binding constraint.
+        #expect(snapshot.menuBarWindow?.label == "Monthly")
+        #expect(snapshot.menuBarWindow?.remainingPercent == 40)
+    }
+
+    @Test("An exhausted pool still outranks the no-session fallback")
+    func exhaustedStillWinsWithoutSessionWindow() throws {
+        let json = #"""
+        {"viewer":{"auth_method":"sso"},"items":[
+          {"product":"coding-plan","subscribed":true,
+           "periods":[{"label":"weekly","percent":100},{"label":"monthly","percent":10}]}
+        ]}
+        """#
+        let snapshot = try ArkCLIProvider.decode(stdout: json.data(using: .utf8)!, date: Date())
+        #expect(snapshot.menuBarWindow?.label == "Weekly")
+        #expect(snapshot.menuBarWindow?.remainingPercent == 0)
+    }
+
     @Test("auth_method=none throws not-authenticated")
     func throwsWhenNotAuthenticated() throws {
         let json = #"{"viewer":{"auth_method":"none"},"items":[]}"#
