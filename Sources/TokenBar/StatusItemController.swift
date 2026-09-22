@@ -45,111 +45,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         applyStatusItemLength()
 
-        // Subscribe to all provider status changes so the icon and menu stay
+        // Subscribe to all provider state changes so the icon and menu stay
         // fresh regardless of which tab or summary mode is selected.
-        store.$arkStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
-            .store(in: &cancellables)
-        store.$opencodeStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
-            .store(in: &cancellables)
-        store.$deepseekStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
-            .store(in: &cancellables)
-        store.$nebulaStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
-            .store(in: &cancellables)
-        store.$zaiStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
-            .store(in: &cancellables)
-        store.$kimiStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
-            .store(in: &cancellables)
-        store.$grokPoolStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
-            .store(in: &cancellables)
-        store.$longcatStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
-            .store(in: &cancellables)
-        store.$aliyunStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
-            .store(in: &cancellables)
-        store.$stepFunStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
-            .store(in: &cancellables)
-        store.$senseNovaStatus
-            .sink { [weak self] _ in self?.updateIconAndMenu() }
+        store.$states
+            .sink { [weak self] _ in
+                self?.updateIconAndMenu()
+                self?.updateActiveRefreshView()
+            }
             .store(in: &cancellables)
         // Reminder list changes rebuild the menu (the Expiring section).
         store.reminderScheduler.$items
             .sink { [weak self] _ in self?.scheduleMenuRebuildIfOpen() }
-            .store(in: &cancellables)
-        // Refresh view updates.
-        store.$arkLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$opencodeLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$deepseekLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$nebulaLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$zaiLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$kimiLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$grokPoolLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$longcatLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$aliyunLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$stepFunLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$senseNovaLastUpdatedAt
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$arkIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$opencodeIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$deepseekIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$nebulaIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$zaiIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$kimiIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$grokPoolIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$longcatIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$aliyunIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$stepFunIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
-            .store(in: &cancellables)
-        store.$senseNovaIsRefreshing
-            .sink { [weak self] _ in self?.updateActiveRefreshView() }
             .store(in: &cancellables)
         // Selection change.
         settings.$selectedMenu
