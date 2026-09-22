@@ -9,6 +9,9 @@ final class ArkCLIProvider: UsageProvider {
     let displayName = "arkcli"
     private let runner: ArkCLIRunner
     private let subscribeRunner: ArkCLIRunner
+    /// Order end dates move at day granularity; the extra subprocess runs at
+    /// most once per TTL instead of on every refresh.
+    private let subscriptionCache = TTLCache<[VolcSubscription]>(ttl: 12 * 60 * 60)
 
     init(runner: ArkCLIRunner = .live, subscribeRunner: ArkCLIRunner = .liveSubscribeTrade) {
         self.runner = runner
@@ -31,11 +34,17 @@ final class ArkCLIProvider: UsageProvider {
         // The profile `expires_at` field is only a local credential lifetime, so
         // it is never used: a wrong expiry is worse than no badge at all.
         // Best effort: a failed lookup keeps the rings and drops the badge.
-        let subscribeRunner = self.subscribeRunner
-        let subscriptions: [VolcSubscription] = await Task.detached(priority: .utility) {
-            guard let data = try? subscribeRunner.run(environment) else { return [] }
-            return VolcSubscribeTrade.decode(data)
-        }.value
+        let subscriptions: [VolcSubscription]
+        if let cached = subscriptionCache.validValue() {
+            subscriptions = cached
+        } else {
+            let subscribeRunner = self.subscribeRunner
+            subscriptions = await Task.detached(priority: .utility) {
+                guard let data = try? subscribeRunner.run(environment) else { return [] }
+                return VolcSubscribeTrade.decode(data)
+            }.value
+            subscriptionCache.store(subscriptions)
+        }
         return try Self.decode(stdout: stdout, date: Date(), subscriptions: subscriptions)
     }
 

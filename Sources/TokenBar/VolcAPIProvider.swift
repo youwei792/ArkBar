@@ -9,6 +9,9 @@ final class VolcAPIProvider: UsageProvider {
     let displayName = "Ark (AK/SK)"
     private let credentials: VolcCredentials
     private let transport: HTTPTransport
+    /// Order end dates move at day granularity; the signed lookup runs at
+    /// most once per TTL instead of on every refresh.
+    private let subscriptionCache = TTLCache<[VolcSubscription]>(ttl: 12 * 60 * 60)
 
     init(credentials: VolcCredentials, transport: HTTPTransport = HTTPClientTransport()) {
         self.credentials = credentials
@@ -38,7 +41,13 @@ final class VolcAPIProvider: UsageProvider {
 
         // Best effort: a subscription lookup failure leaves the rings intact and
         // simply drops the expiry badge, rather than failing the whole tab.
-        let subscriptions = await fetchSubscriptions()
+        let subscriptions: [VolcSubscription]
+        if let cached = subscriptionCache.validValue() {
+            subscriptions = cached
+        } else {
+            subscriptions = await fetchSubscriptions()
+            subscriptionCache.store(subscriptions)
+        }
         return try Self.decodeCodingPlanUsage(
             from: response.data, date: Date(), subscriptions: subscriptions)
     }

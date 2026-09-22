@@ -272,6 +272,13 @@ final class ZaiProvider: UsageProvider {
 
     private let settings: AppSettings
     private let transport: any HTTPTransport
+    /// Order end dates move at day granularity; the subscription list is
+    /// fetched at most once per TTL (and re-fetched when region or key
+    /// changes).
+    private let subscriptionCache = TTLCache<(
+        region: ZaiAPIRegion,
+        apiKey: String,
+        list: [ZaiSubscription])>(ttl: 12 * 60 * 60)
 
     init(settings: AppSettings, transport: any HTTPTransport = defaultHTTPTransport()) {
         self.settings = settings
@@ -294,7 +301,15 @@ final class ZaiProvider: UsageProvider {
         // The quota endpoint reports window resets only; the order's end date
         // comes from the console subscription list. Best effort — a failure
         // here keeps the rings rendering and only drops the expiry badge.
-        let subscriptions = await fetchSubscriptions(region: region, apiKey: apiKey)
+        let subscriptions: [ZaiSubscription]
+        if let cached = subscriptionCache.validValue(),
+           cached.region == region, cached.apiKey == apiKey
+        {
+            subscriptions = cached.list
+        } else {
+            subscriptions = await fetchSubscriptions(region: region, apiKey: apiKey)
+            subscriptionCache.store((region: region, apiKey: apiKey, list: subscriptions))
+        }
 
         // Map Z.ai limits into ArkBar's UsageWindow, reusing the canonical
         // labels the Ark providers use so the ring tones and legend line up.
