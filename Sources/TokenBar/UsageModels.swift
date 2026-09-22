@@ -257,7 +257,14 @@ struct ProviderSnapshot: Sendable, Equatable {
         {
             return exhausted
         }
-        return sessionWindow
+        if let session = sessionWindow {
+            return session
+        }
+        // Credit-only plans have no session-rank window at all (StepFun's Step
+        // Plan Plus reports just a monthly credit pool), which used to leave
+        // the status item blank while the card below it showed a percentage.
+        // The tightest window is the binding constraint either way.
+        return tightestWindow
     }
 }
 
