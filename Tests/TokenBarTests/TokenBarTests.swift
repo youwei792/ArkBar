@@ -2893,3 +2893,24 @@ struct ZaiSubscriptionDecodeTests {
                 == "https://open.bigmodel.cn/api/biz/subscription/list?pageNum=1&pageSize=9999")
     }
 }
+
+@Suite("Localization completeness")
+struct LocalizationCompletenessTests {
+    /// `L10n.t` silently falls back to the raw key when a string is missing
+    /// from the table, so a deleted `add(…)` line shows up as `errorProbeModels`
+    /// in the UI instead of failing a build or a test. Sweep every key in both
+    /// languages so that can no longer pass silently.
+    @MainActor
+    @Test("Every LKey resolves to real text in both languages")
+    func allKeysAreTranslatedInBothLanguages() {
+        let previous = L10n.shared.language
+        defer { L10n.shared.language = previous }
+        for language in [Language.zh, .en] {
+            L10n.shared.language = language
+            let missing = LKey.allCases.filter { L10n.t($0) == $0.rawValue }
+            #expect(
+                missing.isEmpty,
+                "\(language) is missing \(missing.count) strings: \(missing.map(\.rawValue).prefix(8))")
+        }
+    }
+}
