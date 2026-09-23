@@ -3102,3 +3102,50 @@ struct PlanCardTitleTests {
         #expect(titles[0] != titles[1])
     }
 }
+
+@Suite("OpenCode Go console endpoints")
+struct OpenCodeConsoleEndpointTests {
+    /// Real `GET /console/api/orgs` payload (2026-09-23): the stable,
+    /// cookie-authenticated source of the org id the status call needs.
+    private let orgsJSON = #"[{"id":"wrk_01KXY1RAYTMS0CNHPXQTHPD6ZQ","name":"Default"}]"#
+
+    @Test("The org list yields the workspace id the status call is scoped with")
+    func parsesOrgs() throws {
+        let ids = OpenCodeGoProvider.parseWorkspaceIDs(from: orgsJSON)
+        #expect(ids == ["wrk_01KXY1RAYTMS0CNHPXQTHPD6ZQ"])
+    }
+
+    @Test("The card header is an identity, not a menu action")
+    @MainActor
+    func providerNameIsNotALinkLabel() throws {
+        // `L(.openCodeGo)` is the "打开 OpenCode Go" menu item; using it as the
+        // provider name made the header read like a link to open the site.
+        let status = #"""
+        {"access":{"endsAt":"2026-10-11T04:39:30.000Z","meters":{
+          "fiveHour":{"resetsAt":"2026-09-21T16:59:05.633Z","limitMicroCents":"1200000000","usedMicroCents":"21101705"},
+          "week":{"resetsAt":"2026-09-28T00:00:00.000Z","limitMicroCents":"3000000000","usedMicroCents":"70412590"},
+          "month":{"limitMicroCents":"6000000000","usedMicroCents":"3307818513"}}}}
+        """#
+        let snapshot = OpenCodeGoProvider.makeProviderSnapshot(
+            try OpenCodeGoProvider.decodeUsagePage(status, now: Date(timeIntervalSince1970: 1_790_000_000)),
+            authMethod: "Chrome Profile 3")
+        #expect(snapshot.providerName == "OpenCode Go")
+        #expect(snapshot.providerName != L(.openCodeGo))
+        #expect(snapshot.authMethod == "Chrome Profile 3")
+    }
+}
+
+@Suite("Shared error wording")
+struct SharedErrorWordingTests {
+    @MainActor
+    @Test("The generic API error does not name a single provider")
+    func apiErrorIsProviderNeutral() {
+        // 12 providers throw `.apiError`; it used to say "方舟 API 错误",
+        // so OpenCode Go's failure blamed Ark in the menu.
+        let message = UsageError.apiError(statusCode: 400, message: "OpenCode Go").errorDescription ?? ""
+        #expect(!message.contains("方舟"))
+        #expect(!message.lowercased().contains("ark api"))
+        #expect(message.contains("400"))
+        #expect(message.contains("OpenCode Go"))
+    }
+}

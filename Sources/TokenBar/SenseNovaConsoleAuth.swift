@@ -364,13 +364,19 @@ private enum OAuthSession {
         }
     }
 
-    private final class RedirectCapturingDelegate: NSObject, URLSessionDataDelegate {
+    /// URLSession calls the delegate from its own queue while the caller awaits
+    /// on another, so the hop state is guarded; `@unchecked Sendable` follows the
+    /// same NSLock pattern as the GrokPool token cache.
+    private final class RedirectCapturingDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+        private let lock = NSLock()
         private var continuation: CheckedContinuation<(Data, HTTPURLResponse?), Error>?
         private var body = Data()
         private var redirect: HTTPURLResponse?
 
         func attach(_ continuation: CheckedContinuation<(Data, HTTPURLResponse?), Error>) {
+            lock.lock()
             self.continuation = continuation
+            lock.unlock()
         }
 
         func urlSession(
@@ -382,21 +388,30 @@ private enum OAuthSession {
         {
             // Stop here: the caller replays the chain itself so the Set-Cookie
             // headers of each hop can be paired with the next request.
+            lock.lock()
             redirect = response
+            lock.unlock()
             completionHandler(nil)
         }
 
         func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+            lock.lock()
             body.append(data)
+            lock.unlock()
         }
 
         func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-            defer { continuation = nil }
+            lock.lock()
+            let pending = continuation
+            let data = body
+            let seen = redirect ?? task.response as? HTTPURLResponse
+            continuation = nil
+            lock.unlock()
             if let error {
-                continuation?.resume(throwing: error)
+                pending?.resume(throwing: error)
                 return
             }
-            continuation?.resume(returning: (body, redirect ?? task.response as? HTTPURLResponse))
+            pending?.resume(returning: (data, seen))
         }
     }
 }
