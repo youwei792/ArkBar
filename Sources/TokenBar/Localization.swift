@@ -316,6 +316,7 @@ enum LKey: String, CaseIterable {
     case errorSenseNovaTokenFailed = "error.senseNovaTokenFailed"
     case errorSenseNovaTokenUnparseable = "error.senseNovaTokenUnparseable"
     case errorSenseNovaTokenMissing = "error.senseNovaTokenMissing"
+    case errorInsecureEndpoint = "error.insecureEndpoint"
     case errorProbeModels = "error.probeModels"
     case apiKeyNoHeaders = "apiKey.noHeaders"
     case apiKeyNoWindow = "apiKey.noWindow"
@@ -788,6 +789,7 @@ final class L10n: ObservableObject {
         add(.errorSenseNovaTokenFailed, "商汤令牌换取失败（HTTP %d）：%@", "SenseNova token exchange failed (HTTP %d): %@")
         add(.errorSenseNovaTokenUnparseable, "商汤令牌响应无法解析。", "The SenseNova token response could not be parsed.")
         add(.errorSenseNovaTokenMissing, "商汤令牌响应缺少 access_token。", "The SenseNova token response carried no access_token.")
+        add(.errorInsecureEndpoint, "自定义地址不安全：%@。凭据会发送到该地址，因此只允许 HTTPS（本地 http://localhost 例外）。", "Insecure custom endpoint: %@. Credentials are sent to this address, so only HTTPS is allowed (http://localhost is exempt).")
         add(.errorProbeModels, "所有探测模型均不可用", "All probe models failed")
         add(.apiKeyNoHeaders, "API Key 有效，但响应未返回请求限额头。", "API key is valid, but no request-limit headers were returned.")
         add(.apiKeyNoWindow, "API Key 有效，但未返回用量窗口。", "API key is valid, but no usage window was returned.")

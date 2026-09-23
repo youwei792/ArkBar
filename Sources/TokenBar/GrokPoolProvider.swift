@@ -127,10 +127,10 @@ final class GrokPoolProvider: UsageProvider {
     }
 
     func fetch(environment: [String: String]) async throws -> ProviderSnapshot {
-        let baseURL = await MainActor.run {
+        let configured = await MainActor.run {
             Self.normalizedBaseURL(self.settings.grokPoolBaseURL)
-        } ?? GrokPoolCredentialResolver.baseURL(environment: environment)
-            ?? Self.defaultBaseURL
+        }
+        let baseURL = try Self.resolveBaseURL(configured: configured, environment: environment)
         let username = await MainActor.run {
             Self.trimmed(self.settings.grokPoolUsername)
         } ?? GrokPoolCredentialResolver.username(environment: environment)
@@ -295,6 +295,20 @@ final class GrokPoolProvider: UsageProvider {
             throw UsageError.networkError("Invalid GrokPool base URL")
         }
         return url
+    }
+
+    /// Picks the relay address and refuses to send credentials anywhere they
+    /// would leak: a configured-but-insecure value is an error rather than a
+    /// silent fallback to the default host, which would query the wrong relay.
+    static func resolveBaseURL(configured: String?, environment: [String: String]) throws -> String {
+        for candidate in [configured, GrokPoolCredentialResolver.baseURL(environment: environment)] {
+            guard let value = candidate else { continue }
+            guard SecureEndpoint.isTrustworthy(value) else {
+                throw UsageError.insecureEndpoint(url: value)
+            }
+            return value
+        }
+        return defaultBaseURL
     }
 
     static func normalizedBaseURL(_ raw: String) -> String? {

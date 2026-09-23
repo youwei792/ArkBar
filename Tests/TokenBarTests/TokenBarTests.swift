@@ -3156,3 +3156,69 @@ struct SharedErrorWordingTests {
         #expect(message.contains("OpenCode Go"))
     }
 }
+
+@Suite("Custom endpoint policy")
+struct SecureEndpointTests {
+    @Test("HTTPS anywhere, plain HTTP only on loopback")
+    func trustworthiness() {
+        #expect(SecureEndpoint.isTrustworthy("https://apinebula.ai"))
+        #expect(SecureEndpoint.isTrustworthy("https://relay.example.com:8443/v1"))
+        #expect(SecureEndpoint.isTrustworthy("http://localhost:3000"))
+        #expect(SecureEndpoint.isTrustworthy("http://127.0.0.1"))
+        // The leak this guards: these providers send a browser cookie or the
+        // administrator password to whatever address Settings holds.
+        #expect(!SecureEndpoint.isTrustworthy("http://relay.example.com"))
+        #expect(!SecureEndpoint.isTrustworthy("ftp://relay.example.com"))
+        #expect(!SecureEndpoint.isTrustworthy("relay.example.com"))
+        #expect(!SecureEndpoint.isTrustworthy(""))
+    }
+
+    /// Asserts the resolver rejects `value` and that the rejection names the
+    /// offending address (UsageError is not Equatable, so the message is the
+    /// observable signal).
+    private func expectRejection(_ value: String, _ resolve: () throws -> String) throws {
+        do {
+            let resolved = try resolve()
+            Issue.record("expected a rejection, got \(resolved)")
+        } catch let error as UsageError {
+            guard case .insecureEndpoint = error else {
+                Issue.record("expected insecureEndpoint, got \(error)")
+                return
+            }
+            #expect((error.errorDescription ?? "").contains(value))
+        }
+    }
+
+    @Test("A configured insecure relay is an error, not a silent fallback")
+    func nebulaResolution() throws {
+        #expect(try NebulaProvider.resolveBaseURL(
+            configured: "https://my.relay.dev", environment: [:]) == "https://my.relay.dev")
+        try expectRejection("http://my.relay.dev") {
+            try NebulaProvider.resolveBaseURL(configured: "http://my.relay.dev", environment: [:])
+        }
+    }
+
+    @Test("Unset values still fall through to env then default")
+    func fallbackOrder() throws {
+        #expect(try NebulaProvider.resolveBaseURL(
+            configured: nil,
+            environment: ["NEBULA_BASE_URL": "http://127.0.0.1:8080"]) == "http://127.0.0.1:8080")
+        #expect(try NebulaProvider.resolveBaseURL(configured: nil, environment: [:])
+            == NebulaProvider.defaultBaseURL)
+        try expectRejection("http://evil.example") {
+            try NebulaProvider.resolveBaseURL(
+                configured: nil, environment: ["NEBULA_BASE_URL": "http://evil.example"])
+        }
+    }
+
+    @Test("GrokPool applies the same policy to its admin credentials")
+    func grokPoolResolution() throws {
+        #expect(try GrokPoolProvider.resolveBaseURL(
+            configured: "https://grok.internal", environment: [:]) == "https://grok.internal")
+        try expectRejection("http://grok.internal") {
+            try GrokPoolProvider.resolveBaseURL(configured: "http://grok.internal", environment: [:])
+        }
+        #expect(try GrokPoolProvider.resolveBaseURL(configured: nil, environment: [:])
+            == GrokPoolProvider.defaultBaseURL)
+    }
+}
