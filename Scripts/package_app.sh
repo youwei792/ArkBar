@@ -43,18 +43,34 @@ cp "$ROOT/Resources/Info.plist" "$CONTENTS/Info.plist"
 # Icon.
 cp "$ROOT/Resources/AppIcon.icns" "$RESOURCES/AppIcon.icns"
 
-# SwiftPM resource bundle (provider logos). swift build places it under .build/
-# with the package's module name; copy it into the app so Bundle.module stays
-# resolvable from the installed bundle.
-RESOURCE_BUNDLE="$BUILD_DIR/arm64-apple-macosx/release/TokenBar_TokenBar.bundle"
-if [[ ! -d "$RESOURCE_BUNDLE" ]]; then
-    RESOURCE_BUNDLE=$(find "$BUILD_DIR" -type d -name "TokenBar_TokenBar.bundle" -not -path "*.xctest*" | head -1)
+# SwiftPM resource bundle (provider logos). Resolve it next to the binary that
+# was just built. `.build` also keeps bundles from older scratch-path layouts,
+# and those go stale silently: an existence check passes while the copy inside
+# is missing every logo added since. Pick by logo count instead, and refuse to
+# install rather than ship an app with blank provider icons.
+count_logos() { find "$1" -type f -name "ProviderIcon-*" 2>/dev/null | wc -l | tr -d ' '; }
+
+REQUIRED_LOGOS=$(find "$ROOT/Sources/TokenBar/Resources" -type f -name "ProviderIcon-*" | wc -l | tr -d ' ')
+RESOURCE_BUNDLE="$(dirname "$BIN")/TokenBar_TokenBar.bundle"
+BUILT_LOGOS=$(count_logos "$RESOURCE_BUNDLE")
+
+if [[ "$BUILT_LOGOS" -lt "$REQUIRED_LOGOS" ]]; then
+    while IFS= read -r -d '' candidate; do
+        CANDIDATE_LOGOS=$(count_logos "$candidate")
+        if [[ "$CANDIDATE_LOGOS" -gt "$BUILT_LOGOS" ]]; then
+            RESOURCE_BUNDLE="$candidate"
+            BUILT_LOGOS="$CANDIDATE_LOGOS"
+        fi
+    done < <(find "$BUILD_DIR" -type d -name "TokenBar_TokenBar.bundle" -not -path "*.xctest*" -print0)
 fi
-if [[ -z "$RESOURCE_BUNDLE" || ! -d "$RESOURCE_BUNDLE" ]]; then
-    echo "ERROR: TokenBar_TokenBar.bundle not found; refusing to install an app without provider logos." >&2
+
+if [[ "$BUILT_LOGOS" -lt "$REQUIRED_LOGOS" ]]; then
+    echo "ERROR: $RESOURCE_BUNDLE holds $BUILT_LOGOS provider logos but Sources/TokenBar/Resources has $REQUIRED_LOGOS." >&2
+    echo "       A stale build product would drop the newest logos; refusing to install." >&2
     exit 1
 fi
 cp -R "$RESOURCE_BUNDLE" "$RESOURCES/"
+echo "Provider logos: $BUILT_LOGOS/$REQUIRED_LOGOS from $RESOURCE_BUNDLE"
 
 # License notices travel with the installed binary as well as the source.
 cp "$ROOT/LICENSE" "$RESOURCES/LICENSE.txt"
