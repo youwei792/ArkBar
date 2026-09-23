@@ -359,7 +359,14 @@ struct MenuBuilderTests {
     }
 
     @Test("Countdown formats days/hours/minutes")
+    @MainActor
     func countdown() {
+        // The countdown is localized, so the expected strings only hold in one
+        // language: the test used to inherit the host's locale and failed on
+        // CI runners that resolve Chinese ("5分" instead of "in 5m").
+        let previousLanguage = L10n.shared.language
+        L10n.shared.language = .en
+        defer { L10n.shared.language = previousLanguage }
         let now = Date(timeIntervalSince1970: 1_000_000)
         #expect(MenuBuilder.countdown(from: now, to: now.addingTimeInterval(30)) == "in 0m")
         #expect(MenuBuilder.countdown(from: now, to: now.addingTimeInterval(5 * 60)) == "in 5m")
