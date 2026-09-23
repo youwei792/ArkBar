@@ -161,23 +161,30 @@ final class UsageStore: ObservableObject {
                 self?.refresh(tab: .ark)
             }
             .store(in: &cancellables)
-        // Credential changes refresh their tab.
+        // Credential changes refresh their tab. Free-text fields are bound
+        // straight to the setting, so without a debounce every keystroke writes
+        // UserDefaults and starts a refresh; Keychain-backed values only change on
+        // Save and need none.
+        func typed(_ publisher: some Publisher<String, Never>) -> AnyPublisher<Void, Never> {
+            publisher
+                .debounce(for: .milliseconds(500), scheduler: RunLoop.main)
+                .map { _ in () }
+                .eraseToAnyPublisher()
+        }
         let credentialTriggers: [(AnyPublisher<Void, Never>, ProviderTab)] = [
             (settings.$opencodeCookie.map { _ in () }.eraseToAnyPublisher(), .opencode),
             (settings.$opencodeCookieSource.map { _ in () }.eraseToAnyPublisher(), .opencode),
-            (settings.$opencodeWorkspaceID
-                .debounce(for: .milliseconds(350), scheduler: RunLoop.main)
-                .map { _ in () }.eraseToAnyPublisher(), .opencode),
+            (typed(settings.$opencodeWorkspaceID), .opencode),
             (settings.$deepseekApiKey.map { _ in () }.eraseToAnyPublisher(), .deepseek),
             (settings.$deepseekPlatformToken.map { _ in () }.eraseToAnyPublisher(), .deepseek),
             (settings.$nebulaAPIKey.map { _ in () }.eraseToAnyPublisher(), .nebula),
-            (settings.$nebulaBaseURL.map { _ in () }.eraseToAnyPublisher(), .nebula),
+            (typed(settings.$nebulaBaseURL), .nebula),
             (settings.$zaiAPIKey.map { _ in () }.eraseToAnyPublisher(), .zai),
             (settings.$zaiRegion.map { _ in () }.eraseToAnyPublisher(), .zai),
             (settings.$kimiAPIKey.map { _ in () }.eraseToAnyPublisher(), .kimi),
             (settings.$grokPoolUsername.map { _ in () }.eraseToAnyPublisher(), .grokPool),
             (settings.$grokPoolPassword.map { _ in () }.eraseToAnyPublisher(), .grokPool),
-            (settings.$grokPoolBaseURL.map { _ in () }.eraseToAnyPublisher(), .grokPool),
+            (typed(settings.$grokPoolBaseURL), .grokPool),
             (settings.$longcatCookie.map { _ in () }.eraseToAnyPublisher(), .longcat),
             (settings.$longcatCookieSource.map { _ in () }.eraseToAnyPublisher(), .longcat),
             (settings.$aliyunAPIKey.map { _ in () }.eraseToAnyPublisher(), .aliyun),
