@@ -314,6 +314,7 @@ enum UsageError: LocalizedError, Sendable {
     case senseNovaMissingCredentials
     case senseNovaInvalidSession
     case senseNovaNotSupported
+    case insecureEndpoint(url: String)
 
     var errorDescription: String? {
         switch self {
@@ -387,6 +388,8 @@ enum UsageError: LocalizedError, Sendable {
             L(.errorSenseNovaInvalidSession)
         case .senseNovaNotSupported:
             L(.errorSenseNovaNotSupported)
+        case let .insecureEndpoint(url):
+            String(format: L(.errorInsecureEndpoint), url)
         }
     }
 }

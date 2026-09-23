@@ -139,10 +139,10 @@ final class NebulaProvider: UsageProvider {
     }
 
     func fetch(environment: [String: String]) async throws -> ProviderSnapshot {
-        let baseURL = await MainActor.run {
+        let configured = await MainActor.run {
             Self.normalizedBaseURL(self.settings.nebulaBaseURL)
-        } ?? NebulaCredentialResolver.baseURL(environment: environment)
-            ?? Self.defaultBaseURL
+        }
+        let baseURL = try Self.resolveBaseURL(configured: configured, environment: environment)
         let apiKey = await MainActor.run {
             Self.trimmed(self.settings.nebulaAPIKey)
         } ?? NebulaCredentialResolver.apiKey(environment: environment)
@@ -370,6 +370,20 @@ final class NebulaProvider: UsageProvider {
             throw UsageError.networkError("Invalid Nebula base URL")
         }
         return url
+    }
+
+    /// Picks the relay address and refuses to send credentials anywhere they
+    /// would leak: a configured-but-insecure value is an error rather than a
+    /// silent fallback to the default host, which would query the wrong relay.
+    static func resolveBaseURL(configured: String?, environment: [String: String]) throws -> String {
+        for candidate in [configured, NebulaCredentialResolver.baseURL(environment: environment)] {
+            guard let value = candidate else { continue }
+            guard SecureEndpoint.isTrustworthy(value) else {
+                throw UsageError.insecureEndpoint(url: value)
+            }
+            return value
+        }
+        return defaultBaseURL
     }
 
     static func normalizedBaseURL(_ raw: String) -> String? {
