@@ -743,7 +743,9 @@ final class L10n: ObservableObject {
         add(.errorArkcliFailed, "arkcli 查询失败 (%d)：%@", "arkcli usage failed (%d): %@")
         add(.errorMissingCredentials, "缺少火山引擎凭证。请设置 AK/SK，或登录 arkcli。", "Missing Volcengine credentials. Set AK/SK or sign in to arkcli.")
         add(.errorNetwork, "网络错误：%@", "Network error: %@")
-        add(.errorAPI, "方舟 API 错误 (%d)：%@", "Ark API error (%d): %@")
+        // Shared by every provider's apiError, so it must not name one of them:
+        // OpenCode Go's 400 used to read "方舟 API 错误".
+        add(.errorAPI, "接口返回错误 (%d)：%@", "API error (%d): %@")
         add(.errorParse, "无法解析响应：%@", "Failed to parse response: %@")
         add(.errorNoPlan, "未找到有效的 Coding 或 Agent 套餐用量：%@", "No active Coding or Agent Plan usage: %@")
         add(.errorOpenCodeCookieMissing, "未配置有效的 OpenCode Go 手动 Cookie。", "No valid manual OpenCode Go Cookie is configured.")

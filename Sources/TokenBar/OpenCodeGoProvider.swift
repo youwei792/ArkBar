@@ -12,10 +12,13 @@ import FoundationNetworking
 final class OpenCodeGoProvider: UsageProvider {
     let displayName = "OpenCode Go"
 
-    private static let baseURL = URL(string: "https://opencode.ai")!
-    private static let userReferer = URL(string: "https://opencode.ai/")!
-    private static let serverURL = URL(string: "https://opencode.ai/_server")!
-    private static let workspacesServerID = "def39973159c7f0483d8793a822b8dbb10d067e12c65455fcb4608459ba0234f"
+    private static let consoleReferer = URL(string: "https://opencode.ai/console")!
+    /// The console's own org list: cookie-authenticated and stable. The route
+    /// this replaced called a Next.js server action by its build hash, which
+    /// rotates on every deploy — once it started answering 500, the org id
+    /// stayed nil and the status endpoint's unscoped 400 looked like a mystery
+    /// API outage.
+    private static let orgsURL = URL(string: "https://opencode.ai/console/api/orgs")!
     private static let userAgent =
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
@@ -103,12 +106,25 @@ final class OpenCodeGoProvider: UsageProvider {
         // shell with no usage data in the HTML; the numbers come from the
         // console app's JSON API instead.
         var orgID = Self.normalizeWorkspaceID(workspaceOverride)
+        var resolutionError: Error?
         if orgID == nil {
-            orgID = try? await resolveWorkspaceID(cookieHeader: credential.cookieHeader)
+            do {
+                orgID = try await resolveWorkspaceID(cookieHeader: credential.cookieHeader)
+            } catch {
+                resolutionError = error
+            }
         }
-        let text = try await fetchGoStatus(
-            cookieHeader: credential.cookieHeader,
-            orgID: orgID)
+        let text: String
+        do {
+            text = try await fetchGoStatus(
+                cookieHeader: credential.cookieHeader,
+                orgID: orgID)
+        } catch {
+            // An unscoped request answers 400, which says nothing useful; the
+            // resolution failure is the actual reason.
+            if orgID == nil, let resolutionError { throw resolutionError }
+            throw error
+        }
         let usage = try Self.decodeUsagePage(text, now: Date())
         return Self.makeProviderSnapshot(usage, authMethod: credential.sourceLabel)
     }
@@ -141,59 +157,27 @@ final class OpenCodeGoProvider: UsageProvider {
         }
     }
 
-    /// Resolves the workspace/org id from the legacy server-fn endpoint (still
-    /// alive and cookie-authenticated) so the console call can scope itself.
+    /// Resolves the org/workspace id the status call must be scoped with.
     private func resolveWorkspaceID(cookieHeader: String) async throws -> String {
-        let getText = try await fetchServerText(
-            serverID: Self.workspacesServerID,
-            args: nil,
-            method: "GET",
-            referer: Self.userReferer,
-            cookieHeader: cookieHeader)
-        if Self.looksSignedOut(getText) { throw UsageError.openCodeCookieInvalid }
-        if let id = Self.parseWorkspaceIDs(from: getText).first { return id }
-
-        let postText = try await fetchServerText(
-            serverID: Self.workspacesServerID,
-            args: "[]",
-            method: "POST",
-            referer: Self.userReferer,
-            cookieHeader: cookieHeader)
-        if Self.looksSignedOut(postText) { throw UsageError.openCodeCookieInvalid }
-        if let id = Self.parseWorkspaceIDs(from: postText).first { return id }
-        throw UsageError.parseFailed("OpenCode Go workspace ID is missing. Set it manually in Settings.")
+        let text = try await fetchOrgText(cookieHeader: cookieHeader)
+        if Self.looksSignedOut(text) { throw UsageError.openCodeCookieInvalid }
+        guard let id = Self.parseWorkspaceIDs(from: text).first else {
+            throw UsageError.parseFailed("OpenCode Go workspace ID is missing. Set it manually in Settings.")
+        }
+        return id
     }
 
-    private func fetchServerText(
-        serverID: String,
-        args: String?,
-        method: String,
-        referer: URL,
-        cookieHeader: String) async throws -> String
-    {
-        var components = URLComponents(url: Self.serverURL, resolvingAgainstBaseURL: false)
-        if method == "GET" {
-            var items = [URLQueryItem(name: "id", value: serverID)]
-            if let args, !args.isEmpty { items.append(URLQueryItem(name: "args", value: args)) }
-            components?.queryItems = items
-        }
-        guard let url = components?.url else {
-            throw UsageError.parseFailed("Invalid OpenCode Go server URL.")
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = method
+    /// GETs the console org list with the same session header as every other
+    /// console call.
+    private func fetchOrgText(cookieHeader: String) async throws -> String {
+        var request = URLRequest(url: Self.orgsURL)
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         request.timeoutInterval = 20
         request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
-        request.setValue(serverID, forHTTPHeaderField: "X-Server-Id")
-        request.setValue("server-fn:\(UUID().uuidString)", forHTTPHeaderField: "X-Server-Instance")
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
-        request.setValue(Self.baseURL.absoluteString, forHTTPHeaderField: "Origin")
-        request.setValue(referer.absoluteString, forHTTPHeaderField: "Referer")
-        request.setValue("text/javascript, application/json;q=0.9, */*;q=0.8", forHTTPHeaderField: "Accept")
-        if method != "GET", let args {
-            request.httpBody = Data(args.utf8)
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        }
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(Self.consoleReferer.absoluteString, forHTTPHeaderField: "Referer")
         return try await responseText(for: request)
     }
 
@@ -472,7 +456,7 @@ final class OpenCodeGoProvider: UsageProvider {
             expiryDate: usage.expiryDate,
             errorMessage: nil)
         return ProviderSnapshot(
-            providerName: L(.openCodeGo),
+            providerName: L(.productOpenCodeGo),
             authMethod: authMethod,
             plans: [plan],
             updatedAt: usage.updatedAt,
@@ -496,7 +480,7 @@ final class OpenCodeGoProvider: UsageProvider {
         return nil
     }
 
-    private static func parseWorkspaceIDs(from text: String) -> [String] {
+    static func parseWorkspaceIDs(from text: String) -> [String] {
         let direct = regexMatches(pattern: #"id\s*:\s*\"(wrk_[^\"]+)\""#, text: text)
         if !direct.isEmpty { return unique(direct) }
         if let data = text.data(using: .utf8), let object = try? JSONSerialization.jsonObject(with: data) {
