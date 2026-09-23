@@ -178,6 +178,32 @@ struct ArkCLIRunner: Sendable {
         + shellQuote(VolcSubscribeTrade.requestBodyJSON)
         + " --format json")
 
+    /// The environment handed to any arkcli subprocess.
+    ///
+    /// The parent process can carry every provider's credentials in its
+    /// environment — each is read as an override, and launching the app from a
+    /// shell exports whatever that shell had set — and arkcli is third-party
+    /// node code that may itself exec more. arkcli needs a PATH that reaches
+    /// homebrew plus its own config directory, so nothing else is passed.
+    static func sandboxedEnvironment(from environment: [String: String]) -> [String: String] {
+        let extraPATH = [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "\(NSHomeDirectory())/.volta/bin",
+        ].joined(separator: ":")
+        let inheritedPATH = environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        var sandboxed: [String: String] = [
+            // HOME is where arkcli keeps its SSO credential; a GUI launch always
+            // has one, but fall back rather than hand it an empty config path.
+            "HOME": environment["HOME"] ?? NSHomeDirectory(),
+            "PATH": "\(extraPATH):\(inheritedPATH)",
+        ]
+        for key in ["USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL"] {
+            if let value = environment[key] { sandboxed[key] = value }
+        }
+        return sandboxed
+    }
+
     private static func execute(command: String, environment: [String: String]) throws -> Data {
         // Run arkcli through a shell (NOT a login shell). Two reasons:
         // 1. GUI apps inherit a minimal PATH (/usr/bin:/bin:...) that omits homebrew
@@ -201,17 +227,7 @@ struct ArkCLIRunner: Sendable {
         // Use the resolved binary rather than relying on PATH again; this makes
         // ARKCLI_PATH work for packaged GUI apps and custom installations.
         process.arguments = ["-c", "\(Self.shellQuote(arkcliPath)) \(command)"]
-        // Pad PATH with the common toolchain locations so the non-login shell finds
-        // both arkcli and the node interpreter arkcli's shebang needs.
-        let extraPATH = [
-            "/opt/homebrew/bin",
-            "/usr/local/bin",
-            "\(NSHomeDirectory())/.volta/bin",
-        ].joined(separator: ":")
-        var env = environment
-        let inheritedPATH = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-        env["PATH"] = "\(extraPATH):\(inheritedPATH)"
-        process.environment = env
+        process.environment = Self.sandboxedEnvironment(from: environment)
 
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()

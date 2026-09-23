@@ -1678,6 +1678,10 @@ private struct DiagnosticsPreferencesPane: View {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: path)
             process.arguments = ["--version"]
+            // Same allowlist as the usage calls: the diagnostic must not hand
+            // the CLI the parent's other credentials either.
+            process.environment = ArkCLIRunner.sandboxedEnvironment(
+                from: ProcessInfo.processInfo.environment)
             let pipe = Pipe()
             process.standardOutput = pipe
             process.standardError = pipe

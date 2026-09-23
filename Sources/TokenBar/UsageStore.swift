@@ -112,6 +112,10 @@ final class UsageStore: ObservableObject {
         var successLog: @Sendable (ProviderSnapshot) -> String = { "\($0.plans.count) plan(s)" }
         /// Label for log lines.
         var logName: String
+        /// Whether the generic runner logs a success line. The Ark track logs
+        /// each provider attempt inside its own loop, so a second summary line
+        /// would just repeat it.
+        var logsSuccess = true
 
         static func defaultErrorMessage(_ error: Error) -> String {
             if let usageError = error as? UsageError {
@@ -274,7 +278,10 @@ final class UsageStore: ObservableObject {
             }
             arkProviders.append(ArkCLIProvider())
         }
-        next[.ark] = Track(fetch: Self.arkFetch(providers: arkProviders), logName: "Ark")
+        next[.ark] = Track(
+            fetch: Self.arkFetch(providers: arkProviders),
+            logName: "Ark",
+            logsSuccess: false)
 
         let openCode = OpenCodeGoProvider(settings: settings)
         next[.opencode] = singleTrack(
@@ -517,7 +524,9 @@ final class UsageStore: ObservableObject {
         let track = tracks[tab]
         do {
             let snapshot = try await fetch(environment)
-            Self.log("✓ \(track?.logName ?? "provider"): \(track?.successLog(snapshot) ?? "\(snapshot.plans.count) plan(s)")")
+            if track?.logsSuccess != false {
+                Self.log("✓ \(track?.logName ?? "provider"): \(track?.successLog(snapshot) ?? "\(snapshot.plans.count) plan(s)")")
+            }
             mutate(tab) { state in
                 state.lastUpdatedAt = Date()
                 state.status = .ok(snapshot: snapshot)
