@@ -21,6 +21,7 @@
 .env.*
 .swiftpm/
 .zcode/
+.zcodeignore
 ArkBar.app/
 DerivedData/
 TokenBar.app
