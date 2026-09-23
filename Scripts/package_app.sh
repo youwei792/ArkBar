@@ -46,12 +46,15 @@ cp "$ROOT/Resources/AppIcon.icns" "$RESOURCES/AppIcon.icns"
 # SwiftPM resource bundle (provider logos). swift build places it under .build/
 # with the package's module name; copy it into the app so Bundle.module stays
 # resolvable from the installed bundle.
-RESOURCE_BUNDLE=$(find "$BUILD_DIR" -name "TokenBar_TokenBar.bundle" -maxdepth 4 2>/dev/null | head -1)
-if [[ -n "$RESOURCE_BUNDLE" ]]; then
-    cp -R "$RESOURCE_BUNDLE" "$RESOURCES/"
-else
-    echo "WARN: TokenBar_TokenBar.bundle not found; provider logos will be missing." >&2
+RESOURCE_BUNDLE="$BUILD_DIR/arm64-apple-macosx/release/TokenBar_TokenBar.bundle"
+if [[ ! -d "$RESOURCE_BUNDLE" ]]; then
+    RESOURCE_BUNDLE=$(find "$BUILD_DIR" -type d -name "TokenBar_TokenBar.bundle" -not -path "*.xctest*" | head -1)
 fi
+if [[ -z "$RESOURCE_BUNDLE" || ! -d "$RESOURCE_BUNDLE" ]]; then
+    echo "ERROR: TokenBar_TokenBar.bundle not found; refusing to install an app without provider logos." >&2
+    exit 1
+fi
+cp -R "$RESOURCE_BUNDLE" "$RESOURCES/"
 
 # License notices travel with the installed binary as well as the source.
 cp "$ROOT/LICENSE" "$RESOURCES/LICENSE.txt"
@@ -70,30 +73,39 @@ echo "=== Codesign ==="
 SIGN_IDENTITY="${TOKENBAR_SIGN_IDENTITY:-Apple Development: 1751121595@qq.com (CBDAK7YPZ4)}"
 if security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
     echo "Signing with: $SIGN_IDENTITY"
-    codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DST" 2>&1 || {
-        echo "WARN: stable signing failed; falling back to ad-hoc." >&2
-        codesign --force --deep --sign - "$APP_DST" 2>&1 || true
-    }
+    # No silent ad-hoc fallback: an ad-hoc signature changes on every build and
+    # silently revokes the Full Disk Access and browser-cookie Keychain grants
+    # the user already approved. If the chosen identity fails, stop.
+    codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DST"
 else
     echo "No stable identity '$SIGN_IDENTITY' found; signing ad-hoc."
-    echo "TIP: to stop repeated Full Disk Access / Keychain re-authorization,"
-    echo "     create a codesigning identity and pass TOKENBAR_SIGN_IDENTITY."
-    codesign --force --deep --sign - "$APP_DST" 2>&1 || true
+    echo "NOTE: ad-hoc signatures change every build, so Full Disk Access and"
+    echo "      browser-cookie Keychain grants must be re-approved after a rebuild."
+    echo "TIP: create a codesigning identity and pass TOKENBAR_SIGN_IDENTITY."
+    codesign --force --deep --sign - "$APP_DST"
 fi
 
-echo "=== Verifying bundle ==="
-codesign --verify --deep --strict "$APP_DST" 2>&1 || true
+# Gate installation on verification. This used to be `|| true`, so an unsigned
+# or broken bundle was installed anyway and then had its quarantine stripped:
+# a security failure was reported as success.
+echo "=== Verifying signature ==="
+codesign --verify --deep --strict "$APP_DST"
+codesign -dvv "$APP_DST" 2>&1 | grep -E '^Identifier|^Authority' || echo "Note: no Authority line (ad-hoc signature)."
 echo "Bundle: $APP_DST"
 ls -la "$APP_DST/Contents/MacOS/"
 ls -la "$APP_DST/Contents/Resources/"
 
-# Install to /Applications.
+# Install to /Applications, only after the bundle verified above.
 echo "=== Installing to /Applications ==="
 if [[ -d "$APP_PUBLISHED" ]]; then
     echo "Removing existing $APP_PUBLISHED"
     rm -rf "$APP_PUBLISHED"
 fi
 cp -R "$APP_DST" "$APP_PUBLISHED"
+
+echo "=== Verifying installed copy ==="
+codesign --verify --deep --strict "$APP_PUBLISHED"
+# Quarantine is cleared only for the copy that just verified.
 xattr -dr com.apple.quarantine "$APP_PUBLISHED" 2>/dev/null || true
 
 echo ""
