@@ -3222,3 +3222,44 @@ struct SecureEndpointTests {
             == GrokPoolProvider.defaultBaseURL)
     }
 }
+
+@Suite("Subprocess environment")
+struct SubprocessEnvironmentTests {
+    @Test("arkcli gets a usable PATH and HOME, and nothing else")
+    func allowlist() {
+        // The parent GUI process can carry other providers' credentials in its
+        // environment when it was launched from a shell, and arkcli is
+        // third-party node code. Only the documented keys may cross.
+        let parent = [
+            "PATH": "/usr/bin:/bin",
+            "HOME": "/Users/tester",
+            "LANG": "zh_CN.UTF-8",
+            "TMPDIR": "/var/folders/x/T/",
+            "DEEPSEEK_API_KEY": "sk-secret",
+            "Z_AI_API_KEY": "glm-secret",
+            "KIMI_CODE_API_KEY": "kimi-secret",
+            "GROKPOOL_PASSWORD": "hunter2",
+            "ARK_API_KEY": "ark-secret",
+            "STEPFUN_API_KEY": "step-secret",
+        ]
+        let child = ArkCLIRunner.sandboxedEnvironment(from: parent)
+        #expect(child["DEEPSEEK_API_KEY"] == nil)
+        #expect(child["Z_AI_API_KEY"] == nil)
+        #expect(child["KIMI_CODE_API_KEY"] == nil)
+        #expect(child["GROKPOOL_PASSWORD"] == nil)
+        #expect(child["ARK_API_KEY"] == nil)
+        #expect(child["STEPFUN_API_KEY"] == nil)
+        #expect(child["HOME"] == "/Users/tester")
+        #expect(child["LANG"] == "zh_CN.UTF-8")
+        #expect(child["TMPDIR"] == "/var/folders/x/T/")
+        // homebrew must be reachable: arkcli and its node shebang live there.
+        #expect(child["PATH"]?.contains("/opt/homebrew/bin") == true)
+        #expect(child["PATH"]?.hasSuffix("/usr/bin:/bin") == true)
+    }
+
+    @Test("A missing HOME still resolves to the user's directory")
+    func homeFallback() {
+        let child = ArkCLIRunner.sandboxedEnvironment(from: ["PATH": "/usr/bin"])
+        #expect(child["HOME"] == NSHomeDirectory())
+    }
+}
