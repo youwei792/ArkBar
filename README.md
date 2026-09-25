@@ -2,7 +2,7 @@
 
 [English](README.en.md) · [安全报告](SECURITY.md) · [更新日志](CHANGELOG.md)
 
-TokenBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding/Agent Plan、OpenCode Go、DeepSeek、APINebula 中转站、智谱（Z.ai）、Kimi For Coding、GrokPool 网关、LongCat (longcat.chat)、阿里云百炼 Coding Plan、阶跃星辰 Step Plan 与商汤日日新 Token Plan 的用量，并在订阅快到期且额度没用完时提醒你；不会显示 Dock 图标。
+TokenBar 是一款原生 macOS 菜单栏应用，用于查看火山方舟 Coding/Agent Plan、OpenCode Go、DeepSeek、APINebula 中转站、智谱（Z.ai）、Kimi For Coding、GrokPool 网关、LongCat (longcat.chat)、阿里云百炼 Coding Plan / Token Plan、阶跃星辰 Step Plan 与商汤日日新 Token Plan 的用量，并在订阅快到期且额度没用完时提醒你；不会显示 Dock 图标。
 
 > 仓库名为 `ArkBar`；面向用户的产品、Swift Package、可执行文件与 `.app` 名称均为 `TokenBar`。当前源码与本地打包版本号为 `0.1.0`（Unreleased）；截至 2026-09-01，远端没有 Git tag 或 GitHub Release。下述步骤仅用于从源码运行或本地开发打包，不代表已有正式发布安装包。
 
@@ -46,7 +46,7 @@ swift build
 ./Scripts/package_app.sh
 ```
 
-该开发脚本仅构建 Apple Silicon（`arm64`）版本，会替换工作目录的 `TokenBar.app` 和 `/Applications/TokenBar.app`，并进行 ad-hoc 签名；它不是公证过的正式发布安装包。
+该开发脚本仅构建 Apple Silicon（`arm64`）版本，会替换工作目录的 `TokenBar.app` 和 `/Applications/TokenBar.app`，并优先使用稳定签名身份（`TOKENBAR_SIGN_IDENTITY`，默认取本机已有的 Apple Development 身份）；找不到稳定身份时退化为 ad-hoc 签名并告警——ad-hoc 签名每次构建都会变化，会使用户此前授予的完全磁盘访问与浏览器钥匙串授权失效，需要重新批准。它不是公证过的正式发布安装包。
 
 ### Intel 与 Universal Binary（维护者参考）
 
@@ -72,17 +72,17 @@ lipo -archs TokenBar
 | --- | --- | --- |
 | `arkcli` SSO（推荐） | `npm install -g @volcengine/ark-cli`，随后执行 `arkcli auth login volc-sso` | 可读取 `arkcli usage plan` 提供的个人版/团队版 Coding 与 Agent Plan 用量。 |
 | Volcengine AK/SK | 三选一：在“设置 → Ark 套餐”填写 Access Key / Secret Key（存 Keychain + 文件缓存）、环境变量 `VOLCENGINE_ACCESS_KEY_ID` 和 `VOLCENGINE_SECRET_ACCESS_KEY` | 仅 Coding Plan，用 Volcengine V4 签名请求读取。IAM 长期密钥不会过期：填一次只读子账号密钥对即可免去 arkcli SSO 约 48 小时一轮的重新登录。凭据优先级：设置值 > 环境变量。 |
-| Ark API Key | `ARK_API_KEY`；可选 `ARK_MODEL_ID` | 仅单个请求限额窗口。探测会发送最小 API 请求，可能消耗请求额度。 |
+| Ark API Key | `ARK_API_KEY`；可选 `ARK_MODEL_ID` | 仅单个请求限额窗口。优先用零成本的 `GET /models` 读取网关 `x-ratelimit-*` 响应头；仅当该路由没有返回配额头时才回退到一次最小 chat 请求（`max_tokens: 1`），可能消耗少量请求额度。 |
 | OpenCode Go | 在“设置 → OpenCode Go”中明确点击“重新读取浏览器登录”，或选择手动 Cookie；读取 Chrome/Safari Cookie 需要在 系统设置 中授予 TokenBar 完全磁盘访问权限 | 从 OpenCode 控制台的 JSON 接口 `GET /console/api/go/status` 读取三档用量（5 小时 / 周 / 月，micro-cents 计量），并取 `access.endsAt` 作为订阅到期时间；不会用本地消费记录估算余额。 |
 | DeepSeek | 三选一：设置页填写 API Key / Platform Token（存 Keychain）、环境变量 `DEEPSEEK_API_KEY` / `DEEPSEEK_PLATFORM_TOKEN`，或让 Chrome 登录 platform.deepseek.com 后自动读取 | 余额来自 `api.deepseek.com/user/balance`（或平台钱包）；今日/每月费用、Token、请求次数与分类明细来自平台 `usage/amount` + `usage/cost`。凭据优先级：设置值 > 环境变量 > Chrome 会话。 |
 | APINebula（中转站） | 在“设置 → APINebula 中转”中显式点击“重新读取浏览器登录”（控制台会话缓存到 Keychain）；可选填 API Key | 余额/累计已用来自控制台 `api/user/self`；今日/每月费用、Token、请求次数与缓存读/未缓存/输出分类来自 `api/log/self` 使用日志（缓存 token 位于日志 `other` 字段）。余额与日志是控制台接口，API Key 仅保证 `/v1` 模型调用。 |
 | 智谱（Z.ai） | 在“设置 → 智谱 Coding Plan”中填写 API Key（存 Keychain + 文件缓存）；可选环境变量 `Z_AI_API_KEY` 兜底；API 区域可选 Global（`api.z.ai`）或 BigModel 国内站（`open.bigmodel.cn`），默认国内站 | 读取 `api/monitor/usage/quota/limit` 返回的 Coding Plan 额度窗口：5 小时 + 每周（session/weekly 环），部分套餐另有每月 MCP 时间窗口（monthly 环）。凭据优先级：设置值 > 环境变量。 |
 | Kimi For Coding | API Key 可选（在“设置 → Kimi For Coding”填写，存 Keychain + 文件缓存；环境变量 `KIMI_CODE_API_KEY` 兜底）；在“设置 → Kimi For Coding”点“重新读取浏览器登录”导入 `www.kimi.com` 会话后可额外读取共享总池 | 读取 `api.kimi.com/coding/v1/usages` 的 Code 会员配额：总配额（每周，weekly 环）+ 5 小时限流窗口（session 环）；浏览器会话另读取 `www.kimi.com` 的 `GetSubscriptionStats`，把 **Kimi Code + Kimi Work 共享总池**映射为 monthly 环。凭据优先级：设置值 > 环境变量。 |
 | GrokPool（grok2api 网关） | 在“设置 → GrokPool 网关”填写**管理员账号密码**（存 Keychain + 文件缓存）；可选环境变量 `GROKPOOL_USERNAME` / `GROKPOOL_PASSWORD` 兜底；Base URL 默认 `https://grok.axonlume.com` | 以管理员身份登录（`POST /api/admin/v1/auth/login`）获取短期 Bearer 访问令牌，读取 24h 运营看板（`GET /api/admin/v1/dashboard?period=24h`）：请求数与成功率、计费费用（10^10 ticks = $1）、输入/缓存/输出/推理 token 拆分、活跃账号数与常用模型。令牌每 15 分钟自动重新获取，401 时自动重登。 |
-| LongCat (longcat.chat) | 在“设置 → LongCat”点“重新读取浏览器登录”导入 `longcat.chat` 会话（存 Keychain + 文件缓存）；支持 Chrome / Arc / Safari / Edge / Brave / Firefox 多浏览器回退；可选手动粘贴 Cookie 头或环境变量 `LONGCAT_MANUAL_COOKIE` | 用量接口在 longcat.chat 控制台（非 api.longcat.chat）。从 `POST /api/pay/quota/metering/token-packs/summary` 读取当前 token pack（`data.currentLot`：`totalToken` / `consumedToken` / `remainingToken` / `expireTime`），剩余圆环 = 剩余 Token 占比。可选读取 pending fuel pack 作为补充余额与最近过期时间。凭据优先级：手动 Cookie > 浏览器会话 > 环境变量。 |
-| 阿里云百炼 Coding Plan | 在“设置 → 阿里云 Coding Plan”填写专属 API Key（`sk-sp-` 开头，存 Keychain + 文件缓存）；环境变量 `ALIYUN_CODING_PLAN_API_KEY` 兜底 | Pro 档三档请求额度（5 小时 6,000 次滚动 / 每周 45,000 次周一重置 / 每月 90,000 次订阅日重置）映射为 session / weekly / monthly 三环，请求数显示绝对值。注意：官方暂未提供公开用量 API，开通前列表如实显示“尚未开通”；开通后自动生效，若未生效需按 docs/aliyun-handoff.md 抓包适配。该 Key 与按量计费的 sk- Key 不互通。 |
+| LongCat (longcat.chat) | 在“设置 → LongCat”点“重新读取浏览器登录”导入 `longcat.chat` 会话（存 Keychain + 文件缓存）；支持 Chrome / Arc / Safari / Edge / Brave / Firefox 多浏览器回退；可选手动粘贴 Cookie 头或环境变量 `LONGCAT_MANUAL_COOKIE` | 用量接口在 longcat.chat 控制台（非 api.longcat.chat）。从 `POST /api/pay/quota/metering/token-packs/summary` 读取当前 token pack（`data.currentLot`：`totalToken` / `consumedToken` / `remainingToken` / `expireTime`），剩余圆环 = 剩余 Token 占比。可选读取 pending fuel pack 作为补充余额与最近过期时间。Cookie 来源分「自动 / 手动」：自动 = 浏览器会话 > 环境变量；手动 = 只使用粘贴的 Cookie。导入要求存在 `passport_token_key` 登录 Cookie。 |
+| 阿里云百炼 Coding Plan / Token Plan | 在“设置 → 阿里云百炼”点**浏览器登录**（推荐，无需 AK/SK）：浏览器打开百炼控制台登录页，登录成功后自动返回；也可填阿里云 AK/SK 或 sk-sp- 套餐 Key（均存 Keychain + 文件缓存；AK/SK 建议只读 RAM 子账号，需 `modelstudio:GenerateCLIAccessToken` 权限）。环境变量兜底：`ALIYUN_ACCESS_KEY_ID` / `ALIYUN_ACCESS_KEY_SECRET`、`ALIYUN_CODING_PLAN_API_KEY` | 阿里云未公开用量 API：TokenBar 用与官方 `bl` CLI 完全相同的控制台网关读取用量——浏览器登录直接获取 console 访问令牌（与 `bl auth login --console` 同一机制，本地起端口接收回调，令牌存 Keychain）；AK/SK 则用 ACS3 签名兑换令牌（内存缓存约 10 分钟、401 自动重换）。自动识别账号持有哪种套餐：**Token Plan**（积分制）显示 5 小时 / 每周 / 每月已用比例环（个人版 Essential 实测只发布月度一档，缺哪档就不显示哪档）；**Coding Plan**（请求数制）显示 5 小时 6,000 / 每周 45,000 / 每月 90,000 三档绝对值环。识别结果记住后每次刷新只查该套餐的接口（Token Plan 另查一次订阅记录，用来显示到期日与套餐档位；两者都是不耗额度的元数据接口）。**浏览器登录拿到的 console 令牌寿命只有几分钟**，过期后需要重新点一次；配了 AK/SK 则由 app 自动重新换票，无需人工干预。 |
 | 阶跃 StepFun | 在“设置 → 阶跃 Step Plan”点“重新读取浏览器登录”导入控制台会话（cookie 鉴权，自动轮换；需授予完全磁盘访问权限） | 控制台 Connect-RPC：`RefreshToken` 轮换会话后查 `QueryStepPlanRateLimit` + `GetStepPlanStatus`。Plus 套餐仅月度 Credit 一个环（剩余 79% 类）+ 到期徽标；带 5 小时/周窗口的套餐会自动显示三环。API Key 无法读取套餐额度（厂商限制）。 |
-| 商汤日日新 | 在“设置 → 商汤 Token Plan”点“重新读取浏览器登录”导入控制台会话 | Token Plan 公测免费（双积分池：通用 + Flash-Lite，各含周余额/5h 窗口/周额度）。**接口确认中（已冻结）**：会话导入已可用，额度端点待一次抓包定稿，探测响应写入 `sensenova-last-response.txt`。 |
+| 商汤日日新 | 在“设置 → 商汤 Token Plan”点“重新读取浏览器登录”导入控制台会话（需授予完全磁盘访问权限） | Token Plan 公测免费（双积分池：通用 + Flash-Lite，各含周余额/5h 窗口/周额度）。控制台 `pool-usage` 接口只接受 SPA 的 OAuth Bearer，因此导入会话后会以 Hydra authorization-code + PKCE 无头换取访问令牌并用 refresh token 自动续期（访问令牌 3 小时有效）。每个积分池各自成环。 |
 
 Ark CLI 的最新安装方式请以官方 [Ark CLI 文档](https://github.com/volcengine/ark-cli) 为准。
 
@@ -96,6 +96,8 @@ export KIMI_CODE_API_KEY='...'
 export GROKPOOL_USERNAME='...'
 export GROKPOOL_PASSWORD='...'
 export LONGCAT_MANUAL_COOKIE='...'
+export ALIYUN_ACCESS_KEY_ID='...'
+export ALIYUN_ACCESS_KEY_SECRET='...'
 export ALIYUN_CODING_PLAN_API_KEY='...'
 .build/debug/TokenBar
 ```
@@ -133,11 +135,13 @@ export ALIYUN_CODING_PLAN_API_KEY='...'
 ## 隐私
 
 - OpenCode 自动接入只会在用户点击“重新读取浏览器登录”后读取 `opencode.ai` 的认证 Cookie；不读取浏览历史，也不会扫描任意文件。
-- TokenBar 只保留 `auth` / `__Host-auth` 认证项，并存入本机 macOS Keychain，同时镜像到 `~/Library/Application Support/TokenBar/credentials.json`（权限 0600）；常规启动、定时刷新和手动刷新优先读文件缓存，不反复触碰钥匙串或浏览器。
-- 手动粘贴的 OpenCode Cookie 同样只保存在本机 Keychain + 文件缓存，不会写入 UserDefaults、源码或日志。
-- DeepSeek 自动接入会在没有 Keychain/环境变量凭据时静默读取 Chrome 中 `platform.deepseek.com` 的 `userToken`（浏览器 localStorage 明文条目），仅用于调用 DeepSeek 平台接口；TokenBar 不会把它写入磁盘。结果按浏览器来源标签在设置页展示。
-- APINebula 浏览器接入只在用户点击“重新读取浏览器登录”后读取 `apinebula.ai` 控制台的会话 Cookie（及 localStorage 中的账户 ID），仅用于调用余额/日志接口，并写入 Keychain + 文件缓存。
-- 浏览器会话导入（OpenCode/APINebula）是显式设置操作；后台与启动刷新永不读取浏览器 cookie 库，也不会因 ad-hoc 重签而反复弹出钥匙串密码框。
+- TokenBar 只保留 `auth` / `__Host-auth` / `console_session` / `__Host-console_session` 认证项，并存入本机 macOS Keychain，同时镜像到 `~/Library/Application Support/TokenBar/credentials.json`（权限 0600）；常规启动、定时刷新和手动刷新优先读文件缓存，不反复触碰钥匙串或浏览器。
+- 手动粘贴的 OpenCode Cookie 同样只保存在本机 Keychain + 文件缓存，不会写入 UserDefaults、源码或日志；粘贴内容会先规范化（剥离 `Cookie:` 前缀、丢弃属性项），再保存。
+- DeepSeek 自动接入会在没有可用的 Platform Token 凭据（Keychain / 环境变量）时静默读取 Chrome 中 `platform.deepseek.com` 的 `userToken`（浏览器 localStorage 明文条目），仅用于调用 DeepSeek 平台接口；TokenBar 不会把它写入磁盘。磁盘扫描与网络校验各有 30 分钟内存缓存，不会每个刷新周期都重复扫描。结果按浏览器来源标签在设置页展示。
+- APINebula 浏览器接入只在用户点击“重新读取浏览器登录”后读取 `apinebula.ai` 控制台的会话 Cookie（及同一浏览器 profile 下 localStorage 中的账户 ID），仅用于调用余额/日志接口，并写入 Keychain + 文件缓存。导入要求存在 `session` 登录 Cookie，且读不到账户 ID 时会明确导入失败而不是缓存一个无法工作的会话。
+- 浏览器会话导入（OpenCode/APINebula/Kimi/LongCat/阶跃/商汤）是显式设置操作；后台与启动刷新永不读取浏览器 cookie 库，也不会因 ad-hoc 重签而反复弹出钥匙串密码框。
+- 所有 Provider 的凭据只保存在本机 Keychain + 文件缓存，不会写入 UserDefaults、源码或日志；钥匙串授权提示会按你当前导入的 Provider 如实说明用途。
+- 网络错误只保留截断到单行、有上限的状态码与摘要（`HTTPErrorSummary`），完整响应正文不会进入日志或界面。
 - 在 DeepSeek 设置页填写的 API Key / Platform Token 只保存在本机 Keychain + 文件缓存，不会写入 UserDefaults、源码或日志。
 - 在智谱设置页填写的 API Key 同样只保存在本机 Keychain + 文件缓存，不会写入 UserDefaults、源码或日志；区域偏好仅存 UserDefaults，不含任何凭据。
 - 在 Kimi For Coding 设置页填写的 API Key 同样只保存在本机 Keychain + 文件缓存，不会写入 UserDefaults、源码或日志；浏览器导入只读取 `www.kimi.com` 的 `kimi-auth` cookie（JWT），仅用于调用控制台用量接口，同样只存 Keychain + 文件缓存。
@@ -153,12 +157,12 @@ export ALIYUN_CODING_PLAN_API_KEY='...'
 swift test
 ```
 
-测试覆盖 Ark CLI/OpenAPI/OpenCode Go/DeepSeek/智谱/Kimi/GrokPool/LongCat 解码、DeepSeek 余额与用量聚合、浏览器会话 token 提取、时间格式、图标渲染、刷新交互和菜单卡片视觉回归。GitHub Actions 会在 pull request 和 `main` 推送时执行同一测试命令。
+测试覆盖 Ark CLI/OpenAPI/OpenCode Go/DeepSeek/智谱/Kimi/GrokPool/LongCat/阶跃/商汤/阿里云解码、DeepSeek 余额与用量聚合、浏览器会话 token 提取、Cookie 规范化与域名边界过滤、错误摘要截断、端点安全策略、CLI 子进程环境隔离、时间格式、图标渲染、刷新交互和菜单卡片视觉回归。GitHub Actions 会在 pull request 和 `main` 推送时执行同一测试命令，并新增 release 构建门禁（release 编译 + 打包脚本冒烟 + 签名/架构校验）。
 
 ## 目录结构
 
 ```text
-Sources/TokenBar/          应用源码（含 DeepSeek/APINebula/Zai/Kimi/GrokPool/LongCat Provider、浏览器会话导入、概览 SummaryRow、CredentialFileCache、单环卡片、ProviderLogo 与 Resources/provider 图标）
+Sources/TokenBar/          应用源码（含 11 个 Provider、浏览器会话导入、概览 SummaryRow、CredentialFileCache、SecureEndpoint、CookieHeaderNormalizer、CookieDomainFilter、BrowserKeychainPrompt、单环卡片、ProviderLogo 与 Resources/provider 图标）
 Scripts/package_app.sh   本地 Apple Silicon 打包脚本
 Tests/TokenBarTests/       解码与视觉回归测试
 ```

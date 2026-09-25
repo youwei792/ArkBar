@@ -1,6 +1,10 @@
 # Kimi For Coding 交接文档
 
-> 状态日期:2026-08-15。本文记录 Kimi 标签页的现状、认证体系、已发现的问题与后续方向,给下一个接手的开发者/自己续接时参考。
+> 状态日期:2026-08-15（**2026-09-25 复核**：本文描述的架构仍准确；本会话已修复
+> 「跨账号 token 配对」问题——access/refresh 现按 JWT `sub` 校验，详见
+> `docs/handoff-2026-09-25.md`。测试数等统计以该文档为准。）
+>
+> 本文记录 Kimi 标签页的现状、认证体系、已发现的问题与后续方向,给下一个接手的开发者/自己续接时参考。
 
 ## 1. 现状概览
 
@@ -93,7 +97,7 @@ ArkBar(菜单栏应用,Target `TokenBar`)已上线 **Kimi For Coding** 标签页
 ## 6. 提交 / 发布
 
 - 合并方式:分支 → PR(youwei792)→ CI `test` 通过 → merge。**不能直接推 main**(有分支保护)。
-- 推送凭据:本机 git 凭据缓存的账号是 `alvincna`(无权),需用 `gh auth token --user youwei792` 做单次 URL 内嵌推送。**提交身份**是 `WwwSideQuest <229644306+youwei792@users.noreply.github.com>`(youwei792)。
+- 推送:/推荐 `gh auth setup-git` 配置 git 凭据(勿把 token 内嵌到 URL,会进 shell history 与进程参数)。**提交身份**是 `WwwSideQuest <229644306+youwei792@users.noreply.github.com>`(youwei792)。
 - 打包:`bash Scripts/package_app.sh`(arm64,ad-hoc 签名)→ 安装到 `/Applications/TokenBar.app` → `pkill -f "/Applications/TokenBar.app/Contents/MacOS/TokenBar"` → `open`。
 - 敏感信息:提交前用 `git diff HEAD | grep -Ei "sk-|Bearer [A-Za-z0-9]{24,}|api[_-]?key=..."` 扫描,确认无真实密钥。
 
