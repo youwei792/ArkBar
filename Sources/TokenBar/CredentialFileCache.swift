@@ -7,8 +7,14 @@ import Foundation
 /// The Keychain remains the canonical store; this is a cache that shadows it.
 /// If the file is missing or corrupt, the app falls back to Keychain and
 /// re-populates the file cache.
+///
+/// Read-modify-write is serialized under one lock: several providers can
+/// persist concurrently, and without it a later write would overwrite an
+/// earlier one's key. Each write stages through a uniquely named temp file so
+/// concurrent writers cannot collide on the staging path either.
 enum CredentialFileCache {
     private static let fileName = "credentials.json"
+    private static let lock = NSLock()
 
     /// ~/Library/Application Support/TokenBar/credentials.json
     private static var fileURL: URL? {
@@ -34,45 +40,57 @@ enum CredentialFileCache {
         return dict
     }
 
-    /// Write a single credential to the file cache, preserving existing entries.
-    static func store(provider: String, value: String) {
-        guard let url = fileURL else { return }
-        var dict = loadAll()
-        dict[provider] = value
-        write(dict, to: url)
+    /// Write a single credential to the file cache, preserving existing
+    /// entries. Returns whether the value was persisted.
+    @discardableResult
+    static func store(provider: String, value: String) -> Bool {
+        guard let url = fileURL else { return false }
+        return lock.withLock {
+            var dict = loadAll()
+            dict[provider] = value
+            return write(dict, to: url)
+        }
     }
 
     /// Remove a single credential from the file cache.
-    static func clear(provider: String) {
-        guard let url = fileURL else { return }
-        var dict = loadAll()
-        dict.removeValue(forKey: provider)
-        write(dict, to: url)
+    @discardableResult
+    static func clear(provider: String) -> Bool {
+        guard let url = fileURL else { return false }
+        return lock.withLock {
+            var dict = loadAll()
+            dict.removeValue(forKey: provider)
+            return write(dict, to: url)
+        }
     }
 
     /// Remove all credentials from the file cache.
     static func clearAll() {
         guard let url = fileURL else { return }
-        write([:], to: url)
+        _ = lock.withLock { write([:], to: url) }
     }
 
-    private static func write(_ dict: [String: String], to url: URL) {
+    private static func write(_ dict: [String: String], to url: URL) -> Bool {
         guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys]) else {
-            return
+            return false
         }
         // Atomically write with 0600 permissions.
         let fm = FileManager.default
-        let tempURL = url.deletingLastPathComponent().appendingPathComponent(".\(fileName).tmp")
+        // Unique staging name: two concurrent writers must not share a temp
+        // path (a write racing a rename would clobber the other's data).
+        let tempURL = url.deletingLastPathComponent()
+            .appendingPathComponent(".\(fileName).\(UUID().uuidString).tmp")
         do {
             try data.write(to: tempURL, options: .atomic)
             try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tempURL.path)
-            try fm.replaceItemAt(url, withItemAt: tempURL,
-                                 backupItemName: nil, options: .usingNewMetadataOnly)
+            _ = try fm.replaceItemAt(url, withItemAt: tempURL,
+                                     backupItemName: nil, options: .usingNewMetadataOnly)
+            return true
         } catch {
             // Best-effort; the Keychain is the canonical store.
             UsageStore.log("CredentialFileCache write failed: \(error.localizedDescription)")
             // Clean up the temp file if it still exists.
             try? fm.removeItem(at: tempURL)
+            return false
         }
     }
 }

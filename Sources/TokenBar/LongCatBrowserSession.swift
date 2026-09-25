@@ -34,10 +34,11 @@ enum LongCatBrowserSession {
     private static let sourceLabelKey = "tokenbar.longcatBrowserSourceLabel"
     private static let browserKey = "tokenbar.longcatBrowser"
     private static let client = BrowserCookieClient()
-    private static let query = BrowserCookieQuery(domains: [
+    private static let domains = [
         "longcat.chat",
         "www.longcat.chat",
-    ])
+    ]
+    private static let query = BrowserCookieQuery(domains: domains)
 
     private static let preferredBrowsers: [Browser] = {
         let preferred: [Browser] = [.chrome, .arc, .safari, .edge, .brave, .firefox]
@@ -46,12 +47,24 @@ enum LongCatBrowserSession {
 
     static func cachedSession() -> Session? {
         guard let raw = CookieKeychainStore.load(provider: cachedCredentialAccount),
-              let header = Self.requestCookieHeader(from: raw)
+              let header = Self.requestCookieHeader(from: raw),
+              Self.hasSessionCookie(header)
         else {
             return nil
         }
         let source = UserDefaults.standard.string(forKey: sourceLabelKey) ?? L(.browserSession)
         return Session(cookieHeader: header, sourceLabel: source)
+    }
+
+    /// The console sign-in lives in Meituan's `passport_token_key` SSO cookie;
+    /// without it the browser is signed out (or only carries analytics cookies).
+    static func hasSessionCookie(_ header: String) -> Bool {
+        for part in header.split(separator: ";") {
+            let trimmed = part.trimmingCharacters(in: .whitespaces)
+            guard let eq = trimmed.firstIndex(of: "=") else { continue }
+            if trimmed[..<eq] == "passport_token_key" { return true }
+        }
+        return false
     }
 
     static func cachedSourceLabel() -> String? {
@@ -110,14 +123,20 @@ enum LongCatBrowserSession {
                 let matched = sources.filter { !$0.records.isEmpty }
                 UsageStore.log("LongCat browser import: \(candidate.displayName) → \(matched.count) source(s) with longcat.chat cookies")
                 for source in matched {
-                    let cookies = BrowserCookieClient.makeHTTPCookies(source.records, origin: query.origin)
+                    // Strict domain boundary: the query matches by substring,
+                    // so lookalike domains could otherwise ride along.
+                    let records = CookieDomainFilter.filter(source.records, allowedDomains: domains)
+                    guard !records.isEmpty else { continue }
+                    let cookies = BrowserCookieClient.makeHTTPCookies(records, origin: query.origin)
                     let rawHeader = cookies
                         .map { "\($0.name)=\($0.value)" }
                         .joined(separator: "; ")
                     let cookieNames = cookies.map { $0.name }.joined(separator: ", ")
                     UsageStore.log("LongCat browser import: \(source.label) → \(cookies.count) cookies [\(cookieNames)], header length \(rawHeader.count)")
-                    guard let header = Self.requestCookieHeader(from: rawHeader) else {
-                        UsageStore.log("LongCat browser import: \(source.label) → requestCookieHeader filtered out all cookies")
+                    guard let header = Self.requestCookieHeader(from: rawHeader),
+                          Self.hasSessionCookie(header)
+                    else {
+                        UsageStore.log("LongCat browser import: \(source.label) → no passport_token_key sign-in cookie")
                         continue
                     }
                     let session = Session(cookieHeader: header, sourceLabel: source.label)

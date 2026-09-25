@@ -71,9 +71,9 @@ final class SenseNovaProvider: UsageProvider {
     private func resolvedSession() async throws -> SenseNovaBrowserSession.Session {
         let manual = await MainActor.run { self.settings.senseNovaManualCookie }
         let session: SenseNovaBrowserSession.Session
-        if let manual = Self.trimmed(manual) {
+        if let header = CookieHeaderNormalizer.normalize(manual) {
             session = SenseNovaBrowserSession.Session(
-                cookieHeader: manual, sourceLabel: L(.manualCookie))
+                cookieHeader: header, sourceLabel: L(.manualCookie))
         } else if let cached = SenseNovaBrowserSession.cachedSession() {
             session = cached
         } else {

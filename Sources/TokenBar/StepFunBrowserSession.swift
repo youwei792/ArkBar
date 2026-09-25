@@ -31,7 +31,8 @@ enum StepFunBrowserSession {
     private static let sourceLabelKey = "tokenbar.stepFunBrowserSourceLabel"
     private static let browserKey = "tokenbar.stepFunBrowser"
     private static let client = BrowserCookieClient()
-    private static let query = BrowserCookieQuery(domains: ["platform.stepfun.com", "account.stepfun.com", "stepfun.com"])
+    private static let domains = ["platform.stepfun.com", "account.stepfun.com", "stepfun.com"]
+    private static let query = BrowserCookieQuery(domains: domains)
 
     private static let preferredBrowsers: [Browser] = {
         let preferred: [Browser] = [.chrome, .arc, .safari, .edge, .brave, .firefox]
@@ -40,12 +41,32 @@ enum StepFunBrowserSession {
 
     static func cachedSession() -> Session? {
         guard let raw = CookieKeychainStore.load(provider: cachedCredentialAccount),
-              !raw.isEmpty
+              hasSessionCookie(raw)
         else {
             return nil
         }
         let source = UserDefaults.standard.string(forKey: sourceLabelKey) ?? L(.browserSession)
         return Session(cookieHeader: raw, sourceLabel: source)
+    }
+
+    /// The console session lives in the `Oasis-Token` cookie; a header without
+    /// it belongs to a signed-out browser (or only carries analytics cookies).
+    static func hasSessionCookie(_ header: String) -> Bool {
+        for part in header.split(separator: ";") {
+            let trimmed = part.trimmingCharacters(in: .whitespaces)
+            guard let eq = trimmed.firstIndex(of: "=") else { continue }
+            if trimmed[..<eq] == "Oasis-Token" { return true }
+        }
+        return false
+    }
+
+    /// Replaces the cached cookie header after a RefreshToken rotation,
+    /// keeping the original source label. Rotation issues a new Oasis-Token
+    /// roughly every 30 minutes; without this write-back the cached session
+    /// goes stale within the hour and every refresh 401s.
+    static func updateCachedCookieHeader(_ header: String) {
+        guard hasSessionCookie(header) else { return }
+        CookieKeychainStore.store(cookie: header, provider: cachedCredentialAccount)
     }
 
     /// Ordered import candidates: the previously-used browser first, then the
@@ -95,9 +116,16 @@ enum StepFunBrowserSession {
                 StepFunProvider.writeImportDiagnostic(
                     "candidate \(candidate.displayName) records=\(names.count) \(names.prefix(12))")
                 for source in sources where !source.records.isEmpty {
+                    // Strict domain boundary: the query matches by substring,
+                    // so lookalike domains (not-stepfun.com) could ride along.
+                    let records = CookieDomainFilter.filter(source.records, allowedDomains: domains)
+                    guard !records.isEmpty else { continue }
                     let header = Self.requestCookieHeader(
-                        from: BrowserCookieClient.makeHTTPCookies(source.records, origin: query.origin))
-                    guard !header.isEmpty else { continue }
+                        from: BrowserCookieClient.makeHTTPCookies(records, origin: query.origin))
+                    // Any-cookie-is-success would import signed-out browsers
+                    // full of analytics cookies; the session must carry the
+                    // Oasis-Token the console actually authenticates with.
+                    guard Self.hasSessionCookie(header) else { continue }
                     let session = Session(cookieHeader: header, sourceLabel: source.label)
                     Self.cache(session, browser: candidate)
                     return session

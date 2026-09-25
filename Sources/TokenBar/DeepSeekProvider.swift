@@ -416,7 +416,15 @@ final class DeepSeekProvider: UsageProvider {
         if let apiKey {
             balance = try await fetchBalance(apiKey: apiKey)
         } else if let platformToken {
-            balance = try await fetchPlatformBalance(platformToken: platformToken)
+            do {
+                balance = try await fetchPlatformBalance(platformToken: platformToken)
+            } catch UsageError.deepSeekInvalidPlatformToken where browserSourceLabel != nil {
+                // The browser session rotated underneath the in-memory
+                // caches: drop them so the next refresh rescans the browser
+                // store instead of retrying the dead token.
+                await DeepSeekBrowserSession.invalidateAutomaticSession()
+                throw UsageError.deepSeekInvalidPlatformToken
+            }
         } else {
             throw UsageError.deepSeekMissingCredentials
         }
@@ -427,6 +435,9 @@ final class DeepSeekProvider: UsageProvider {
         if let platformToken {
             do {
                 stats = try await fetchUsageSummary(platformToken: platformToken)
+            } catch UsageError.deepSeekInvalidPlatformToken where browserSourceLabel != nil {
+                await DeepSeekBrowserSession.invalidateAutomaticSession()
+                UsageStore.log("✗ DeepSeek browser session expired; rescanning on next refresh")
             } catch {
                 UsageStore.log("✗ DeepSeek usage summary unavailable: \(error.localizedDescription)")
             }

@@ -313,9 +313,33 @@ final class AppSettings: ObservableObject {
     /// never persisted to UserDefaults).
     @Published private(set) var longcatCookie: String
 
-    /// Alibaba Cloud (百炼) Coding Plan dedicated API key, `sk-sp-…`
-    /// (Keychain mirror, never persisted to UserDefaults).
+    /// Alibaba Cloud (百炼) Coding Plan IAM key pair (Keychain mirrors,
+    /// never persisted to UserDefaults). The console usage gateway has no
+    /// public API; the AK/SK pair mints the short-lived console access token
+    /// the official `bl` CLI uses. Optional — browser login is the primary
+    /// path.
+    @Published private(set) var aliyunAccessKeyID: String
+    @Published private(set) var aliyunSecretAccessKey: String
+
+    /// Console access token from the browser login (Keychain mirror). This is
+    /// the primary Alibaba Cloud credential; it expires eventually and is
+    /// re-obtained by signing in again.
+    @Published private(set) var aliyunConsoleToken: String
+
+    /// Alibaba Cloud Coding Plan dedicated API key, `sk-sp-…` (Keychain
+    /// mirror). Scoped to the model gateway; used only as a last-resort
+    /// Bearer attempt on the console usage API.
     @Published private(set) var aliyunAPIKey: String
+
+    /// Which Alibaba Cloud plan this account holds (Token Plan vs Coding
+    /// Plan), discovered on the first successful fetch. A plain preference —
+    /// no credentials — that keeps later refreshes to one usage read.
+    @Published var aliyunDetectedPlan: AliyunPlanKind? {
+        didSet {
+            UserDefaults.standard.set(
+                aliyunDetectedPlan?.rawValue, forKey: Keys.aliyunDetectedPlan)
+        }
+    }
 
     /// StepFun console session Cookie header (Keychain mirror, never
     /// persisted to UserDefaults). Managed through the browser import.
@@ -346,7 +370,8 @@ final class AppSettings: ObservableObject {
     var kimiAPIKeyHasValue: Bool { !kimiAPIKey.isEmpty }
     var grokPoolCredentialsHaveValue: Bool { !grokPoolUsername.isEmpty && !grokPoolPassword.isEmpty }
     var longcatCookieHasValue: Bool { !longcatCookie.isEmpty }
-    var aliyunAPIKeyHasValue: Bool { !aliyunAPIKey.isEmpty }
+    var aliyunCredentialsHaveValue: Bool { !aliyunAccessKeyID.isEmpty && !aliyunSecretAccessKey.isEmpty }
+    var aliyunConsoleLoggedIn: Bool { !aliyunConsoleToken.isEmpty }
     var stepFunCookieHasValue: Bool { !stepFunCookie.isEmpty }
     var stepFunAPIKeyHasValue: Bool { !stepFunAPIKey.isEmpty }
     var senseNovaAPIKeyHasValue: Bool { !senseNovaAPIKey.isEmpty }
@@ -566,6 +591,34 @@ final class AppSettings: ObservableObject {
         longcatCookie = CookieKeychainStore.load(provider: "longcat-cookie") ?? ""
     }
 
+    func setAliyunAccessKeyID(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: key, provider: "aliyun-accesskey")
+        aliyunAccessKeyID = persisted ? (key ?? "") : (CookieKeychainStore.load(provider: "aliyun-accesskey") ?? "")
+    }
+
+    func setAliyunSecretAccessKey(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: key, provider: "aliyun-secretkey")
+        aliyunSecretAccessKey = persisted ? (key ?? "") : (CookieKeychainStore.load(provider: "aliyun-secretkey") ?? "")
+    }
+
+    func loadAliyunFromKeychain() {
+        aliyunAccessKeyID = CookieKeychainStore.load(provider: "aliyun-accesskey") ?? ""
+        aliyunSecretAccessKey = CookieKeychainStore.load(provider: "aliyun-secretkey") ?? ""
+        aliyunConsoleToken = CookieKeychainStore.load(provider: "aliyun-console") ?? ""
+        aliyunAPIKey = CookieKeychainStore.load(provider: "aliyun-key") ?? ""
+    }
+
+    func setAliyunConsoleToken(_ value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let token = trimmed?.isEmpty == false ? trimmed : nil
+        let persisted = CookieKeychainStore.store(cookie: token, provider: "aliyun-console")
+        aliyunConsoleToken = persisted ? (token ?? "") : (CookieKeychainStore.load(provider: "aliyun-console") ?? "")
+    }
+
     func setAliyunAPIKey(_ value: String?) {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
         let key = trimmed?.isEmpty == false ? trimmed : nil
@@ -573,8 +626,12 @@ final class AppSettings: ObservableObject {
         aliyunAPIKey = persisted ? (key ?? "") : (CookieKeychainStore.load(provider: "aliyun-key") ?? "")
     }
 
-    func loadAliyunFromKeychain() {
-        aliyunAPIKey = CookieKeychainStore.load(provider: "aliyun-key") ?? ""
+    /// The stored Aliyun IAM pair, when both halves are present. Read on the
+    /// main actor by the provider; environment variables remain the fallback.
+    var storedAliyunCredentials: AliyunCredentials? {
+        guard !aliyunAccessKeyID.isEmpty, !aliyunSecretAccessKey.isEmpty else { return nil }
+        return AliyunCredentials(
+            accessKeyID: aliyunAccessKeyID, secretAccessKey: aliyunSecretAccessKey)
     }
 
     func loadOpenCodeCookieFromKeychain() {
@@ -600,6 +657,7 @@ final class AppSettings: ObservableObject {
         static let showGrokPool = "tokenbar.showGrokPool"
         static let showLongCat = "tokenbar.showLongCat"
         static let showAliyun = "tokenbar.showAliyun"
+        static let aliyunDetectedPlan = "tokenbar.aliyunDetectedPlan"
         static let showStepFun = "tokenbar.showStepFun"
         static let showSenseNova = "tokenbar.showSenseNova"
         static let expiryReminderEnabled = "tokenbar.expiryReminderEnabled"
@@ -649,6 +707,8 @@ final class AppSettings: ObservableObject {
         self.showGrokPool = defaults.object(forKey: Keys.showGrokPool) as? Bool ?? true
         self.showLongCat = defaults.object(forKey: Keys.showLongCat) as? Bool ?? true
         self.showAliyun = defaults.object(forKey: Keys.showAliyun) as? Bool ?? true
+        let aliyunPlanRaw = defaults.string(forKey: Keys.aliyunDetectedPlan)
+        self.aliyunDetectedPlan = aliyunPlanRaw.flatMap(AliyunPlanKind.init(rawValue:))
         self.showStepFun = defaults.object(forKey: Keys.showStepFun) as? Bool ?? true
         self.showSenseNova = defaults.object(forKey: Keys.showSenseNova) as? Bool ?? true
         self.stepFunCookie = CookieKeychainStore.load(provider: "stepfun-browser") ?? ""
@@ -696,6 +756,9 @@ final class AppSettings: ObservableObject {
         self.zaiAPIKey = CookieKeychainStore.load(provider: "zai-token") ?? ""
         self.kimiAPIKey = CookieKeychainStore.load(provider: "kimi-key") ?? ""
         self.kimiAuthToken = CookieKeychainStore.load(provider: "kimi-auth") ?? ""
+        self.aliyunAccessKeyID = CookieKeychainStore.load(provider: "aliyun-accesskey") ?? ""
+        self.aliyunSecretAccessKey = CookieKeychainStore.load(provider: "aliyun-secretkey") ?? ""
+        self.aliyunConsoleToken = CookieKeychainStore.load(provider: "aliyun-console") ?? ""
         self.aliyunAPIKey = CookieKeychainStore.load(provider: "aliyun-key") ?? ""
     }
 }

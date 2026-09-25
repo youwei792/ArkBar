@@ -146,6 +146,8 @@ enum LKey: String, CaseIterable {
     case settingsKimiSubtitle = "settings.kimiSubtitle"
     case settingsGrokPoolSubtitle = "settings.grokPoolSubtitle"
     case settingsLongCatSubtitle = "settings.longcatSubtitle"
+    case settingsStepFunSubtitle = "settings.stepFunSubtitle"
+    case settingsSenseNovaSubtitle = "settings.senseNovaSubtitle"
     case settingsAliyunSubtitle = "settings.aliyunSubtitle"
     case settingsReminderSubtitle = "settings.reminderSubtitle"
     case settingsDiagnosticsSubtitle = "settings.diagnosticsSubtitle"
@@ -190,8 +192,9 @@ enum LKey: String, CaseIterable {
     case noSuccessfulUpdate = "settings.noSuccessfulUpdate"
     case browserSession = "settings.browserSession"
     case manualCookie = "settings.manualCookie"
-    case openCodeBrowserAccessTitle = "settings.openCodeBrowserAccessTitle"
-    case openCodeBrowserAccessMessage = "settings.openCodeBrowserAccessMessage"
+    case browserKeychainAccessTitle = "settings.browserKeychainAccessTitle"
+    case browserKeychainAccessMessage = "settings.browserKeychainAccessMessage"
+    case browserKeychainAccessFallback = "settings.browserKeychainAccessFallback"
     case continueAction = "settings.continueAction"
     case settingsAppVersion = "settings.appVersion"
     case settingsCurrentSource = "settings.currentSource"
@@ -209,6 +212,7 @@ enum LKey: String, CaseIterable {
     case productGrokPool = "product.grokPool"
     case productLongCat = "product.longcat"
     case productAliyunCodingPlan = "product.aliyunCodingPlan"
+    case productAliyunTokenPlan = "product.aliyunTokenPlan"
     case productStepFunCodingPlan = "product.stepfunCodingPlan"
     case productSenseNovaCodingPlan = "product.sensenovaCodingPlan"
     case windowSession = "window.session"
@@ -286,6 +290,7 @@ enum LKey: String, CaseIterable {
     case errorNebulaMissingCredentials = "error.nebulaMissingCredentials"
     case errorNebulaInvalidToken = "error.nebulaInvalidToken"
     case errorNebulaBrowserSessionMissing = "error.nebulaBrowserSessionMissing"
+    case errorNebulaUserIdMissing = "error.nebulaUserIdMissing"
     case errorNebulaBrowserAuthorizationRequired = "error.nebulaBrowserAuthorizationRequired"
     case errorZaiMissingCredentials = "error.zaiMissingCredentials"
     case errorZaiInvalidToken = "error.zaiInvalidToken"
@@ -302,6 +307,9 @@ enum LKey: String, CaseIterable {
     case errorAliyunMissingCredentials = "error.aliyunMissingCredentials"
     case errorAliyunInvalidToken = "error.aliyunInvalidToken"
     case errorAliyunNotActivated = "error.aliyunNotActivated"
+    case errorAliyunConsoleLoginExpired = "error.aliyunConsoleLoginExpired"
+    case errorAliyunConsoleLoginTimeout = "error.aliyunConsoleLoginTimeout"
+    case errorAliyunConsoleLoginFailed = "error.aliyunConsoleLoginFailed"
     case errorStepFunMissingCredentials = "error.stepFunMissingCredentials"
     case errorStepFunInvalidSession = "error.stepFunInvalidSession"
     case errorStepFunBrowserSessionMissing = "error.stepFunBrowserSessionMissing"
@@ -340,9 +348,15 @@ enum LKey: String, CaseIterable {
     case longCatBrowserSession = "longcat.browserSession"
 
     // Alibaba Cloud (阿里云百炼 Coding Plan)
+    case aliyunAccessKeyIDLabel = "aliyun.accessKeyIDLabel"
+    case aliyunAccessKeySecretLabel = "aliyun.accessKeySecretLabel"
     case aliyunAPIKeyLabel = "aliyun.apiKeyLabel"
+    case aliyunBrowserLogin = "aliyun.browserLogin"
+    case aliyunConsoleSignedIn = "aliyun.consoleSignedIn"
+    case aliyunConsoleNotSignedIn = "aliyun.consoleNotSignedIn"
+    case aliyunConsoleLoginStatus = "aliyun.consoleLoginStatus"
     case aliyunCredentialsHint = "aliyun.credentialsHint"
-    case aliyunPendingHint = "aliyun.pendingHint"
+    case aliyunTokenHint = "aliyun.tokenHint"
     case stepFunCredentialsHint = "stepfun.credentialsHint"
     case stepFunAPIKeyLabel = "stepfun.apiKeyLabel"
     case stepFunManualCookiePlaceholder = "stepfun.manualCookiePlaceholder"
@@ -400,17 +414,33 @@ enum LKey: String, CaseIterable {
 /// Intentionally NOT `@MainActor`: the string table is read-only, and `t(_:)`
 /// must be callable from nonisolated computed-property getters (e.g.
 /// `AppSettings.DisplayMode.displayName`) and from `MenuBuilder` static funcs.
-/// `language` only mutates on the main thread (Settings Picker), so reads from
-/// other contexts are safe in practice. Marked `nonisolated(unsafe)` to opt out
-/// of the Sendable check for the singleton.
+/// `language` is lock-guarded instead of relying on "only mutates on the main
+/// thread in practice": provider fetch paths do read it off the main actor.
 final class L10n: ObservableObject {
     nonisolated(unsafe) static let shared = L10n()
 
-    @Published var language: Language {
-        didSet {
+    private let lock = NSLock()
+    private var resolvedLanguage: Language
+
+    /// Thread-safe language accessor. Not `@Published`: a computed property
+    /// cannot carry the wrapper, so observation goes through
+    /// `objectWillChange.send()` (what `@ObservedObject` consumers react to)
+    /// plus the `languageDidChange` notification (what the menu rebuilds on).
+    var language: Language {
+        get {
+            lock.withLock { resolvedLanguage }
+        }
+        set {
+            let changed: Bool = lock.withLock {
+                guard resolvedLanguage != newValue else { return false }
+                resolvedLanguage = newValue
+                return true
+            }
+            guard changed else { return }
+            objectWillChange.send()
             // Persist and notify. AppSettings owns writes from the Settings window;
             // this manager only publishes the visual-language invalidation.
-            UserDefaults.standard.set(language.rawValue, forKey: "tokenbar.language")
+            UserDefaults.standard.set(newValue.rawValue, forKey: "tokenbar.language")
             // Notify menu controller to rebuild.
             NotificationCenter.default.post(name: Self.languageDidChange, object: nil)
         }
@@ -420,7 +450,7 @@ final class L10n: ObservableObject {
 
     private init() {
         let raw = UserDefaults.standard.string(forKey: "tokenbar.language") ?? Language.system.rawValue
-        self.language = Language(rawValue: raw) ?? .system
+        self.resolvedLanguage = Language(rawValue: raw) ?? .system
     }
 
     /// Look up a localized string for the current language.
@@ -448,6 +478,7 @@ final class L10n: ObservableObject {
         case .grokPool: t(.productGrokPool)
         case .longcat: t(.productLongCat)
         case .aliyunCodingPlan: t(.productAliyunCodingPlan)
+        case .aliyunTokenPlan: t(.productAliyunTokenPlan)
         case .stepfunCodingPlan: t(.productStepFunCodingPlan)
         case .senseNovaCodingPlan: t(.productSenseNovaCodingPlan)
         }
@@ -591,7 +622,7 @@ final class L10n: ObservableObject {
         add(.settingsKimi, "Kimi For Coding", "Kimi For Coding")
         add(.settingsGrokPool, "GrokPool 网关", "GrokPool Gateway")
         add(.settingsLongCat, "LongCat", "LongCat")
-        add(.settingsAliyun, "阿里云 Coding Plan", "Alibaba Cloud Coding Plan")
+        add(.settingsAliyun, "阿里云百炼", "Alibaba Cloud Bailian")
         add(.settingsStepFun, "阶跃 Step Plan", "StepFun Step Plan")
         add(.settingsSenseNova, "商汤 Token Plan", "SenseNova Token Plan")
         add(.settingsReminder, "订阅提醒", "Expiry Reminders")
@@ -604,7 +635,9 @@ final class L10n: ObservableObject {
         add(.settingsKimiSubtitle, "Kimi For Coding 会员配额与共享总池", "Kimi For Coding membership quota and shared pool")
         add(.settingsGrokPoolSubtitle, "网关 24 小时运营看板", "Gateway 24-hour operations dashboard")
         add(.settingsLongCatSubtitle, "Token 资源包剩余额度", "Token package remaining quota")
-        add(.settingsAliyunSubtitle, "百炼 Coding Plan 三档请求额度（开通后生效）", "Bailian Coding Plan request windows (active after activation)")
+        add(.settingsStepFunSubtitle, "Step Plan 月度 Credit 额度", "Step Plan monthly credit quota")
+        add(.settingsSenseNovaSubtitle, "日日新 Token Plan（公测免费：60,000 积分/5 小时）", "SenseNova Token Plan (free beta: 60,000 credits / 5 hours)")
+        add(.settingsAliyunSubtitle, "百炼 Coding Plan / Token Plan 用量", "Bailian Coding Plan / Token Plan usage")
         add(.settingsReminderSubtitle, "快到期且额度没用完时提醒你", "Nudges you when a plan expires with quota left")
         add(.settingsDiagnosticsSubtitle, "运行环境与 arkcli 检查", "Runtime environment and arkcli checks")
         add(.settingsDiagnostics, "诊断", "Diagnostics")
@@ -631,7 +664,7 @@ final class L10n: ObservableObject {
         add(.openKimiConsole, "打开 Kimi Code 控制台", "Open Kimi Code Console")
         add(.openGrokPoolConsole, "打开 GrokPool 控制台", "Open GrokPool Console")
         add(.openLongCatConsole, "打开 LongCat 用量页", "Open LongCat Usage")
-        add(.openAliyunConsole, "打开阿里云 Coding Plan 控制台", "Open Alibaba Cloud Coding Plan Console")
+        add(.openAliyunConsole, "打开百炼控制台", "Open Bailian Console")
         add(.openStepFunConsole, "打开阶跃控制台", "Open StepFun Console")
         add(.openSenseNovaConsole, "打开商汤控制台", "Open SenseNova Console")
         add(.openCodeCookieSource, "Cookie 来源", "Cookie source")
@@ -648,8 +681,9 @@ final class L10n: ObservableObject {
         add(.noSuccessfulUpdate, "尚未成功更新", "No successful update yet")
         add(.browserSession, "浏览器会话", "Browser session")
         add(.manualCookie, "手动 Cookie", "Manual Cookie")
-        add(.openCodeBrowserAccessTitle, "允许读取浏览器登录", "Allow Browser Sign-in Access")
-        add(.openCodeBrowserAccessMessage, "TokenBar 将请求 macOS 钥匙串中的“%@”，用于解密 opencode.ai 登录 Cookie。TokenBar 只保留认证 Cookie，不读取浏览历史。", "TokenBar will request “%@” from macOS Keychain to decrypt the opencode.ai sign-in Cookie. TokenBar keeps only the authentication Cookie and does not read browsing history.")
+        add(.browserKeychainAccessTitle, "允许读取浏览器登录", "Allow Browser Sign-in Access")
+        add(.browserKeychainAccessMessage, "TokenBar 将请求 macOS 钥匙串中的“%1$@”，用于解密你刚刚选择导入的 %2$@ 登录 Cookie，随后 macOS 会再次向你确认。TokenBar 只读取该站点的登录凭据，不读取浏览历史。", "TokenBar will request “%1$@” from macOS Keychain to decrypt the %2$@ sign-in Cookie you just chose to import; macOS will ask you to confirm next. TokenBar reads only that site's sign-in credentials, never browsing history.")
+        add(.browserKeychainAccessFallback, "所选服务", "the selected service")
         add(.continueAction, "继续", "Continue")
         add(.settingsAppVersion, "TokenBar 版本", "TokenBar version")
         add(.settingsCurrentSource, "当前来源", "Current source")
@@ -667,6 +701,7 @@ final class L10n: ObservableObject {
         add(.productGrokPool, "GrokPool", "GrokPool")
         add(.productLongCat, "LongCat", "LongCat")
         add(.productAliyunCodingPlan, "阿里云 Coding Plan", "Alibaba Cloud Coding Plan")
+        add(.productAliyunTokenPlan, "阿里云 Token Plan", "Alibaba Cloud Token Plan")
         add(.productStepFunCodingPlan, "阶跃 Step Plan", "StepFun Step Plan")
         add(.productSenseNovaCodingPlan, "商汤 Token Plan", "SenseNova Token Plan")
         add(.windowSession, "会话", "Session")
@@ -759,6 +794,7 @@ final class L10n: ObservableObject {
         add(.errorNebulaMissingCredentials, "未配置 APINebula 控制台会话或 API Key。请先在浏览器登录 apinebula.ai，再点“重新读取浏览器登录”。", "No APINebula console session or API key is configured. Sign in at apinebula.ai, then click “Re-import Browser Sign-in”.")
         add(.errorNebulaInvalidToken, "APINebula 控制台会话或 API Key 无效。余额接口通常需要浏览器登录会话，请重新导入。", "The APINebula console session or API key is invalid. Balance endpoints usually need a browser sign-in session; re-import it.")
         add(.errorNebulaBrowserSessionMissing, "没有在浏览器中找到 apinebula.ai 登录会话。请先在浏览器登录控制台。", "No apinebula.ai browser session was found. Sign in to the console in a browser first.")
+        add(.errorNebulaUserIdMissing, "已找到登录会话，但无法读取控制台账号 ID（New-Api-User）。请改用已登录的 Chromium 系浏览器（Chrome / Arc / Edge / Brave）导入。", "Found a sign-in, but could not read the console account id (New-Api-User). Import from a signed-in Chromium browser (Chrome / Arc / Edge / Brave) instead.")
         add(.errorNebulaBrowserAuthorizationRequired, "TokenBar 尚未缓存 APINebula 浏览器登录。请在 APINebula 设置中点“重新读取浏览器登录”。", "TokenBar has no cached APINebula browser sign-in. Click “Re-import Browser Sign-in” in APINebula settings.")
         add(.errorZaiMissingCredentials, "未找到智谱 API Key。请在智谱设置中填写，或设置环境变量 Z_AI_API_KEY。", "No Z.ai API key found. Enter one in the Z.ai settings, or set Z_AI_API_KEY.")
         add(.errorZaiInvalidToken, "智谱 API Key 无效或已过期。请检查区域与 Key 是否匹配（BigModel CN / Global）。", "The Z.ai API key is invalid or expired. Check that the region and key match (BigModel CN / Global).")
@@ -772,9 +808,12 @@ final class L10n: ObservableObject {
         add(.errorLongcatInvalidSession, "LongCat 登录已失效。请重新登录 longcat.chat，或更新手动 Cookie。", "The LongCat sign-in expired. Sign in again at longcat.chat or update the manual Cookie.")
         add(.errorLongcatBrowserSessionMissing, "没有在浏览器中找到 longcat.chat 登录会话。请先在浏览器登录 LongCat 控制台。", "No longcat.chat browser session was found. Sign in to the LongCat console in a browser first.")
         add(.errorLongcatBrowserAuthorizationRequired, "TokenBar 尚未缓存 LongCat 浏览器登录。请在 LongCat 设置中点“重新读取浏览器登录”。", "TokenBar has no cached LongCat browser sign-in. Click “Re-import Browser Sign-in” in LongCat settings.")
-        add(.errorAliyunMissingCredentials, "未找到阿里云 Coding Plan API Key。", "No Alibaba Cloud Coding Plan API key found.")
-        add(.errorAliyunInvalidToken, "阿里云 Coding Plan API Key 无效。请到百炼控制台「Coding Plan」页面重新获取。", "The Alibaba Cloud Coding Plan API key is invalid. Get a new one from the Bailian console Coding Plan page.")
-        add(.errorAliyunNotActivated, "阿里云 Coding Plan 尚未开通或暂不可用。请在百炼控制台开通（注意开通期限）；开通后刷新即可读取用量。", "The Alibaba Cloud Coding Plan is not activated yet. Activate it in the Bailian console (mind the activation deadline); usage will appear on the next refresh.")
+        add(.errorAliyunMissingCredentials, "未找到阿里云 AK/SK。请在「设置 → 阿里云百炼」填写，或设置环境变量 ALIYUN_ACCESS_KEY_ID / ALIYUN_ACCESS_KEY_SECRET。", "No Alibaba Cloud AK/SK found. Fill them in Settings → Alibaba Cloud Bailian, or set ALIYUN_ACCESS_KEY_ID / ALIYUN_ACCESS_KEY_SECRET.")
+        add(.errorAliyunInvalidToken, "阿里云拒绝了当前凭据。请重新浏览器登录，或检查 AK/SK 是否有效且有 modelstudio:GenerateCLIAccessToken 权限。", "Alibaba Cloud rejected the current credential. Sign in via the browser again, or check that the AK/SK pair is valid and has the modelstudio:GenerateCLIAccessToken permission.")
+        add(.errorAliyunNotActivated, "未找到有效的阿里云 Token Plan 或 Coding Plan 订阅。请在百炼控制台确认套餐状态；两种套餐都不在时刷新会报此错。", "No valid Alibaba Cloud Token Plan or Coding Plan subscription was found. Check the plan status in the Bailian console; this error means neither plan is active on the account.")
+        add(.errorAliyunConsoleLoginExpired, "阿里云控制台登录已过期。请在「设置 → 阿里云百炼」重新点击浏览器登录。", "The Bailian console sign-in has expired. Click browser sign-in again in Settings → Alibaba Cloud Bailian.")
+        add(.errorAliyunConsoleLoginTimeout, "浏览器登录超时（10 分钟未完成）。请重试。", "Browser sign-in timed out (not completed within 10 minutes). Please try again.")
+        add(.errorAliyunConsoleLoginFailed, "阿里云控制台浏览器登录失败。", "The Bailian console browser sign-in failed.")
         add(.errorStepFunMissingCredentials, "未导入阶跃控制台登录会话。请在阶跃设置中点“重新读取浏览器登录”，或粘贴手动 Cookie。", "No StepFun console sign-in has been imported. Click “Re-import Browser Sign-in” in the StepFun settings, or paste a manual Cookie.")
         add(.errorStepFunInvalidSession, "阶跃控制台登录已失效。请重新读取浏览器登录。", "The StepFun console sign-in expired. Re-import the browser session.")
         add(.errorStepFunBrowserSessionMissing, "没有在浏览器中找到 stepfun.com 登录会话。请先在浏览器登录阶跃控制台。", "No stepfun.com sign-in session was found in the browser. Sign in to the StepFun console first.")
@@ -795,9 +834,15 @@ final class L10n: ObservableObject {
         add(.apiKeyNoWindow, "API Key 有效，但未返回用量窗口。", "API key is valid, but no usage window was returned.")
 
         // Alibaba Cloud (阿里云百炼 Coding Plan)
-        add(.aliyunAPIKeyLabel, "API Key", "API Key")
-        add(.aliyunCredentialsHint, "在百炼控制台「Coding Plan」页面获取专属 API Key（sk-sp- 开头）；也可用环境变量 ALIYUN_CODING_PLAN_API_KEY（与按量计费 sk- Key 不互通）。", "Get the dedicated Coding Plan key (sk-sp-…) from the Bailian console; ALIYUN_CODING_PLAN_API_KEY also works. Not interchangeable with pay-as-you-go sk- keys.")
-        add(.aliyunPendingHint, "用量读取在套餐开通后自动生效；若仍未显示，需把控制台「Coding Plan」页面的网络请求记录交给开发者。", "Usage reading activates automatically once the plan is activated. If it still does not appear, hand the console Coding Plan page network log to the developer.")
+        add(.aliyunAccessKeyIDLabel, "Access Key ID", "Access Key ID")
+        add(.aliyunAccessKeySecretLabel, "Access Key Secret", "Access Key Secret")
+        add(.aliyunAPIKeyLabel, "API Key（sk-sp-，可选）", "API Key (sk-sp-, optional)")
+        add(.aliyunBrowserLogin, "浏览器登录百炼控制台", "Browser Sign-in to Bailian Console")
+        add(.aliyunConsoleSignedIn, "已登录", "signed in")
+        add(.aliyunConsoleNotSignedIn, "未登录", "not signed in")
+        add(.aliyunConsoleLoginStatus, "控制台登录：%@", "Console sign-in: %@")
+        add(.aliyunCredentialsHint, "推荐「浏览器登录」：点击后会在浏览器打开百炼控制台登录页，登录成功后自动返回读取用量，无需 AK/SK。也可填写阿里云 AK/SK 自动兑换访问令牌（需 modelstudio:GenerateCLIAccessToken 权限，建议只读 RAM 子账号）；或环境变量 ALIYUN_ACCESS_KEY_ID / ALIYUN_ACCESS_KEY_SECRET。支持 Token Plan 与 Coding Plan，自动识别。", "Browser sign-in is recommended: it opens the Bailian console login page in your browser and returns automatically to read usage — no AK/SK needed. An Aliyun AK/SK pair also works (needs the modelstudio:GenerateCLIAccessToken permission; a read-only RAM sub-account is recommended), as do the ALIYUN_ACCESS_KEY_ID / ALIYUN_ACCESS_KEY_SECRET environment variables. Both Token Plan and Coding Plan are supported and detected automatically.")
+        add(.aliyunTokenHint, "访问令牌只在内存中缓存（约 10 分钟），过期自动重换，不会写入磁盘；sk-sp- 套餐 Key 主要用于模型调用，这里只作为兜底尝试。", "The console token is cached in memory only (~10 minutes) and re-minted automatically when it expires; it is never written to disk. The sk-sp- plan key authenticates model calls and is only tried here as a last resort.")
         add(.senseNovaCredentialsHint, "在浏览器登录 https://platform.sensenova.cn/console 后，点“重新读取浏览器登录”导入控制台会话（存 Keychain）；读取浏览器 Cookie 需要 TokenBar 拥有完全磁盘访问权限。Token Plan 的额度接口官方未公开，App 正在通过探测确定接口（探测响应写入资源库 TokenBar/sensenova-last-response.txt）。", "Sign in to https://platform.sensenova.cn/console in a browser, then click “Re-import Browser Sign-in” to capture the console session (stored in Keychain). Reading browser cookies requires Full Disk Access. The Token Plan quota API is not publicly documented; TokenBar probes the candidate endpoints to confirm it (probe responses are written to Application Support/TokenBar/sensenova-last-response.txt).")
         add(.senseNovaAPIKeyLabel, "API Key（Bearer）", "API Key (Bearer)")
         add(.stepFunCredentialsHint, "在浏览器登录 https://platform.stepfun.com 后，点“重新读取浏览器登录”导入控制台会话（存 Keychain，自动续期）。阶跃的套餐额度只认控制台会话——API Key 只能调模型、读不了额度（已实测确认），所以 API Key 栏对查用量无效，可留空。", "Sign in to https://platform.stepfun.com in a browser, then click “Re-import Browser Sign-in” to capture the console session (stored in Keychain, auto-rotated). StepFun plan quota is console-session only — API keys can call models but cannot read quota (verified), so the API-key field is not needed for usage tracking.")

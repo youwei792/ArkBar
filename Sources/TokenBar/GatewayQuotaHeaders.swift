@@ -79,8 +79,18 @@ enum GatewayQuotaHeaders {
     }
 
     /// Human-readable dump of every header (for the support diagnostic).
+    /// Credential-bearing headers are dropped: diagnostics may be shared with
+    /// support, and a gateway `Set-Cookie` must never land in a file.
     static func dump(_ headers: [String: String]) -> String {
         headers
+            .filter { key, _ in
+                let lower = key.lowercased()
+                return !lower.contains("cookie")
+                    && !lower.contains("authorization")
+                    && !lower.contains("token")
+                    && !lower.contains("api-key")
+                    && !lower.contains("secret")
+            }
             .sorted { $0.key.lowercased() < $1.key.lowercased() }
             .map { "\($0.key): \($0.value)" }
             .joined(separator: "\n")

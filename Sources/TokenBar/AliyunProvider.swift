@@ -4,38 +4,10 @@ import Foundation
 
 /// Bailian console destinations for the Coding Plan product.
 enum AliyunConsole {
-    /// Usage dashboard; also where the dedicated `sk-sp-…` API key is issued.
+    /// Console root — the subscription section lists both Token Plan and
+    /// Coding Plan, so no product-specific page is assumed.
     static let dashboardURL = URL(
-        string: "https://bailian.console.aliyun.com/cn-beijing/subscription/coding-plan")!
-}
-
-// MARK: - Credentials
-
-/// Reads the dedicated Coding Plan API key from the environment. Settings
-/// (Keychain) values take precedence; this is the fallback.
-enum AliyunCredentialResolver {
-    static let apiKeyKeys = ["ALIYUN_CODING_PLAN_API_KEY"]
-
-    static func apiKey(environment: [String: String]) -> String? {
-        for key in apiKeyKeys {
-            guard let raw = environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !raw.isEmpty
-            else {
-                continue
-            }
-            var value = raw
-            if (value.hasPrefix("\"") && value.hasSuffix("\"")) ||
-                (value.hasPrefix("'") && value.hasSuffix("'"))
-            {
-                value = String(value.dropFirst().dropLast())
-            }
-            value = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !value.isEmpty {
-                return value
-            }
-        }
-        return nil
-    }
+        string: "https://bailian.console.aliyun.com/")!
 }
 
 // MARK: - Parsed model
@@ -67,7 +39,7 @@ struct AliyunWindowEntry: Sendable, Equatable {
     let resetsAt: Date?
 }
 
-/// Parsed Alibaba Cloud Coding Plan usage, before mapping to ArkBar models.
+/// Parsed Alibaba Cloud plan usage, before mapping to ArkBar models.
 struct AliyunUsageSnapshot: Sendable, Equatable {
     let planName: String?
     /// Verified subscription expiry when the source exposes it.
@@ -75,24 +47,53 @@ struct AliyunUsageSnapshot: Sendable, Equatable {
     let windows: [AliyunWindowEntry]
 }
 
+/// The Token Plan subscription record. Token Plan's usage API publishes only
+/// ratios and reset times, so the plan tier and the subscription end date come
+/// from here — the same call the console page makes next to the usage one.
+struct AliyunSubscription: Sendable, Equatable {
+    let planName: String?
+    let expiryDate: Date?
+}
+
+/// Which Alibaba Cloud subscription the account holds. Coding Plan meters
+/// request counts (5-hour / weekly / monthly); Token Plan meters credit
+/// ratios (5-hour / weekly). The two have different console APIs, so the
+/// first successful fetch records which one this account uses and later
+/// refreshes query only that API.
+enum AliyunPlanKind: String, Sendable, CaseIterable {
+    case token
+    case coding
+
+    /// Try the detected plan first; an undetected account tries Token Plan
+    /// (the personal default) before Coding Plan.
+    static func order(detected: AliyunPlanKind?) -> [AliyunPlanKind] {
+        switch detected {
+        case .coding: return [.coding, .token]
+        case .token, .none: return [.token, .coding]
+        }
+    }
+}
+
 // MARK: - Provider
 
 /// Alibaba Cloud (阿里云百炼) Coding Plan usage.
 ///
-/// Stage 1 (skeleton): the plan is bought but not yet activated, and Alibaba
-/// documents no public quota API — the console Coding Plan page is the only
-/// usage view. The provider therefore validates the `sk-sp-…` key and then
-/// fails honestly with `aliyunNotActivated` instead of guessing an endpoint.
-/// Stage 2 (after activation) replaces `fetchUsage` with the real request:
-/// open the console page, capture the usage XHR in devtools, and map it onto
-/// `AliyunUsageSnapshot` — see docs/aliyun-handoff.md.
+/// Alibaba publishes no public quota API: usage is only visible on the console
+/// Coding Plan page, and the `sk-sp-…` plan key authenticates the model
+/// gateway only. The console's own data path is the Model Studio console
+/// gateway, which the official `bl` CLI drives with a short-lived access
+/// token minted from an Aliyun AK/SK pair (`GenerateCLIAccessToken`,
+/// ACS3-HMAC-SHA256 signed). TokenBar follows that exact contract — see
+/// `AliyunSigner.swift` and docs/aliyun-handoff.md — so a read-only AK/SK pair
+/// is all the configuration this needs.
 final class AliyunProvider: UsageProvider {
     let displayName = "阿里云"
 
     private let settings: AppSettings
-    private let transport: any HTTPTransport
+    private let transport: HTTPTransport
+    private let tokenStore = AliyunConsoleTokenStore()
 
-    init(settings: AppSettings, transport: any HTTPTransport = defaultHTTPTransport()) {
+    init(settings: AppSettings, transport: HTTPTransport = defaultHTTPTransport()) {
         self.settings = settings
         self.transport = transport
     }
@@ -101,29 +102,164 @@ final class AliyunProvider: UsageProvider {
     func isAvailable(environment: [String: String]) -> Bool { true }
 
     func fetch(environment: [String: String]) async throws -> ProviderSnapshot {
-        let apiKey = await MainActor.run { Self.trimmed(self.settings.aliyunAPIKey) }
-            ?? AliyunCredentialResolver.apiKey(environment: environment)
-
-        guard let apiKey, !apiKey.isEmpty else {
+        let (consoleToken, storedCredentials, storedAPIKey) = await MainActor.run {
+            (
+                self.settings.aliyunConsoleToken,
+                self.settings.storedAliyunCredentials,
+                Self.trimmed(self.settings.aliyunAPIKey)
+            )
+        }
+        let credentials = storedCredentials ?? AliyunCredentialResolver.resolve(environment: environment)
+        let apiKey = storedAPIKey ?? AliyunAPIKeyResolver.resolve(environment: environment)
+        let hasConsoleToken = !consoleToken.isEmpty
+        guard hasConsoleToken || credentials != nil || apiKey != nil else {
             throw UsageError.aliyunMissingCredentials
         }
 
-        let usage = try await fetchUsage(apiKey: apiKey)
-        return Self.makeSnapshot(from: usage)
+        let (token, source) = try await tokenStore.accessToken(
+            consoleToken: consoleToken,
+            credentials: credentials,
+            apiKey: apiKey,
+            transport: transport)
+        do {
+            return try await fetchUsage(token: token)
+        } catch {
+            switch source {
+            case .apiKey:
+                // The plan key is scoped to the model gateway; the console
+                // gateway rejects it whatever the exact status or envelope.
+                // Remember the rejection and point at the paths that work.
+                await tokenStore.markAPIKeyRejected()
+                throw UsageError.aliyunInvalidToken
+            case .browserLogin:
+                // The console-login token cannot be refreshed without the
+                // user. Drop it, then fall back to AK/SK when available.
+                guard case UsageError.aliyunInvalidToken = error else { throw error }
+                await MainActor.run { self.settings.setAliyunConsoleToken(nil) }
+                if let credentials {
+                    await tokenStore.invalidateMinted()
+                    let (fresh, _) = try await tokenStore.accessToken(
+                        consoleToken: nil, credentials: credentials, apiKey: nil,
+                        transport: transport)
+                    return try await fetchUsage(token: fresh)
+                }
+                throw UsageError.aliyunConsoleLoginExpired
+            case .accessKey:
+                // The console token is short-lived; mint a fresh one and
+                // retry once before surfacing the credential error.
+                guard case UsageError.aliyunInvalidToken = error else { throw error }
+                await tokenStore.invalidateMinted()
+                let (fresh, _) = try await tokenStore.accessToken(
+                    consoleToken: nil, credentials: credentials, apiKey: nil,
+                    transport: transport)
+                return try await fetchUsage(token: fresh)
+            }
+        }
     }
 
-    /// Stage 2 replaces this body with the real console/API request. The
-    /// `sk-sp-…` key authenticates the dedicated gateway
-    /// (`https://coding.dashscope.aliyuncs.com/v1`); whether it also
-    /// authorizes a quota endpoint is exactly what the activation spike must
-    /// confirm.
-    private func fetchUsage(apiKey: String) async throws -> AliyunUsageSnapshot {
+    /// Queries the account's plan. An account holds either a Token Plan or a
+    /// Coding Plan (never both); the detected kind is tried first so a normal
+    /// refresh costs exactly one usage read.
+    private func fetchUsage(token: String) async throws -> ProviderSnapshot {
+        let detected = await MainActor.run { self.settings.aliyunDetectedPlan }
+        var absent: [(kind: AliyunPlanKind, raw: Data)] = []
+        for kind in AliyunPlanKind.order(detected: detected) {
+            switch try await fetchPlan(kind: kind, token: token) {
+            case let .plan(snapshot):
+                if kind != detected {
+                    await MainActor.run { self.settings.aliyunDetectedPlan = kind }
+                }
+                return snapshot
+            case let .absent(raw):
+                absent.append((kind, raw))
+            }
+        }
+        Self.writeDiagnostic(Self.noPlanDiagnostic(absent))
         throw UsageError.aliyunNotActivated
+    }
+
+    /// Both APIs answered without an error envelope, so record exactly what each
+    /// one returned — that is the difference between "this account has no such
+    /// plan" and "the payload moved", and it cannot be told apart from the menu.
+    private static func noPlanDiagnostic(
+        _ absent: [(kind: AliyunPlanKind, raw: Data)]
+    ) -> String {
+        absent.map {
+            "\($0.kind.rawValue) plan: "
+                + HTTPErrorSummary.truncate(String(decoding: $0.raw, as: UTF8.self), 1200)
+        }
+        .joined(separator: "\n")
+    }
+
+    /// One plan's usage. `.absent` means the account has no such plan — that is
+    /// not an error, the caller tries the other kind.
+    private func fetchPlan(kind: AliyunPlanKind, token: String) async throws -> PlanOutcome {
+        do {
+            switch kind {
+            case .token:
+                let data = try await AliyunConsoleAPI.fetchTokenPlanUsage(
+                    token: token, transport: transport)
+                let usage = try Self.parseTokenPlan(data: data)
+                guard !usage.windows.isEmpty else { return .absent(raw: data) }
+                let subscription = await fetchSubscription(token: token)
+                let merged = AliyunUsageSnapshot(
+                    planName: subscription.planName ?? usage.planName,
+                    expiryDate: subscription.expiryDate ?? usage.expiryDate,
+                    windows: usage.windows)
+                return .plan(Self.makeSnapshot(
+                    from: merged,
+                    product: .aliyunTokenPlan,
+                    edition: merged.planName.map(Self.editionName)))
+            case .coding:
+                let data = try await AliyunConsoleAPI.fetchCodingPlanUsage(
+                    token: token, transport: transport)
+                do {
+                    let usage = try Self.parse(data: data)
+                    return .plan(Self.makeSnapshot(
+                        from: usage,
+                        product: .aliyunCodingPlan,
+                        edition: usage.planName.map(Self.editionName)))
+                } catch UsageError.aliyunNotActivated {
+                    // No VALID Coding Plan instance: let the caller try the
+                    // Token Plan API.
+                    return .absent(raw: data)
+                }
+            }
+        } catch {
+            Self.writeDiagnostic(
+                "\(kind.rawValue) plan query failed: \(HTTPErrorSummary.truncate(error.localizedDescription))")
+            throw error
+        }
+    }
+
+    private enum PlanOutcome {
+        case plan(ProviderSnapshot)
+        case absent(raw: Data)
+    }
+
+    /// Reads the Token Plan subscription record. Usage already answered the
+    /// question the card exists for, so a failure here costs the expiry badge
+    /// and the tier name rather than failing the whole refresh.
+    private func fetchSubscription(token: String) async -> AliyunSubscription {
+        do {
+            let data = try await AliyunConsoleAPI.fetchTokenPlanSubscription(
+                token: token, transport: transport)
+            return try Self.parseTokenPlanSubscription(data: data)
+        } catch {
+            Self.writeDiagnostic(
+                "token plan subscription query failed: "
+                    + HTTPErrorSummary.truncate(error.localizedDescription))
+            return AliyunSubscription(planName: nil, expiryDate: nil)
+        }
     }
 
     // MARK: - Mapping (static for tests)
 
-    static func makeSnapshot(from usage: AliyunUsageSnapshot) -> ProviderSnapshot {
+    static func makeSnapshot(
+        from usage: AliyunUsageSnapshot,
+        product: PlanSnapshot.Product,
+        edition: String?
+    ) -> ProviderSnapshot {
         let windows = usage.windows
             .sorted { $0.kind.windowRank < $1.kind.windowRank }
             .map {
@@ -135,9 +271,9 @@ final class AliyunProvider: UsageProvider {
                     resetsAt: $0.resetsAt)
             }
         let plan = PlanSnapshot(
-            id: "aliyun-coding-plan",
-            product: .aliyunCodingPlan,
-            edition: usage.planName ?? "Coding Plan",
+            id: "aliyun-\(product.rawValue)",
+            product: product,
+            edition: edition,
             tier: nil,
             seatID: nil,
             subscribed: true,
@@ -146,10 +282,16 @@ final class AliyunProvider: UsageProvider {
             errorMessage: nil)
         return ProviderSnapshot(
             providerName: "阿里云",
-            authMethod: "apikey",
+            authMethod: "aksk",
             plans: [plan],
             updatedAt: Date(),
             errorMessage: nil)
+    }
+
+    /// The console reports a lowercase instance type ("pro"); show it the way
+    /// the console page does.
+    private static func editionName(_ raw: String) -> String {
+        raw.isEmpty ? "Coding Plan" : raw.prefix(1).uppercased() + raw.dropFirst()
     }
 
     private static func trimmed(_ value: String) -> String? {
@@ -159,13 +301,98 @@ final class AliyunProvider: UsageProvider {
 
     // MARK: - Decoding (static for tests)
 
-    /// Parses a usage payload into `AliyunUsageSnapshot`.
+    /// Parses the console gateway response.
     ///
-    /// PLACEHOLDER CONTRACT — written before the plan's activation, tolerant
-    /// on purpose. Field names are best guesses (with common aliases) and
-    /// must be reconciled with the response captured from the console page
-    /// during the stage-2 spike; the mapping layer above does not change.
+    /// Coding Plan envelope (verified against the official CLI's fixtures):
+    /// `data → DataV2 → data → data → codingPlanInstanceInfos[]`, where the
+    /// first `status == "VALID"` instance's `codingPlanQuotaInfo` carries
+    /// `per5Hour*` / `perWeek*` / `perBillMonth*` triplets of
+    /// `UsedQuota` / `TotalQuota` / `QuotaNextRefreshTime` (epoch millis).
     static func parse(data: Data) throws -> AliyunUsageSnapshot {
+        let payload = try Self.unwrapEnvelope(data)
+
+        guard let instances = payload["codingPlanInstanceInfos"] as? [[String: Any]],
+              let instance = instances.first(where: {
+                  ($0["status"] as? String)?.uppercased() == "VALID"
+              })
+        else {
+            // No active subscription: expired, refunded, or not activated.
+            throw UsageError.aliyunNotActivated
+        }
+
+        let quota = instance["codingPlanQuotaInfo"] as? [String: Any] ?? [:]
+        var windows: [AliyunWindowEntry] = []
+        for (prefix, kind) in [
+            ("per5Hour", AliyunWindowEntry.Kind.fiveHour),
+            ("perWeek", AliyunWindowEntry.Kind.weekly),
+            ("perBillMonth", AliyunWindowEntry.Kind.monthly),
+        ] {
+            if let window = Self.window(from: quota, prefix: prefix, kind: kind) {
+                windows.append(window)
+            }
+        }
+        guard !windows.isEmpty else {
+            throw UsageError.parseFailed("Alibaba Cloud: no quota windows in the Coding Plan instance")
+        }
+
+        let instanceType = (instance["instanceType"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let expiryDate = ["expiredTime", "expireTime", "endTime", "subscriptionExpireTime"]
+            .compactMap { instance[$0] }
+            .compactMap { Self.dateValue($0) }
+            .first
+        return AliyunUsageSnapshot(
+            planName: instanceType?.isEmpty == false ? instanceType : nil,
+            expiryDate: expiryDate,
+            windows: windows)
+    }
+
+    /// Parses the Token Plan usage payload: `per5HourPercentage` /
+    /// `per1WeekPercentage` / `per1MonthPercentage` are **used** ratios in
+    /// [0, 1] (absent means the plan has no such window — an Essential-style
+    /// personal plan reports the monthly one only), with epoch-millisecond reset
+    /// times. No absolute counts are published, so the rings render as
+    /// percent-only windows.
+    static func parseTokenPlan(data: Data) throws -> AliyunUsageSnapshot {
+        let payload = try Self.unwrapEnvelope(data)
+
+        var windows: [AliyunWindowEntry] = []
+        let ratios: [(key: String, resetKey: String, kind: AliyunWindowEntry.Kind)] = [
+            ("per5HourPercentage", "per5HourResetTime", .fiveHour),
+            ("per1WeekPercentage", "per1WeekResetTime", .weekly),
+            ("per1MonthPercentage", "per1MonthResetTime", .monthly),
+        ]
+        for ratio in ratios {
+            guard let value = Self.doubleValue(payload[ratio.key]), value.isFinite else {
+                continue
+            }
+            windows.append(AliyunWindowEntry(
+                kind: ratio.kind,
+                usedPercent: min(100, max(0, value * 100)),
+                used: nil,
+                total: nil,
+                resetsAt: Self.dateValue(payload[ratio.resetKey])))
+        }
+        return AliyunUsageSnapshot(planName: nil, expiryDate: nil, windows: windows)
+    }
+
+    /// Parses the Token Plan subscription record: `specCode` is the plan tier
+    /// (`"essential"`), `endTime` the subscription expiry in epoch
+    /// milliseconds. `remainingDays` is deliberately ignored — it is derived
+    /// data the app recomputes from the date, and a stale copy of it would
+    /// disagree with the countdown.
+    static func parseTokenPlanSubscription(data: Data) throws -> AliyunSubscription {
+        let payload = try Self.unwrapEnvelope(data)
+        let specCode = (payload["specCode"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return AliyunSubscription(
+            planName: (specCode?.isEmpty == false) ? specCode : nil,
+            expiryDate: Self.dateValue(payload["endTime"]))
+    }
+
+    /// Walks the console envelope (`data → DataV2 → data → data`, with a
+    /// shallower fallback) — the same tolerant unwrap the official CLI does.
+    static func unwrapEnvelope(_ data: Data) throws -> [String: Any] {
         guard !data.isEmpty else {
             throw UsageError.parseFailed("Empty Alibaba Cloud response body")
         }
@@ -175,83 +402,52 @@ final class AliyunProvider: UsageProvider {
         } catch {
             throw UsageError.parseFailed("Alibaba Cloud: \(error.localizedDescription)")
         }
-        guard let root = object as? [String: Any] else {
+        guard var payload = object as? [String: Any] else {
             throw UsageError.parseFailed("Alibaba Cloud: expected a JSON object")
         }
-
-        let planName = [root["plan"], root["planName"], root["planType"]]
-            .compactMap { $0 as? String }
-            .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        let expiryDate = ["expiresAt", "expireTime", "expiryDate"]
-            .compactMap { root[$0] }
-            .compactMap { Self.dateValue($0) }
-            .first
-
-        guard let rawWindows = root["windows"] as? [[String: Any]] else {
-            throw UsageError.parseFailed("Alibaba Cloud: missing usage windows")
-        }
-
-        var windows: [AliyunWindowEntry] = []
-        for raw in rawWindows {
-            guard let kind = Self.windowKind(raw["kind"] ?? raw["window"] ?? raw["type"]) else {
-                continue
+        if let data = payload["data"] as? [String: Any] {
+            if let dataV2 = data["DataV2"] as? [String: Any] {
+                let inner = dataV2["data"] as? [String: Any]
+                payload = (inner?["data"] as? [String: Any]) ?? inner ?? dataV2
+            } else {
+                payload = data["data"] as? [String: Any] ?? data
             }
-            let usedPercent = ["usedPercent", "percent", "usagePercent"]
-                .compactMap { raw[$0] }
-                .compactMap { Self.doubleValue($0) }
-                .first ?? 0
-            let used = ["used", "usedCount", "currentValue"]
-                .compactMap { raw[$0] }
-                .compactMap { Self.intValue($0) }
-                .first
-            let total = ["total", "limit", "quota"]
-                .compactMap { raw[$0] }
-                .compactMap { Self.intValue($0) }
-                .first
-            let resetsAt = ["resetAt", "resetsAt", "resetTime", "nextResetTime"]
-                .compactMap { raw[$0] }
-                .compactMap { Self.dateValue($0) }
-                .first
-            windows.append(AliyunWindowEntry(
-                kind: kind,
-                usedPercent: min(100, max(0, usedPercent)),
-                used: used,
-                total: total,
-                resetsAt: resetsAt))
         }
-
-        if windows.isEmpty {
-            throw UsageError.parseFailed("Alibaba Cloud: no recognizable usage windows")
-        }
-        return AliyunUsageSnapshot(planName: planName, expiryDate: expiryDate, windows: windows)
+        return payload
     }
 
-    private static func windowKind(_ value: Any?) -> AliyunWindowEntry.Kind? {
-        guard let string = value as? String else { return nil }
-        switch string.lowercased() {
-        case "five_hour", "five-hour", "5h", "session", "hourly":
-            return .fiveHour
-        case "weekly", "week":
-            return .weekly
-        case "monthly", "month":
-            return .monthly
-        default:
+    /// One `per5Hour` / `perWeek` / `perBillMonth` triplet. A window without a
+    /// positive total does not apply to the plan and is omitted, matching the
+    /// console's own rendering.
+    private static func window(
+        from quota: [String: Any], prefix: String, kind: AliyunWindowEntry.Kind
+    ) -> AliyunWindowEntry? {
+        guard let total = Self.intValue(quota["\(prefix)TotalQuota"]), total > 0 else {
             return nil
+        }
+        let used = Self.intValue(quota["\(prefix)UsedQuota"]) ?? 0
+        let usedPercent = min(100, max(0, Double(used) / Double(total) * 100))
+        let resetsAt = Self.dateValue(quota["\(prefix)QuotaNextRefreshTime"])
+        return AliyunWindowEntry(
+            kind: kind,
+            usedPercent: usedPercent,
+            used: used,
+            total: total,
+            resetsAt: resetsAt)
+    }
+
+    private static func intValue(_ value: Any?) -> Int? {
+        switch value {
+        case let number as NSNumber: return number.intValue
+        case let string as String: return Int(string.trimmingCharacters(in: .whitespaces))
+        default: return nil
         }
     }
 
     private static func doubleValue(_ value: Any?) -> Double? {
         switch value {
         case let number as NSNumber: return number.doubleValue
-        case let string as String: return Double(string)
-        default: return nil
-        }
-    }
-
-    private static func intValue(_ value: Any?) -> Int? {
-        switch value {
-        case let number as NSNumber: return number.intValue
-        case let string as String: return Int(string)
+        case let string as String: return Double(string.trimmingCharacters(in: .whitespaces))
         default: return nil
         }
     }
@@ -275,6 +471,19 @@ final class AliyunProvider: UsageProvider {
         default:
             return nil
         }
+    }
+
+    /// Support diagnostic: the request shape and a bounded body summary land in
+    /// the app-support directory (never credentials — the token is a header).
+    static func writeDiagnostic(_ text: String) {
+        guard let dir = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("TokenBar", isDirectory: true)
+        else { return }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? text.write(
+            to: dir.appendingPathComponent("aliyun-last-response.txt"),
+            atomically: true, encoding: .utf8)
     }
 }
 

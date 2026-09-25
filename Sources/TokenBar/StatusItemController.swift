@@ -135,7 +135,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             settings.$showLongCat.map { _ in },
             settings.$showAliyun.map { _ in },
             settings.$showStepFun.map { _ in },
-            settings.$showSenseNova.map { _ in })
+            settings.$showSenseNova.map { _ in },
+            settings.$showSummary.map { _ in })
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.updateIcon()
@@ -160,30 +161,18 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func applyStatusItemLength() {
         statusItem.length = Self.statusItemLength(
             for: settings.displayMode,
-            showsBalance: settings.showsBalanceInStatusBar(iconTab(for: store.currentStatus)))
+            showsBalance: settings.showsBalanceInStatusBar(iconTab()))
     }
 
     /// Picks the best provider tab for the status-item icon: the explicit tab in
-    /// provider mode, or the tightest (lowest remaining percent) in summary mode.
-    private func iconTab(for loadStatus: UsageStore.LoadStatus?) -> ProviderTab {
+    /// provider mode, or the tightest (lowest remaining percent) in summary mode —
+    /// the same pick `UsageStore.tightestVisibleTab` makes for the summary
+    /// status and the refresh row, so icon, menu and refresh state never disagree.
+    private func iconTab() -> ProviderTab {
         if case let .provider(tab) = settings.selectedMenu {
             return tab
         }
-        // Summary mode: pick the provider with the lowest remaining percent.
-        // Uses menuBarWindow so an exhausted weekly pool outranks a fresh
-        // 100% session on another provider.
-        let candidates = settings.visibleTabs
-            .map { ($0, store.status(for: $0)) }
-            .filter { $0.1.snapshot?.menuBarWindow != nil }
-        if let best = candidates.min(by: { a, b in
-            let pa = a.1.snapshot?.menuBarWindow?.remainingPercent ?? 100
-            let pb = b.1.snapshot?.menuBarWindow?.remainingPercent ?? 100
-            return pa < pb
-        }) {
-            return best.0
-        }
-        // Fallback: first visible provider, or .ark
-        return settings.visibleTabs.first ?? .ark
+        return store.tightestVisibleTab ?? settings.visibleTabs.first ?? .ark
     }
 
     private func updateIcon(for loadStatus: UsageStore.LoadStatus? = nil, tab explicitTab: ProviderTab? = nil) {
@@ -210,7 +199,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             }
         }
         guard let button = statusItem.button else { return }
-        let tab = explicitTab ?? iconTab(for: effectiveStatus)
+        let tab = explicitTab ?? iconTab()
         let showBalance = settings.showsBalanceInStatusBar(tab)
         let valueText = statusValueText(
             for: effectiveStatus, tab: tab, remaining: remaining,
@@ -340,8 +329,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let status: MenuBuilder.State.Status
         switch menu {
         case .summary:
-            // Use the tightest provider for the refresh row state.
-            selectedTab = settings.visibleTabs.first ?? .ark
+            // The refresh row mirrors the tightest provider — the same pick
+            // the status-item icon makes.
+            selectedTab = store.tightestVisibleTab ?? settings.visibleTabs.first ?? .ark
             status = .ok(snapshot: ProviderSnapshot(
                 providerName: "", authMethod: nil, plans: [],
                 updatedAt: Date(), errorMessage: nil))
@@ -480,7 +470,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// open the reminder settings pane where they are managed.
     private func handleReminderTap(_ item: ExpiryReminderItem) {
         if let tab = item.tab {
-            settings.selectedMenu = .provider(tab)
+            // A hidden provider has no switcher button to land on — send the
+            // user to the reminder pane instead of dead-ending the selection.
+            if settings.isVisible(tab) {
+                settings.selectedMenu = .provider(tab)
+            } else {
+                showSettings(initialPane: .reminder)
+            }
             return
         }
         showSettings(initialPane: .reminder)

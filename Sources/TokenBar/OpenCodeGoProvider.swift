@@ -520,7 +520,9 @@ final class OpenCodeGoProvider: UsageProvider {
               let dictionary = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
         for key in ["message", "error", "detail"] {
-            if let value = dictionary[key] as? String, !value.isEmpty { return value }
+            if let value = dictionary[key] as? String, !value.isEmpty {
+                return HTTPErrorSummary.truncate(value)
+            }
         }
         return nil
     }

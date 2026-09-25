@@ -193,24 +193,47 @@ final class LongCatProvider: UsageProvider {
 
     // MARK: - Credential resolution
 
-    /// Resolves the Cookie header from (in order): manual setting, cached
-    /// browser session, environment variable. Throws if none found.
+    /// Resolves the Cookie header according to the configured source: manual
+    /// mode uses only the pasted cookie; automatic mode uses the cached
+    /// browser session, then the environment fallback.
     private func resolveCookieHeader(environment: [String: String]) async throws -> String {
-        let manual = await MainActor.run { settings.longcatCookie }
-        if !manual.isEmpty {
-            UsageStore.log("LongCat: using manual cookie (length \(manual.count))")
-            return manual
+        let (source, manual) = await MainActor.run {
+            (self.settings.longcatCookieSource, self.settings.longcatCookie)
         }
-        if let cached = LongCatBrowserSession.cachedSession() {
-            UsageStore.log("LongCat: using cached browser session from \(cached.sourceLabel) (length \(cached.cookieHeader.count))")
-            return cached.cookieHeader
-        }
-        if let envValue = LongCatCredentialResolver.cookieHeader(environment: environment) {
-            UsageStore.log("LongCat: using environment cookie (length \(envValue.count))")
-            return envValue
+        if let header = Self.resolveHeader(
+            source: source, manual: manual,
+            cachedHeader: LongCatBrowserSession.cachedSession()?.cookieHeader,
+            environment: environment)
+        {
+            return header
         }
         UsageStore.log("LongCat: no cookie source available")
         throw UsageError.longcatMissingCredentials
+    }
+
+    /// Pure resolution so the source selector's semantics are testable.
+    static func resolveHeader(
+        source: AppSettings.LongCatCookieSource,
+        manual: String,
+        cachedHeader: String?,
+        environment: [String: String]
+    ) -> String? {
+        switch source {
+        case .manual:
+            guard let header = CookieHeaderNormalizer.normalize(manual) else { return nil }
+            UsageStore.log("LongCat: using manual cookie (length \(header.count))")
+            return header
+        case .automatic:
+            if let cachedHeader {
+                UsageStore.log("LongCat: using cached browser session (length \(cachedHeader.count))")
+                return cachedHeader
+            }
+            if let envValue = LongCatCredentialResolver.cookieHeader(environment: environment) {
+                UsageStore.log("LongCat: using environment cookie (length \(envValue.count))")
+                return envValue
+            }
+            return nil
+        }
     }
 
     // MARK: - HTTP

@@ -362,8 +362,9 @@ final class ZaiProvider: UsageProvider {
             if response.statusCode == 401 || response.statusCode == 403 {
                 throw UsageError.zaiInvalidToken
             }
-            let body = String(data: response.data, encoding: .utf8) ?? ""
-            throw UsageError.apiError(statusCode: response.statusCode, message: "Z.ai quota: \(body)")
+            throw UsageError.apiError(
+                statusCode: response.statusCode,
+                message: "Z.ai quota: \(HTTPErrorSummary.summarize(response.data))")
         }
         // Some upstream issues (wrong endpoint/region/proxy) can yield HTTP 200
         // with an empty body. Surface a clear parse error rather than an opaque

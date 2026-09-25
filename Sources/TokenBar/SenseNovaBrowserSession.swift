@@ -29,8 +29,8 @@ enum SenseNovaBrowserSession {
     private static let sourceLabelKey = "tokenbar.senseNovaBrowserSourceLabel"
     private static let browserKey = "tokenbar.senseNovaBrowser"
     private static let client = BrowserCookieClient()
-    private static let query = BrowserCookieQuery(
-        domains: ["platform.sensenova.cn", "sensenova.cn", "console.sensecore.cn"])
+    private static let domains = ["platform.sensenova.cn", "sensenova.cn", "console.sensecore.cn"]
+    private static let query = BrowserCookieQuery(domains: domains)
 
     private static let preferredBrowsers: [Browser] = {
         let preferred: [Browser] = [.chrome, .arc, .safari, .edge, .brave, .firefox]
@@ -120,7 +120,11 @@ enum SenseNovaBrowserSession {
             do {
                 let sources = try client.records(matching: query, in: candidate)
                 for source in sources where !source.records.isEmpty {
-                    let header = BrowserCookieClient.makeHTTPCookies(source.records, origin: query.origin)
+                    // Strict domain boundary: the query matches by substring,
+                    // so lookalike domains (not-stepfun.com) could ride along.
+                    let records = CookieDomainFilter.filter(source.records, allowedDomains: domains)
+                    guard !records.isEmpty else { continue }
+                    let header = BrowserCookieClient.makeHTTPCookies(records, origin: query.origin)
                         .filter { !$0.name.lowercased().hasPrefix("utm_") }
                         .map { "\($0.name)=\($0.value)" }
                         .joined(separator: "; ")

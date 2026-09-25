@@ -3,8 +3,13 @@ import Foundation
 import FoundationNetworking
 #endif
 
-/// Provider that probes `/api/coding/v3/chat/completions` with an Ark API key and reads
-/// the `x-ratelimit-*` response headers. Mirrors CodexBar's DoubaoAPIFetchStrategy probe branch.
+/// Provider that reads the `x-ratelimit-*` response headers of the Ark coding
+/// gateway with an API key. Mirrors CodexBar's DoubaoAPIFetchStrategy probe branch.
+///
+/// The zero-cost `GET /models` probe runs first: the gateway attaches the same
+/// rate-limit headers to it without billing any chat tokens. Only when that
+/// route carries no quota contract does this fall back to a minimal billed
+/// chat probe (a single request per refresh, no model fan-out).
 ///
 /// This path only yields a single request-limit window (no weekly/monthly), so it is a
 /// last-resort fallback when neither arkcli SSO nor AK/SK are available.
@@ -24,7 +29,14 @@ final class ArkAPIKeyProvider: UsageProvider {
         let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw UsageError.missingCredentials }
 
-        // Try probe models in order; different keys may not have access to every model.
+        // Zero-cost probe first; nil means the route carried no quota headers
+        // and the billed chat probe is the only way to read the window.
+        if let snapshot = try await probeModels() {
+            return snapshot
+        }
+
+        // Billed fallback. Different keys may not have access to every model,
+        // so the probe models are tried in order.
         let probeModels = [
             environment["ARK_MODEL_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines),
             "doubao-seed-2.0-code",
@@ -46,6 +58,30 @@ final class ArkAPIKeyProvider: UsageProvider {
         throw lastError ?? UsageError.apiError(statusCode: 0, message: L(.errorProbeModels))
     }
 
+    /// Zero-cost probe: `GET /models` carries the same gateway rate-limit
+    /// headers as a chat call but never bills tokens. Returns nil when the
+    /// route is missing, not permitted, or carries no quota headers, so the
+    /// caller falls back to the billed chat probe.
+    private func probeModels() async throws -> ProviderSnapshot? {
+        var request = URLRequest(url: Self.modelsURL)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 15
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        let response = try await transport.response(for: request)
+        guard response.statusCode == 200 || response.statusCode == 429 else {
+            if response.statusCode == 404 || response.statusCode == 403 { return nil }
+            throw UsageError.apiError(
+                statusCode: response.statusCode,
+                message: HTTPErrorSummary.summarize(response.data))
+        }
+        guard let window = Self.rateLimitWindow(from: response.response.allHeaderFields) else {
+            return nil
+        }
+        return Self.snapshot(window: window)
+    }
+
     private func probe(model: String) async throws -> ProviderSnapshot {
         var request = URLRequest(url: Self.apiURL)
         request.httpMethod = "POST"
@@ -63,45 +99,40 @@ final class ArkAPIKeyProvider: UsageProvider {
         let response = try await transport.response(for: request)
         // Both 200 (success) and 429 (rate limited) carry rate-limit headers.
         guard response.statusCode == 200 || response.statusCode == 429 else {
-            throw UsageError.apiError(statusCode: response.statusCode, message: Self.errorSummary(response.data))
+            throw UsageError.apiError(
+                statusCode: response.statusCode,
+                message: HTTPErrorSummary.summarize(response.data))
         }
-
-        let headers = response.response.allHeaderFields
-        let remaining = Self.intHeader(headers, "x-ratelimit-remaining-requests")
-        let limit = Self.intHeader(headers, "x-ratelimit-limit-requests")
-        let resetString = Self.stringHeader(headers, "x-ratelimit-reset-requests")
-        let resetTime = resetString.flatMap(Self.parseResetTime)
 
         // If the key is valid but no limit headers, surface as "active, no window".
-        guard let limit, limit > 0, let remaining else {
-            return ProviderSnapshot(
-                providerName: "Ark (API Key)",
-                authMethod: "apikey",
-                plans: [PlanSnapshot(
-                    id: "apikey-probe",
-                    product: .codingPlan,
-                    edition: "personal",
-                    tier: nil,
-                    seatID: nil,
-                    subscribed: true,
-                    windows: [],
-                    expiryDate: nil,
-                    errorMessage: L(.apiKeyNoHeaders))],
-                updatedAt: Date(),
-                errorMessage: L(.apiKeyNoWindow))
+        guard let window = Self.rateLimitWindow(from: response.response.allHeaderFields) else {
+            return Self.noWindowSnapshot()
         }
+        return Self.snapshot(window: window)
+    }
 
+    private static let apiURL = URL(string: "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions")!
+    private static let modelsURL = URL(string: "https://ark.cn-beijing.volces.com/api/coding/v3/models")!
+
+    private static func rateLimitWindow(from headers: [AnyHashable: Any]) -> UsageWindow? {
+        let limit = intHeader(headers, "x-ratelimit-limit-requests")
+        let remaining = intHeader(headers, "x-ratelimit-remaining-requests")
+        guard let limit, limit > 0, let remaining else { return nil }
+        let resetTime = stringHeader(headers, "x-ratelimit-reset-requests").flatMap(parseResetTime)
         // Some gateways report a remaining value that briefly exceeds the limit
         // while a quota update propagates. Clamp both ends before rendering.
         let safeRemaining = min(limit, max(0, remaining))
         let used = limit - safeRemaining
-        let usedPercent = limit > 0 ? min(100, Double(used) / Double(limit) * 100) : 0
-        let window = UsageWindow(
+        let usedPercent = min(100, Double(used) / Double(limit) * 100)
+        return UsageWindow(
             label: "Requests",
             usedPercent: usedPercent,
             used: used,
             total: limit,
             resetsAt: resetTime)
+    }
+
+    private static func snapshot(window: UsageWindow) -> ProviderSnapshot {
         let plan = PlanSnapshot(
             id: "apikey-probe",
             product: .codingPlan,
@@ -120,7 +151,23 @@ final class ArkAPIKeyProvider: UsageProvider {
             errorMessage: nil)
     }
 
-    private static let apiURL = URL(string: "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions")!
+    private static func noWindowSnapshot() -> ProviderSnapshot {
+        ProviderSnapshot(
+            providerName: "Ark (API Key)",
+            authMethod: "apikey",
+            plans: [PlanSnapshot(
+                id: "apikey-probe",
+                product: .codingPlan,
+                edition: "personal",
+                tier: nil,
+                seatID: nil,
+                subscribed: true,
+                windows: [],
+                expiryDate: nil,
+                errorMessage: L(.apiKeyNoHeaders))],
+            updatedAt: Date(),
+            errorMessage: L(.apiKeyNoWindow))
+    }
 
     private static func stringHeader(_ headers: [AnyHashable: Any], _ name: String) -> String? {
         if let v = headers[name] as? String { return v }
@@ -168,27 +215,6 @@ final class ArkAPIKeyProvider: UsageProvider {
         if seconds > 0 { return Date().addingTimeInterval(seconds) }
         if let secs = TimeInterval(trimmed) { return Date().addingTimeInterval(secs) }
         return nil
-    }
-
-    private static func errorSummary(_ data: Data) -> String {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return text.isEmpty ? "unexpected response" : text
-        }
-        if let meta = json["ResponseMetadata"] as? [String: Any],
-           let err = meta["Error"] as? [String: Any]
-        {
-            let code = (err["Code"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let msg = (err["Message"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let code, let msg, !code.isEmpty, !msg.isEmpty { return "\(code): \(msg)" }
-            if let code, !code.isEmpty { return code }
-            if let msg, !msg.isEmpty { return msg }
-        }
-        if let err = json["error"] as? [String: Any], let msg = err["message"] as? String, !msg.isEmpty {
-            return msg
-        }
-        if let msg = json["message"] as? String, !msg.isEmpty { return msg }
-        return "unexpected response"
     }
 }
 

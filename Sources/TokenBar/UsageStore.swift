@@ -65,20 +65,24 @@ final class UsageStore: ObservableObject {
     /// snapshot or reminder setting changes.
     let reminderScheduler: ReminderScheduler
 
+    /// The tightest (lowest remaining percent) visible provider — the single
+    /// source every summary surface (status-item icon, summary status,
+    /// refresh-row pick) draws from, so they can never disagree.
+    var tightestVisibleTab: ProviderTab? {
+        settings.visibleTabs
+            .filter { status(for: $0).snapshot?.menuBarWindow != nil }
+            .min(by: { a, b in
+                let pa = status(for: a).snapshot?.menuBarWindow?.remainingPercent ?? 100
+                let pb = status(for: b).snapshot?.menuBarWindow?.remainingPercent ?? 100
+                return pa < pb
+            })
+    }
+
     /// The "tightest" (lowest remaining percent, most urgent) provider.
     /// Used to drive the status-item icon when in summary mode.
     private var tightestStatus: LoadStatus {
-        let candidates = settings.visibleTabs.compactMap { tab -> (ProviderTab, LoadStatus)? in
-            let s = status(for: tab)
-            guard s.snapshot != nil else { return nil }
-            return (tab, s)
-        }
-        if let first = candidates.min(by: { a, b in
-            let pa = a.1.snapshot?.menuBarWindow?.remainingPercent ?? 100
-            let pb = b.1.snapshot?.menuBarWindow?.remainingPercent ?? 100
-            return pa < pb
-        }) {
-            return first.1
+        if let tab = tightestVisibleTab {
+            return status(for: tab)
         }
         // Fallback: first with any data, or .never
         return settings.visibleTabs
@@ -138,6 +142,9 @@ final class UsageStore: ObservableObject {
     private var tracks: [ProviderTab: Track] = [:]
     private var timer: Timer?
     private var cancellables = Set<AnyCancellable>()
+    /// Tabs whose refresh was requested while a fetch was already in flight;
+    /// drained (re-fetched with the current settings) when that fetch ends.
+    private var pendingRefresh: Set<ProviderTab> = []
 
     init(settings: AppSettings = .shared) {
         self.settings = settings
@@ -191,6 +198,9 @@ final class UsageStore: ObservableObject {
             (typed(settings.$grokPoolBaseURL), .grokPool),
             (settings.$longcatCookie.map { _ in () }.eraseToAnyPublisher(), .longcat),
             (settings.$longcatCookieSource.map { _ in () }.eraseToAnyPublisher(), .longcat),
+            (settings.$aliyunConsoleToken.map { _ in () }.eraseToAnyPublisher(), .aliyun),
+            (settings.$aliyunAccessKeyID.map { _ in () }.eraseToAnyPublisher(), .aliyun),
+            (settings.$aliyunSecretAccessKey.map { _ in () }.eraseToAnyPublisher(), .aliyun),
             (settings.$aliyunAPIKey.map { _ in () }.eraseToAnyPublisher(), .aliyun),
         ]
         for (publisher, tab) in credentialTriggers {
@@ -245,7 +255,10 @@ final class UsageStore: ObservableObject {
                 .dropFirst()
                 .removeDuplicates()
                 .sink { [weak self] visible in
-                    guard let self, visible, self.status(for: tab) == .never else { return }
+                    guard let self else { return }
+                    // Hiding a provider drops its reminders immediately.
+                    self.updateReminders()
+                    guard visible, self.status(for: tab) == .never else { return }
                     self.refresh(tab: tab)
                 }
                 .store(in: &cancellables)
@@ -411,8 +424,13 @@ final class UsageStore: ObservableObject {
     }
 
     func refresh(tab: ProviderTab) {
-        // Single-flight per track; mirrors the old per-provider guards.
-        guard states[tab]?.isRefreshing != true else { return }
+        // Single-flight per track. A trigger that lands while a fetch is in
+        // flight is queued instead of dropped, so a credential change during
+        // a slow request still gets a fresh fetch with the new settings.
+        guard states[tab]?.isRefreshing != true else {
+            pendingRefresh.insert(tab)
+            return
+        }
         guard let track = tracks[tab], track.fetch != nil else { return }
         let environment = ProcessInfo.processInfo.environment
         guard track.isAvailable(environment) else {
@@ -476,6 +494,31 @@ final class UsageStore: ObservableObject {
         }
     }
 
+    /// Runs the Bailian console browser login (the same flow as the official
+    /// CLI's `bl auth login --console`): opens the console login page and
+    /// receives the console access token on a loopback callback.
+    ///
+    /// Only one attempt is live at a time: each one holds a loopback port for
+    /// up to ten minutes, so clicking again replaces the previous attempt
+    /// instead of stacking listeners behind tabs the user has abandoned.
+    func reimportAliyunConsoleLogin() {
+        aliyunLoginTask?.cancel()
+        aliyunLoginTask = Task {
+            do {
+                let result = try await AliyunConsoleLogin.run()
+                await MainActor.run { self.settings.setAliyunConsoleToken(result.accessToken) }
+                UsageStore.log("✓ 阿里云: console login succeeded")
+                self.refresh(tab: .aliyun)
+            } catch is CancellationError {
+                // Superseded by a newer click; reporting it would be noise.
+            } catch {
+                UsageStore.log("✗ 阿里云: console login failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private var aliyunLoginTask: Task<Void, Never>?
+
     /// Shared browser-session re-import: import interactively, then refresh
     /// the track with the freshly imported session.
     private func reimportBrowserSession(
@@ -502,6 +545,10 @@ final class UsageStore: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             do {
+                // The shared keychain prompt names this provider while the
+                // import decrypts browser cookies.
+                BrowserKeychainPrompt.setActiveProvider(tab.displayName)
+                defer { BrowserKeychainPrompt.setActiveProvider(nil) }
                 _ = try await Task.detached(priority: .userInitiated, operation: importSession).value
                 guard let fetch = self.tracks[tab]?.fetch else { return }
                 await self.run(tab, fetch: fetch, environment: environment)
@@ -515,6 +562,9 @@ final class UsageStore: ObservableObject {
                     } else {
                         state.status = .error(message: message)
                     }
+                }
+                if self.pendingRefresh.remove(tab) != nil {
+                    self.refresh(tab: tab)
                 }
             }
         }
@@ -543,6 +593,11 @@ final class UsageStore: ObservableObject {
                     state.status = .error(message: message)
                 }
             }
+        }
+        // A refresh queued while this fetch was in flight re-runs now, with
+        // the current settings (fetchers read credentials at fetch time).
+        if pendingRefresh.remove(tab) != nil {
+            refresh(tab: tab)
         }
     }
 
@@ -574,12 +629,14 @@ final class UsageStore: ObservableObject {
 
     // MARK: - Expiry reminders
 
-    /// Recomputes reminder items from every provider snapshot (plans with a
-    /// verified expiry date) plus the user's manual subscriptions.
+    /// Recomputes reminder items from every visible provider's snapshot (plans
+    /// with a verified expiry date) plus the user's manual subscriptions.
+    /// Hidden providers are excluded: their snapshots freeze at hide time, so
+    /// reminding from them would nag with permanently stale quota.
     private func updateReminders() {
         var sources: [PlanReminderSource] = []
-        for (tab, status) in allStatuses {
-            guard let snapshot = status.snapshot else { continue }
+        for tab in settings.visibleTabs {
+            guard let status = states[tab]?.status, let snapshot = status.snapshot else { continue }
             for plan in snapshot.plans {
                 guard let expiryDate = plan.expiryDate else { continue }
                 // The quota that lapses at expiry is the monthly pool when the

@@ -6,16 +6,56 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: macos-15
+    timeout-minutes: 30
     env:
       # SweetCookieKit requires Swift 6.2. macos-15 defaults to Xcode 16.4
       # (Swift 6.1), while the hosted image also includes Xcode 26.2.
       DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
+      - name: Check toolchain
+        run: test -d "$DEVELOPER_DIR"
       - name: Show Swift version
         run: swift --version
       - name: Run tests
         run: swift test
+
+  release:
+    # Release-path gate. Debug tests alone can pass while the packaged app is
+    # broken: a stale resource bundle once shipped with 8 of 11 provider logos
+    # and every test stayed green. This job runs the whole packaging script and
+    # verifies the installed bundle end to end.
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check toolchain
+        run: test -d "$DEVELOPER_DIR"
+      - name: Build release
+        run: swift build -c release
+      - name: Package app
+        run: ./Scripts/package_app.sh
+      - name: Verify installed bundle
+        run: |
+          set -euo pipefail
+          APP="/Applications/TokenBar.app"
+          test -d "$APP"
+          codesign --verify --deep --strict "$APP"
+          echo "archs: $(lipo -archs "$APP/Contents/MacOS/TokenBar")"
+          REQUIRED=$(find "$GITHUB_WORKSPACE/Sources/TokenBar/Resources" -type f -name "ProviderIcon-*" | wc -l | tr -d ' ')
+          INSTALLED=$(find "$APP/Contents/Resources/TokenBar_TokenBar.bundle" -type f -name "ProviderIcon-*" | wc -l | tr -d ' ')
+          echo "provider logos: $INSTALLED/$REQUIRED"
+          test "$INSTALLED" -eq "$REQUIRED"
+          echo "version: $(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist")"

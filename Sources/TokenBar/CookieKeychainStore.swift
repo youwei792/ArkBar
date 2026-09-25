@@ -68,32 +68,36 @@ enum CookieKeychainStore {
         // dialog (admin password); the file cache + process cache already
         // serve all reads, so an identical write has no benefit.
         let unchanged = cacheLock.withLock { processCache[account] == cookie }
+        var keychainOK = unchanged
         if !unchanged {
-            _ = store(keychainOnly: cookie, account: account)
+            keychainOK = store(keychainOnly: cookie, account: account)
         }
 
         // File cache.
-        CredentialFileCache.store(provider: account, value: cookie)
+        let fileOK = CredentialFileCache.store(provider: account, value: cookie)
 
         // Process cache.
         cacheLock.withLock { processCache[account] = cookie }
 
-        if unchanged { return true }
+        if unchanged { return fileOK }
 
         // Drop any legacy v2 entry.
         _ = clear(service: legacyService, account: account)
-        return true
+        // Report the real outcome instead of claiming success: a value that
+        // reached neither layer must not show as "saved" in Settings.
+        return keychainOK || fileOK
     }
 
-    /// Removes a credential from all three layers.
+    /// Removes a credential from all three layers. Returns whether every layer
+    /// acknowledged the removal.
     @discardableResult
     static func clear(provider: String) -> Bool {
         let account = account(forProvider: provider)
-        cacheLock.withLock { processCache.removeValue(forKey: account) }
-        CredentialFileCache.clear(provider: account)
-        _ = clear(service: service, account: account)
-        _ = clear(service: legacyService, account: account)
-        return true
+        _ = cacheLock.withLock { processCache.removeValue(forKey: account) }
+        let fileOK = CredentialFileCache.clear(provider: account)
+        let primaryOK = clear(service: service, account: account)
+        let legacyOK = clear(service: legacyService, account: account)
+        return fileOK && primaryOK && legacyOK
     }
 
     // MARK: - Keychain helpers
