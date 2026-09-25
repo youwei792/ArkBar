@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import AppKit
 import ObjectiveC.runtime
+import SweetCookieKit
 @testable import TokenBar
 
 @Suite("ArkCLIProvider decode")
@@ -2696,17 +2697,37 @@ struct StepFunConsoleDecodeTests {
 
 @Suite("Alibaba Cloud provider decode")
 struct AliyunProviderDecodeTests {
-    /// Placeholder contract — reconciled with the real console payload in
-    /// stage 2 (docs/aliyun-handoff.md).
+    /// Real console-gateway envelope, reconciled with the official CLI's
+    /// fixtures for `zeldaEasy.broadscope-bailian.codingPlan.queryCodingPlanInstanceInfoV2`
+    /// (github.com/modelstudioai/cli).
     private static let usageJSON = #"""
     {
-      "plan": "pro",
-      "expiresAt": "2026-11-21T00:00:00+08:00",
-      "windows": [
-        {"kind": "five_hour", "usedPercent": 12.5, "used": 750, "total": 6000, "resetAt": 1761302400},
-        {"kind": "weekly", "percent": 30, "used": 13500, "total": 45000},
-        {"kind": "monthly", "percent": 8, "used": 7200, "total": 90000}
-      ]
+      "data": {
+        "DataV2": {
+          "data": {
+            "data": {
+              "codingPlanInstanceInfos": [
+                {
+                  "status": "VALID",
+                  "instanceType": "pro",
+                  "expiredTime": 1798000000,
+                  "codingPlanQuotaInfo": {
+                    "per5HourUsedQuota": 38,
+                    "per5HourTotalQuota": 100,
+                    "per5HourQuotaNextRefreshTime": 1786000000000,
+                    "perWeekUsedQuota": 500,
+                    "perWeekTotalQuota": 1000,
+                    "perWeekQuotaNextRefreshTime": 1786100000000,
+                    "perBillMonthUsedQuota": 950,
+                    "perBillMonthTotalQuota": 1000,
+                    "perBillMonthQuotaNextRefreshTime": 1786200000000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
     }
     """#
 
@@ -2714,33 +2735,94 @@ struct AliyunProviderDecodeTests {
     func parseWindows() throws {
         let snapshot = try AliyunProvider.parse(data: Self.usageJSON.data(using: .utf8)!)
         #expect(snapshot.planName == "pro")
-        #expect(snapshot.expiryDate != nil)
         #expect(snapshot.windows.count == 3)
         #expect(snapshot.windows[0].kind == .fiveHour)
-        #expect(snapshot.windows[0].usedPercent == 12.5)
-        #expect(snapshot.windows[0].used == 750)
-        #expect(snapshot.windows[0].total == 6000)
+        #expect(snapshot.windows[0].used == 38)
+        #expect(snapshot.windows[0].total == 100)
+        #expect(snapshot.windows[0].usedPercent == 38)
         #expect(snapshot.windows[0].resetsAt != nil)
         #expect(snapshot.windows[1].kind == .weekly)
-        #expect(snapshot.windows[1].usedPercent == 30)
+        #expect(snapshot.windows[1].usedPercent == 50)
         #expect(snapshot.windows[2].kind == .monthly)
-        #expect(snapshot.windows[2].usedPercent == 8)
+        #expect(snapshot.windows[2].usedPercent == 95)
     }
 
-    @Test("Unknown window kinds are skipped; an empty result is a parse error")
-    func skipsUnknownKinds() {
-        let data = #"{"windows": [{"kind": "mystery"}]}"#.data(using: .utf8)!
+    @Test("Reset times are epoch milliseconds")
+    func resetTimesAreMillis() throws {
+        let snapshot = try AliyunProvider.parse(data: Self.usageJSON.data(using: .utf8)!)
+        #expect(snapshot.windows[0].resetsAt?.timeIntervalSince1970 == 1_786_000_000)
+    }
+
+    @Test("Expiry comes from the instance when the console exposes it")
+    func expiry() throws {
+        let snapshot = try AliyunProvider.parse(data: Self.usageJSON.data(using: .utf8)!)
+        #expect(snapshot.expiryDate?.timeIntervalSince1970 == 1_798_000_000)
+    }
+
+    @Test("Non-VALID instances are skipped; none means not activated")
+    func instanceSelection() {
+        let expired = #"""
+        {"data":{"DataV2":{"data":{"data":{"codingPlanInstanceInfos":[
+          {"status":"EXPIRED","codingPlanQuotaInfo":{"per5HourUsedQuota":1,"per5HourTotalQuota":2}}
+        ]}}}}}
+        """#.data(using: .utf8)!
+        do {
+            _ = try AliyunProvider.parse(data: expired)
+            Issue.record("expected aliyunNotActivated for an expired-only instance list")
+        } catch let error as UsageError {
+            guard case .aliyunNotActivated = error else {
+                Issue.record("expected aliyunNotActivated, got \(error)")
+                return
+            }
+        } catch {
+            Issue.record("unexpected error: \(error)")
+        }
+
+        let mixed = #"""
+        {"data":{"DataV2":{"data":{"data":{"codingPlanInstanceInfos":[
+          {"status":"EXPIRED","codingPlanQuotaInfo":{"per5HourUsedQuota":1,"per5HourTotalQuota":2}},
+          {"status":"VALID","codingPlanQuotaInfo":{"perWeekUsedQuota":500,"perWeekTotalQuota":1000}}
+        ]}}}}}
+        """#.data(using: .utf8)!
+        let snapshot = try? AliyunProvider.parse(data: mixed)
+        #expect(snapshot?.windows.count == 1)
+        #expect(snapshot?.windows.first?.kind == .weekly)
+    }
+
+    @Test("Windows without a positive total are omitted")
+    func omitsEmptyWindows() {
+        let json = #"""
+        {"data":{"DataV2":{"data":{"data":{"codingPlanInstanceInfos":[
+          {"status":"VALID","codingPlanQuotaInfo":{
+            "per5HourTotalQuota":0,
+            "perWeekUsedQuota":10,"perWeekTotalQuota":100
+          }}
+        ]}}}}}
+        """#.data(using: .utf8)!
+        let snapshot = try? AliyunProvider.parse(data: json)
+        #expect(snapshot?.windows.count == 1)
+        #expect(snapshot?.windows.first?.kind == .weekly)
+    }
+
+    @Test("Missing quota info is a parse error")
+    func missingQuota() {
+        let json = #"""
+        {"data":{"DataV2":{"data":{"data":{"codingPlanInstanceInfos":[
+          {"status":"VALID"}
+        ]}}}}}
+        """#.data(using: .utf8)!
         #expect(throws: UsageError.self) {
-            try AliyunProvider.parse(data: data)
+            try AliyunProvider.parse(data: json)
         }
     }
 
     @Test("Windows map to canonical labels in ring order")
     func mapping() throws {
         let snapshot = try AliyunProvider.parse(data: Self.usageJSON.data(using: .utf8)!)
-        let provider = AliyunProvider.makeSnapshot(from: snapshot)
+        let provider = AliyunProvider.makeSnapshot(
+            from: snapshot, product: .aliyunCodingPlan, edition: "Pro")
         #expect(provider.providerName == "阿里云")
-        #expect(provider.authMethod == "apikey")
+        #expect(provider.authMethod == "aksk")
         #expect(provider.plans.count == 1)
         let plan = provider.plans[0]
         #expect(plan.product == .aliyunCodingPlan)
@@ -2748,9 +2830,70 @@ struct AliyunProviderDecodeTests {
         #expect(plan.expiryDate != nil)
         #expect(plan.windows.map(\.label) == ["5-hour", "Weekly", "Monthly"])
         #expect(plan.windows.map(\.sortRank) == [0, 1, 2])
-        #expect(plan.windows[0].used == 750)
-        #expect(plan.windows[0].total == 6000)
+        #expect(plan.windows[0].used == 38)
+        #expect(plan.windows[0].total == 100)
+        #expect(plan.edition == "Pro")
         #expect(plan.daysUntilExpiry != nil)
+    }
+
+    @Test("Token Plan ratios map to used-percent windows without counts")
+    func tokenPlanWindows() throws {
+        let json = #"""
+        {"data":{"DataV2":{"data":{"data":{
+          "per5HourPercentage":0.38,"per5HourResetTime":1786000000000,
+          "per1WeekPercentage":0.5,"per1WeekResetTime":1786100000000
+        }}}}}
+        """#.data(using: .utf8)!
+        let usage = try AliyunProvider.parseTokenPlan(data: json)
+        #expect(usage.windows.count == 2)
+        #expect(usage.windows[0].kind == .fiveHour)
+        #expect(usage.windows[0].usedPercent == 38)
+        #expect(usage.windows[0].used == nil)
+        #expect(usage.windows[0].total == nil)
+        #expect(usage.windows[0].resetsAt?.timeIntervalSince1970 == 1_786_000_000)
+        #expect(usage.windows[1].kind == .weekly)
+        #expect(usage.windows[1].usedPercent == 50)
+
+        let provider = AliyunProvider.makeSnapshot(
+            from: usage, product: .aliyunTokenPlan, edition: nil)
+        #expect(provider.plans[0].product == .aliyunTokenPlan)
+        #expect(provider.plans[0].windows.map(\.label) == ["5-hour", "Weekly"])
+        #expect(provider.plans[0].windows.map(\.sortRank) == [0, 1])
+    }
+
+    /// Captured live from the console's own usage call for an **Essential**
+    /// personal plan: it publishes the monthly window only. Reading just the
+    /// two ratios the official CLI prints made this account look like it had no
+    /// subscription at all.
+    @Test("A monthly-only Token Plan is parsed, not reported as no subscription")
+    func tokenPlanMonthlyOnly() throws {
+        let json = #"""
+        {"code":"200","data":{"DataV2":{"ret":["SUCCESS::接口调用成功"],"data":{
+          "msg":"Success.","code":"SUCCESS",
+          "data":{"per1MonthPercentage":0.014346899921568628,"per1MonthResetTime":1792857600000},
+          "requestId":"04747004-55b5-97f2-a8fe-f507965f1863","success":true
+        }},"success":true,"httpStatus":200,"errorCode":"","errorMsg":""},
+        "httpStatusCode":"200","successResponse":true}
+        """#.data(using: .utf8)!
+        let usage = try AliyunProvider.parseTokenPlan(data: json)
+        #expect(usage.windows.count == 1)
+        #expect(usage.windows[0].kind == .monthly)
+        #expect(abs(usage.windows[0].usedPercent - 1.4346899921568628) < 1e-9)
+        #expect(usage.windows[0].resetsAt?.timeIntervalSince1970 == 1_792_857_600)
+
+        let provider = AliyunProvider.makeSnapshot(
+            from: usage, product: .aliyunTokenPlan, edition: nil)
+        #expect(provider.plans[0].windows.map(\.label) == ["Monthly"])
+    }
+
+    @Test("Token Plan tolerates the shallow envelope and string ratios")
+    func tokenPlanShallowEnvelope() throws {
+        let json = #"""
+        {"data":{"data":{"per5HourPercentage":"0.1"}}}
+        """#.data(using: .utf8)!
+        let usage = try AliyunProvider.parseTokenPlan(data: json)
+        #expect(usage.windows.count == 1)
+        #expect(usage.windows[0].usedPercent == 10)
     }
 
     @Test("Used percent is clamped into 0...100")
@@ -2759,22 +2902,448 @@ struct AliyunProviderDecodeTests {
             planName: nil, expiryDate: nil,
             windows: [AliyunWindowEntry(
                 kind: .fiveHour, usedPercent: 120, used: nil, total: nil, resetsAt: nil)])
-        let provider = AliyunProvider.makeSnapshot(from: usage)
+        let provider = AliyunProvider.makeSnapshot(
+            from: usage, product: .aliyunTokenPlan, edition: nil)
         #expect(provider.plans[0].windows[0].usedPercent == 100)
     }
 }
 
 @Suite("Alibaba Cloud credentials")
 struct AliyunCredentialsTests {
-    @Test("Reads the environment variable, unquoting and trimming")
+    @Test("Reads the environment variables, unquoting and trimming")
     func readsEnvironment() {
-        #expect(AliyunCredentialResolver.apiKey(
-            environment: ["ALIYUN_CODING_PLAN_API_KEY": "sk-sp-abc"]) == "sk-sp-abc")
-        #expect(AliyunCredentialResolver.apiKey(
-            environment: ["ALIYUN_CODING_PLAN_API_KEY": "\"sk-sp-abc\""]) == "sk-sp-abc")
-        #expect(AliyunCredentialResolver.apiKey(environment: [:]) == nil)
-        #expect(AliyunCredentialResolver.apiKey(
-            environment: ["ALIYUN_CODING_PLAN_API_KEY": "   "]) == nil)
+        #expect(AliyunCredentialResolver.resolve(
+            environment: [
+                "ALIYUN_ACCESS_KEY_ID": "LTAI-abc",
+                "ALIYUN_ACCESS_KEY_SECRET": "secret",
+            ])?.accessKeyID == "LTAI-abc")
+        #expect(AliyunCredentialResolver.resolve(
+            environment: [
+                "ALIBABA_CLOUD_ACCESS_KEY_ID": "\"LTAI-abc\"",
+                "ALIBABA_CLOUD_ACCESS_KEY_SECRET": "secret",
+            ])?.accessKeyID == "LTAI-abc")
+        #expect(AliyunCredentialResolver.resolve(environment: [:]) == nil)
+        #expect(AliyunCredentialResolver.resolve(
+            environment: ["ALIYUN_ACCESS_KEY_ID": "LTAI-abc"]) == nil)
+        #expect(AliyunCredentialResolver.resolve(
+            environment: [
+                "ALIYUN_ACCESS_KEY_ID": "   ",
+                "ALIYUN_ACCESS_KEY_SECRET": "s",
+            ]) == nil)
+    }
+}
+
+@Suite("Alibaba Cloud ACS3 signer")
+struct AliyunSignerTests {
+    /// Expected values produced by the official CLI's signing algorithm
+    /// (packages/core/src/client/acs.ts) for the same fixed inputs.
+    @Test("Signature matches the official CLI algorithm byte for byte")
+    func signatureVector() throws {
+        var request = URLRequest(
+            url: URL(string: "https://modelstudio.cn-beijing.aliyuncs.com/modelstudio/cli/generateAccessToken")!)
+        request.httpMethod = "POST"
+        let credentials = AliyunCredentials(
+            accessKeyID: "LTAI5tTESTACCESSKEYID",
+            secretAccessKey: "testSecretAccessKeyValue1234567890")
+        AliyunSigner.sign(
+            request: &request,
+            body: Data(),
+            credentials: credentials,
+            action: "GenerateCLIAccessToken",
+            version: "2026-02-10",
+            date: try #require(ISO8601DateFormatter().date(from: "2026-09-24T12:34:56Z")),
+            nonce: "0dbfb6c2-1f3a-4c5b-9e8d-7a6b5c4d3e2f")
+
+        #expect(request.value(forHTTPHeaderField: "x-acs-date") == "2026-09-24T12:34:56Z")
+        #expect(request.value(forHTTPHeaderField: "x-acs-action") == "GenerateCLIAccessToken")
+        #expect(request.value(forHTTPHeaderField: "x-acs-version") == "2026-02-10")
+        #expect(request.value(forHTTPHeaderField: "x-acs-signature-nonce")
+            == "0dbfb6c2-1f3a-4c5b-9e8d-7a6b5c4d3e2f")
+        #expect(request.value(forHTTPHeaderField: "x-acs-content-sha256")
+            == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        #expect(request.value(forHTTPHeaderField: "Authorization")
+            == "ACS3-HMAC-SHA256 Credential=LTAI5tTESTACCESSKEYID,"
+            + "SignedHeaders=content-type;host;x-acs-action;x-acs-content-sha256;"
+            + "x-acs-date;x-acs-signature-nonce;x-acs-version,"
+            + "Signature=68d0a7312edc9839e159ce76b450b9670b290e1786c9e90a5b5452e4e915b486")
+    }
+}
+
+private struct AliyunRecordedRequest: Sendable {
+    let path: String
+    /// The console API name from the `api` query parameter (gateway calls).
+    let api: String?
+    let authorization: String?
+    let acsAction: String?
+}
+
+/// Path+API-keyed mock with ordered replies per key, recording what was sent
+/// so tests can assert the ACS3-signed mint and the Bearer usage calls. Both
+/// console APIs share `/cli/api.json`, so the `api` query parameter separates
+/// their replies.
+private final class AliyunFlowTransport: HTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var replies: [String: [(Int, Data)]]
+    private var sent: [AliyunRecordedRequest] = []
+
+    init(replies: [String: [(Int, Data)]]) {
+        self.replies = replies
+    }
+
+    var requests: [AliyunRecordedRequest] {
+        lock.withLock { sent }
+    }
+
+    func response(for request: URLRequest) async throws -> HTTPResponse {
+        let path = request.url?.path ?? ""
+        let api = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == "api" })?.value
+        let recorded = AliyunRecordedRequest(
+            path: path,
+            api: api,
+            authorization: request.value(forHTTPHeaderField: "Authorization"),
+            acsAction: request.value(forHTTPHeaderField: "x-acs-action"))
+        let reply: (Int, Data) = lock.withLock {
+            sent.append(recorded)
+            let key = api.map { "\(path)?api=\($0)" } ?? path
+            var queue = replies[key] ?? []
+            guard !queue.isEmpty else { return (200, Data()) }
+            let next = queue.removeFirst()
+            replies[key] = queue
+            return next
+        }
+        return HTTPResponse(
+            data: reply.1,
+            statusCode: reply.0,
+            response: HTTPURLResponse(
+                url: request.url!,
+                statusCode: reply.0,
+                httpVersion: nil,
+                headerFields: nil)!)
+    }
+}
+
+@Suite("Alibaba Cloud provider fetch", .serialized)
+struct AliyunProviderFetchTests {
+    private static let tokenResponse = #"{"cliAccessToken":"console-token-abc"}"#
+    private static let tokenPlanAPI = "zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage"
+    private static let tokenPlanSubscriptionAPI =
+        "zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/subscription"
+    private static let codingPlanAPI =
+        "zeldaEasy.broadscope-bailian.codingPlan.queryCodingPlanInstanceInfoV2"
+
+    private static func codingPlanResponse() -> Data {
+        #"""
+        {"data":{"DataV2":{"data":{"data":{"codingPlanInstanceInfos":[
+          {"status":"VALID","instanceType":"pro","codingPlanQuotaInfo":{
+            "per5HourUsedQuota":600,"per5HourTotalQuota":6000,"per5HourQuotaNextRefreshTime":1786000000000,
+            "perWeekUsedQuota":1000,"perWeekTotalQuota":45000,"perWeekQuotaNextRefreshTime":1786100000000,
+            "perBillMonthUsedQuota":9000,"perBillMonthTotalQuota":90000,"perBillMonthQuotaNextRefreshTime":1786200000000
+          }}
+        ]}}}}}
+        """#.data(using: .utf8)!
+    }
+
+    private static func tokenPlanResponse() -> Data {
+        #"""
+        {"data":{"DataV2":{"data":{"data":{
+          "per5HourPercentage":0.1,"per5HourResetTime":1786000000000,
+          "per1WeekPercentage":0.25,"per1WeekResetTime":1786100000000
+        }}}}}
+        """#.data(using: .utf8)!
+    }
+
+    /// Captured live from the console's subscription call for an Essential
+    /// personal plan: the tier and the end date live here, not in the usage API.
+    private static func subscriptionResponse() -> Data {
+        #"""
+        {"data":{"DataV2":{"data":{"data":{
+          "instanceCode":"sfm_tokenplansolo_public_cn-ujs4z262n0d",
+          "specCode":"essential","remainingDays":28,
+          "startTime":1790259666000,"endTime":1792857600000,
+          "autoRenewFlag":false,"status":"VALID"
+        }}}}}
+        """#.data(using: .utf8)!
+    }
+
+    /// A Token Plan account with no Coding Plan: the Token Plan API answers
+    /// first and the Coding Plan API is never called.
+    private static let emptyTokenPlan = #"{"data":{"DataV2":{"data":{"data":{}}}}}"#
+        .data(using: .utf8)!
+
+    private static let environment = [
+        "ALIYUN_ACCESS_KEY_ID": "LTAI-test",
+        "ALIYUN_ACCESS_KEY_SECRET": "secret-test",
+    ]
+
+    /// Clears the ambient console token and plan key for the duration of a
+    /// test (the developer's Keychain may hold real ones) and returns a
+    /// closure that restores them.
+    @MainActor
+    private static func clearAmbientAliyunCredentials() -> @MainActor () -> Void {
+        let previousConsoleToken = AppSettings.shared.aliyunConsoleToken
+        let previousAPIKey = AppSettings.shared.aliyunAPIKey
+        AppSettings.shared.setAliyunConsoleToken(nil)
+        AppSettings.shared.setAliyunAPIKey(nil)
+        return {
+            AppSettings.shared.setAliyunConsoleToken(
+                previousConsoleToken.isEmpty ? nil : previousConsoleToken)
+            AppSettings.shared.setAliyunAPIKey(previousAPIKey.isEmpty ? nil : previousAPIKey)
+        }
+    }
+
+    @Test("A Token Plan account queries only the Token Plan API")
+    @MainActor
+    func tokenPlanAccount() async throws {
+        let previous = AppSettings.shared.aliyunDetectedPlan
+        defer { AppSettings.shared.aliyunDetectedPlan = previous }
+        let restore = Self.clearAmbientAliyunCredentials()
+        defer { restore() }
+        AppSettings.shared.aliyunDetectedPlan = nil
+
+        let transport = AliyunFlowTransport(replies: [
+            "/modelstudio/cli/generateAccessToken": [(200, Data(Self.tokenResponse.utf8))],
+            "/cli/api.json?api=\(Self.tokenPlanAPI)": [(200, Self.tokenPlanResponse())],
+            "/cli/api.json?api=\(Self.tokenPlanSubscriptionAPI)": [
+                (200, Self.subscriptionResponse())
+            ],
+        ])
+        let provider = AliyunProvider(settings: AppSettings.shared, transport: transport)
+        let snapshot = try await provider.fetch(environment: Self.environment)
+
+        #expect(transport.requests.count == 3)
+        #expect(transport.requests[0].path == "/modelstudio/cli/generateAccessToken")
+        #expect(transport.requests[0].acsAction == "GenerateCLIAccessToken")
+        #expect(transport.requests[0].authorization?.hasPrefix("ACS3-HMAC-SHA256 Credential=LTAI-test,") == true)
+        #expect(transport.requests[1].api == Self.tokenPlanAPI)
+        #expect(transport.requests[1].authorization == "Bearer console-token-abc")
+        #expect(transport.requests[2].api == Self.tokenPlanSubscriptionAPI)
+
+        #expect(snapshot.plans[0].product == .aliyunTokenPlan)
+        // The subscription record supplies the tier name and the expiry the
+        // usage API does not publish.
+        #expect(snapshot.plans[0].edition == "Essential")
+        #expect(snapshot.plans[0].expiryDate?.timeIntervalSince1970 == 1_792_857_600)
+        let windows = snapshot.plans[0].windows
+        #expect(windows.map(\.label) == ["5-hour", "Weekly"])
+        #expect(windows[0].usedPercent == 10)
+        #expect(windows[1].usedPercent == 25)
+        #expect(windows[0].resetsAt != nil)
+        // The detected plan is remembered, so later refreshes skip probing.
+        #expect(AppSettings.shared.aliyunDetectedPlan == .token)
+    }
+
+    @Test("A Coding Plan account falls back from an empty Token Plan response")
+    @MainActor
+    func codingPlanAccount() async throws {
+        let previous = AppSettings.shared.aliyunDetectedPlan
+        defer { AppSettings.shared.aliyunDetectedPlan = previous }
+        let restore = Self.clearAmbientAliyunCredentials()
+        defer { restore() }
+        AppSettings.shared.aliyunDetectedPlan = nil
+
+        let transport = AliyunFlowTransport(replies: [
+            "/modelstudio/cli/generateAccessToken": [(200, Data(Self.tokenResponse.utf8))],
+            "/cli/api.json?api=\(Self.tokenPlanAPI)": [(200, Self.emptyTokenPlan)],
+            "/cli/api.json?api=\(Self.codingPlanAPI)": [(200, Self.codingPlanResponse())],
+        ])
+        let provider = AliyunProvider(settings: AppSettings.shared, transport: transport)
+        let snapshot = try await provider.fetch(environment: Self.environment)
+
+        #expect(transport.requests.count == 3)
+        #expect(transport.requests[1].api == Self.tokenPlanAPI)
+        #expect(transport.requests[2].api == Self.codingPlanAPI)
+
+        #expect(snapshot.plans[0].product == .aliyunCodingPlan)
+        let windows = snapshot.plans[0].windows
+        #expect(windows.map(\.label) == ["5-hour", "Weekly", "Monthly"])
+        #expect(windows[0].used == 600)
+        #expect(windows[0].total == 6000)
+        #expect(windows[0].usedPercent == 10)
+        #expect(AppSettings.shared.aliyunDetectedPlan == .coding)
+    }
+
+    @Test("A detected plan is queried directly, without probing the other API")
+    @MainActor
+    func detectedPlanIsReused() async throws {
+        let previous = AppSettings.shared.aliyunDetectedPlan
+        defer { AppSettings.shared.aliyunDetectedPlan = previous }
+        let restore = Self.clearAmbientAliyunCredentials()
+        defer { restore() }
+        AppSettings.shared.aliyunDetectedPlan = .token
+
+        // Only the Token Plan API has a reply; if the Coding Plan API were
+        // probed first it would answer 200 with an empty body and fail.
+        let transport = AliyunFlowTransport(replies: [
+            "/modelstudio/cli/generateAccessToken": [(200, Data(Self.tokenResponse.utf8))],
+            "/cli/api.json?api=\(Self.tokenPlanAPI)": [(200, Self.tokenPlanResponse())],
+        ])
+        let provider = AliyunProvider(settings: AppSettings.shared, transport: transport)
+        let snapshot = try await provider.fetch(environment: Self.environment)
+
+        #expect(transport.requests.count == 3)
+        #expect(transport.requests[1].api == Self.tokenPlanAPI)
+        #expect(snapshot.plans[0].product == .aliyunTokenPlan)
+    }
+
+    @Test("A 401 on usage re-mints the token and retries once")
+    @MainActor
+    func retriesAfterAuthFailure() async throws {
+        let previous = AppSettings.shared.aliyunDetectedPlan
+        defer { AppSettings.shared.aliyunDetectedPlan = previous }
+        let restore = Self.clearAmbientAliyunCredentials()
+        defer { restore() }
+        AppSettings.shared.aliyunDetectedPlan = .token
+
+        let transport = AliyunFlowTransport(replies: [
+            "/modelstudio/cli/generateAccessToken": [
+                (200, Data(Self.tokenResponse.utf8)),
+                (200, Data(#"{"cliAccessToken":"console-token-fresh"}"#.utf8)),
+            ],
+            "/cli/api.json?api=\(Self.tokenPlanAPI)": [
+                (401, Data("unauthorized".utf8)),
+                (200, Self.tokenPlanResponse()),
+            ],
+        ])
+        let provider = AliyunProvider(settings: AppSettings.shared, transport: transport)
+        let snapshot = try await provider.fetch(environment: Self.environment)
+
+        #expect(transport.requests.count == 5)
+        #expect(transport.requests[2].path == "/modelstudio/cli/generateAccessToken")
+        #expect(transport.requests[3].api == Self.tokenPlanAPI)
+        #expect(transport.requests[3].authorization == "Bearer console-token-fresh")
+        #expect(snapshot.plans[0].windows.count == 2)
+    }
+
+    @Test("An expired-token error envelope re-mints the token and retries once")
+    @MainActor
+    func retriesAfterExpiredTokenEnvelope() async throws {
+        let previous = AppSettings.shared.aliyunDetectedPlan
+        defer { AppSettings.shared.aliyunDetectedPlan = previous }
+        let restore = Self.clearAmbientAliyunCredentials()
+        defer { restore() }
+        AppSettings.shared.aliyunDetectedPlan = .token
+
+        let expired = #"""
+        {"data":{"success":false,"errorCode":"InvalidAccessToken","errorMessage":"token expired"}}
+        """#.data(using: .utf8)!
+        let transport = AliyunFlowTransport(replies: [
+            "/modelstudio/cli/generateAccessToken": [
+                (200, Data(Self.tokenResponse.utf8)),
+                (200, Data(#"{"cliAccessToken":"console-token-fresh"}"#.utf8)),
+            ],
+            "/cli/api.json?api=\(Self.tokenPlanAPI)": [
+                (200, expired),
+                (200, Self.tokenPlanResponse()),
+            ],
+        ])
+        let provider = AliyunProvider(settings: AppSettings.shared, transport: transport)
+        let snapshot = try await provider.fetch(environment: Self.environment)
+
+        #expect(transport.requests.count == 5)
+        #expect(snapshot.plans[0].windows.count == 2)
+    }
+
+    @Test("Invalid AK/SK surfaces as an invalid-token error")
+    @MainActor
+    func invalidCredentials() async throws {
+        let restore = Self.clearAmbientAliyunCredentials()
+        defer { restore() }
+        let transport = AliyunFlowTransport(replies: [
+            "/modelstudio/cli/generateAccessToken": [(403, Data("forbidden".utf8))],
+        ])
+        let provider = AliyunProvider(settings: AppSettings.shared, transport: transport)
+        do {
+            _ = try await provider.fetch(environment: Self.environment)
+            Issue.record("expected aliyunInvalidToken for a rejected AK/SK")
+        } catch let error as UsageError {
+            guard case .aliyunInvalidToken = error else {
+                Issue.record("expected aliyunInvalidToken, got \(error)")
+                return
+            }
+        }
+        // No usage call was attempted.
+        #expect(transport.requests.count == 1)
+    }
+
+    @Test("Neither plan present reports not-activated")
+    @MainActor
+    func notActivated() async throws {
+        let previous = AppSettings.shared.aliyunDetectedPlan
+        defer { AppSettings.shared.aliyunDetectedPlan = previous }
+        let restore = Self.clearAmbientAliyunCredentials()
+        defer { restore() }
+        AppSettings.shared.aliyunDetectedPlan = nil
+
+        let noInstance = #"""
+        {"data":{"DataV2":{"data":{"data":{"codingPlanInstanceInfos":[]}}}}}
+        """#.data(using: .utf8)!
+        let transport = AliyunFlowTransport(replies: [
+            "/modelstudio/cli/generateAccessToken": [(200, Data(Self.tokenResponse.utf8))],
+            "/cli/api.json?api=\(Self.tokenPlanAPI)": [(200, Self.emptyTokenPlan)],
+            "/cli/api.json?api=\(Self.codingPlanAPI)": [(200, noInstance)],
+        ])
+        let provider = AliyunProvider(settings: AppSettings.shared, transport: transport)
+        do {
+            _ = try await provider.fetch(environment: Self.environment)
+            Issue.record("expected aliyunNotActivated when neither plan is present")
+        } catch let error as UsageError {
+            guard case .aliyunNotActivated = error else {
+                Issue.record("expected aliyunNotActivated, got \(error)")
+                return
+            }
+        }
+    }
+    @Test("A console-login token is used directly, without minting")
+    @MainActor
+    func browserTokenUsed() async throws {
+        // Save/restore, not "clear": a real sign-in on this machine must survive
+        // a test run.
+        let previous = AppSettings.shared.aliyunConsoleToken
+        defer { AppSettings.shared.setAliyunConsoleToken(previous.isEmpty ? nil : previous) }
+        AppSettings.shared.setAliyunConsoleToken("browser-tok")
+
+        let transport = AliyunFlowTransport(replies: [
+            "/cli/api.json?api=\(Self.tokenPlanAPI)": [(200, Self.tokenPlanResponse())],
+        ])
+        let provider = AliyunProvider(settings: AppSettings.shared, transport: transport)
+        let snapshot = try await provider.fetch(environment: [:])
+
+        #expect(transport.requests.count == 2)
+        #expect(transport.requests[0].api == Self.tokenPlanAPI)
+        #expect(transport.requests[0].authorization == "Bearer browser-tok")
+        #expect(snapshot.plans[0].product == .aliyunTokenPlan)
+    }
+
+    @Test("An expired console-login token falls back to an AK/SK mint")
+    @MainActor
+    func expiredBrowserTokenFallsBack() async throws {
+        let previous = AppSettings.shared.aliyunConsoleToken
+        defer { AppSettings.shared.setAliyunConsoleToken(previous.isEmpty ? nil : previous) }
+        AppSettings.shared.setAliyunConsoleToken("stale-tok")
+
+        let transport = AliyunFlowTransport(replies: [
+            "/modelstudio/cli/generateAccessToken": [
+                (200, Data(#"{"cliAccessToken":"minted-fresh"}"#.utf8)),
+            ],
+            "/cli/api.json?api=\(Self.tokenPlanAPI)": [
+                (401, Data("unauthorized".utf8)),
+                (200, Self.tokenPlanResponse()),
+            ],
+        ])
+        let provider = AliyunProvider(settings: AppSettings.shared, transport: transport)
+        let snapshot = try await provider.fetch(environment: [
+            "ALIYUN_ACCESS_KEY_ID": "LTAI-test",
+            "ALIYUN_ACCESS_KEY_SECRET": "secret-test",
+        ])
+
+        #expect(transport.requests.count == 4)
+        #expect(transport.requests[0].authorization == "Bearer stale-tok")
+        #expect(transport.requests[1].path == "/modelstudio/cli/generateAccessToken")
+        #expect(transport.requests[2].authorization == "Bearer minted-fresh")
+        #expect(snapshot.plans[0].windows.count == 2)
+        // The dead browser token is dropped so later refreshes go straight to AK/SK.
+        #expect(AppSettings.shared.aliyunConsoleToken.isEmpty)
     }
 }
 
@@ -2789,6 +3358,7 @@ private func makeTestJWT(typ: String, exp: TimeInterval) -> String {
         .replacingOccurrences(of: "/", with: "_")
         .trimmingCharacters(in: CharacterSet(charactersIn: "="))
     return "eyJhbGciOiJub25lIn0.\(b64).sig"
+
 }
 
 private struct BodyTransport: HTTPTransport {
@@ -2805,6 +3375,7 @@ private struct BodyTransport: HTTPTransport {
                 httpVersion: nil,
                 headerFields: nil)!)
     }
+
 }
 
 // MARK: - Subscription expiry (ListSubscribeTrade / subscription-list)
@@ -3261,5 +3832,815 @@ struct SubprocessEnvironmentTests {
     func homeFallback() {
         let child = ArkCLIRunner.sandboxedEnvironment(from: ["PATH": "/usr/bin"])
         #expect(child["HOME"] == NSHomeDirectory())
+    }
+}
+
+// MARK: - 2026-09-24 复核修复回归
+
+@Suite("HTTP error summaries")
+struct HTTPErrorSummaryTests {
+    @Test("Structured Volcengine errors keep code and message")
+    func structuredError() {
+        let json = #"{"ResponseMetadata":{"Error":{"Code":"AuthenticationFailure","Message":"bad key"}}}"#
+        #expect(HTTPErrorSummary.summarize(Data(json.utf8)) == "AuthenticationFailure: bad key")
+    }
+
+    @Test("HTML bodies are truncated to a bounded single line")
+    func htmlTruncation() {
+        let body = String(repeating: "<p>boom</p>\n", count: 400)
+        let summary = HTTPErrorSummary.summarize(Data(body.utf8))
+        #expect(summary.count <= 301)
+        #expect(!summary.contains("\n"))
+        #expect(summary.hasSuffix("…"))
+    }
+
+    @Test("Empty bodies report a stable placeholder")
+    func emptyBody() {
+        #expect(HTTPErrorSummary.summarize(Data()) == "unexpected response")
+    }
+
+    @Test("Generic JSON message fields are used")
+    func jsonMessage() {
+        let json = #"{"message":"quota exceeded"}"#
+        #expect(HTTPErrorSummary.summarize(Data(json.utf8)) == "quota exceeded")
+    }
+}
+
+private struct StubReply: Sendable {
+    let status: Int
+    let headers: [String: String]
+    let body: Data
+}
+
+/// Records request paths so a test can assert the zero-cost probe ran and the
+/// billed fallback did — or did not.
+private final class RecordingTransport: HTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var replies: [String: StubReply]
+    private var paths: [String] = []
+
+    init(_ replies: [String: StubReply]) {
+        self.replies = replies
+    }
+
+    var requestedPaths: [String] {
+        lock.withLock { paths }
+    }
+
+    func response(for request: URLRequest) async throws -> HTTPResponse {
+        let path = request.url?.path ?? ""
+        lock.withLock { paths.append(path) }
+        let reply = lock.withLock { replies[path] }
+            ?? StubReply(status: 200, headers: [:], body: Data())
+        return HTTPResponse(
+            data: reply.body,
+            statusCode: reply.status,
+            response: HTTPURLResponse(
+                url: request.url!,
+                statusCode: reply.status,
+                httpVersion: nil,
+                headerFields: reply.headers)!)
+    }
+}
+
+@Suite("Ark API key probe")
+struct ArkAPIKeyProbeTests {
+    private static let rateLimitHeaders = [
+        "x-ratelimit-remaining-requests": "40",
+        "x-ratelimit-limit-requests": "100",
+    ]
+
+    private static func provider(_ transport: RecordingTransport) -> ArkAPIKeyProvider {
+        ArkAPIKeyProvider(apiKey: "ark-test-key", transport: transport)
+    }
+
+    @Test("Zero-cost models probe runs first and no chat request is billed")
+    func modelsProbeFirst() async throws {
+        let transport = RecordingTransport([
+            "/api/coding/v3/models": StubReply(
+                status: 200, headers: Self.rateLimitHeaders, body: Data("{}".utf8)),
+            "/api/coding/v3/chat/completions": StubReply(
+                status: 500, headers: [:], body: Data()),
+        ])
+        let snapshot = try await Self.provider(transport).fetch(environment: [:])
+        #expect(transport.requestedPaths == ["/api/coding/v3/models"])
+        let window = try #require(snapshot.plans.first?.windows.first)
+        #expect(window.label == "Requests")
+        #expect(window.total == 100)
+        #expect(window.usedPercent == 60)
+        #expect(window.remainingPercent == 40)
+    }
+
+    @Test("A models route without quota headers falls back to exactly one chat probe")
+    func chatFallbackOnce() async throws {
+        let transport = RecordingTransport([
+            "/api/coding/v3/models": StubReply(
+                status: 200, headers: [:], body: Data("{}".utf8)),
+            "/api/coding/v3/chat/completions": StubReply(
+                status: 200, headers: Self.rateLimitHeaders, body: Data("{}".utf8)),
+        ])
+        let snapshot = try await Self.provider(transport).fetch(environment: [:])
+        // The old probe fanned out to up to four billed requests per refresh.
+        #expect(transport.requestedPaths.filter { $0.hasSuffix("/chat/completions") }.count == 1)
+        #expect(snapshot.plans.first?.windows.first?.total == 100)
+    }
+
+    @Test("A missing models route falls back to the chat probe")
+    func modelsRouteMissing() async throws {
+        let transport = RecordingTransport([
+            "/api/coding/v3/models": StubReply(status: 404, headers: [:], body: Data()),
+            "/api/coding/v3/chat/completions": StubReply(
+                status: 200, headers: Self.rateLimitHeaders, body: Data("{}".utf8)),
+        ])
+        let snapshot = try await Self.provider(transport).fetch(environment: [:])
+        #expect(snapshot.plans.first?.windows.first?.remainingPercent == 40)
+    }
+
+    @Test("A 429 on the models probe still carries the quota headers")
+    func rateLimitedModelsProbe() async throws {
+        let transport = RecordingTransport([
+            "/api/coding/v3/models": StubReply(
+                status: 429, headers: Self.rateLimitHeaders, body: Data("{}".utf8)),
+        ])
+        let snapshot = try await Self.provider(transport).fetch(environment: [:])
+        #expect(snapshot.plans.first?.windows.first?.usedPercent == 60)
+        #expect(transport.requestedPaths == ["/api/coding/v3/models"])
+    }
+
+    @Test("Error summaries are truncated and flattened")
+    func errorSummaryBounded() async throws {
+        let body = String(repeating: "<html>error line\n", count: 500)
+        let transport = RecordingTransport([
+            "/api/coding/v3/models": StubReply(
+                status: 502, headers: [:], body: Data(body.utf8)),
+        ])
+        do {
+            _ = try await Self.provider(transport).fetch(environment: [:])
+            Issue.record("expected an apiError for a non-404/403 models failure")
+        } catch let error as UsageError {
+            guard case let .apiError(code, message) = error else {
+                Issue.record("expected apiError, got \(error)")
+                return
+            }
+            #expect(code == 502)
+            #expect(message.count <= 320)
+            #expect(!message.contains("\n"))
+        }
+    }
+}
+
+@Suite("Kimi token account pairing")
+struct KimiAccountPairingTests {
+    private func jwt(sub: String, typ: String = "access") -> String {
+        func b64(_ object: [String: String]) -> String {
+            let data = try! JSONSerialization.data(withJSONObject: object)
+            return data.base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+                .trimmingCharacters(in: CharacterSet(charactersIn: "="))
+        }
+        return "eyJhbGciOiJub25lIn0.\(b64(["sub": sub, "typ": typ])).sig"
+    }
+
+    @Test("A refresh token from another account is rejected")
+    func mismatchedAccounts() {
+        #expect(
+            KimiBrowserSession.sameAccount(
+                access: jwt(sub: "111"), refresh: jwt(sub: "222", typ: "refresh")) == false)
+    }
+
+    @Test("A same-account refresh token pairs")
+    func matchingAccounts() {
+        #expect(
+            KimiBrowserSession.sameAccount(
+                access: jwt(sub: "111"), refresh: jwt(sub: "111", typ: "refresh")))
+    }
+
+    @Test("Undecodable claims are treated as a match")
+    func undecodableClaims() {
+        #expect(KimiBrowserSession.sameAccount(
+            access: "not-a-jwt", refresh: jwt(sub: "111", typ: "refresh")))
+        #expect(KimiBrowserSession.sameAccount(
+            access: jwt(sub: "111"), refresh: "not-a-jwt"))
+    }
+}
+
+@Suite("Cookie header normalization")
+struct CookieHeaderNormalizerTests {
+    @Test("Strips a pasted Cookie prefix and attribute entries")
+    func stripsPrefixAndAttributes() {
+        let header = CookieHeaderNormalizer.normalize(
+            "Cookie: session=abc123; Path=/; HttpOnly; SameSite=Lax")
+        #expect(header == "session=abc123")
+    }
+
+    @Test("Drops empty and invalid pairs")
+    func dropsInvalid() {
+        #expect(CookieHeaderNormalizer.normalize("=value") == nil)
+        #expect(CookieHeaderNormalizer.normalize("name=") == nil)
+        #expect(CookieHeaderNormalizer.normalize("   ") == nil)
+        #expect(CookieHeaderNormalizer.normalize("Set-Cookie: Path=/") == nil)
+    }
+
+    @Test("Unquotes values and keeps whitelisted names only")
+    func whitelist() {
+        let header = CookieHeaderNormalizer.normalize(
+            "auth=\"quoted-value\"; theme=dark", keepOnly: ["auth"])
+        #expect(header == "auth=quoted-value")
+    }
+
+    @Test("Idempotent on an already-clean header")
+    func idempotent() {
+        let clean = "a=1; b=2"
+        #expect(CookieHeaderNormalizer.normalize(clean) == clean)
+    }
+}
+
+@Suite("Cookie domain boundary filter")
+struct CookieDomainFilterTests {
+    private func record(domain: String, name: String = "session") -> BrowserCookieRecord {
+        BrowserCookieRecord(
+            domain: domain, name: name, path: "/", value: "v",
+            expires: nil, isSecure: false, isHTTPOnly: false)
+    }
+
+    @Test("Exact and subdomain matches pass; lookalikes are rejected")
+    func boundaryMatch() {
+        let filtered = CookieDomainFilter.filter(
+            [
+                record(domain: "stepfun.com"),
+                record(domain: "platform.stepfun.com"),
+                record(domain: "not-stepfun.com"),
+                record(domain: "stepfun.com.evil.tld"),
+                record(domain: "evilstepfun.com"),
+            ],
+            allowedDomains: ["stepfun.com"])
+        #expect(filtered.count == 2)
+        #expect(filtered.map(\.domain).sorted() == ["platform.stepfun.com", "stepfun.com"])
+    }
+
+    @Test("Explicit www entries match their own apex only as configured")
+    func explicitDomains() {
+        let filtered = CookieDomainFilter.filter(
+            [record(domain: "www.kimi.com"), record(domain: "kimi.com")],
+            allowedDomains: ["www.kimi.com", "kimi.com"])
+        #expect(filtered.count == 2)
+    }
+}
+
+@Suite("Browser session sign-in gates")
+struct BrowserSessionGateTests {
+    @Test("StepFun requires the Oasis-Token session cookie")
+    func stepFunGate() {
+        #expect(StepFunBrowserSession.hasSessionCookie("Oasis-Token=eyJ.abc.def; Oasis-Webid=w"))
+        #expect(!StepFunBrowserSession.hasSessionCookie("Oasis-Webid=w; _ga=1"))
+    }
+
+    @Test("LongCat requires the passport_token_key SSO cookie")
+    func longCatGate() {
+        #expect(LongCatBrowserSession.hasSessionCookie("passport_token_key=t; _lxsdk_cuid=c"))
+        #expect(!LongCatBrowserSession.hasSessionCookie("_ga=1; _lxsdk_cuid=c"))
+    }
+
+    @Test("Nebula requires a session cookie, not just Cloudflare clearance")
+    func nebulaGate() {
+        #expect(NebulaBrowserSession.hasSessionCookie("session=abc"))
+        #expect(NebulaBrowserSession.hasSessionCookie("new_api_session=abc"))
+        #expect(!NebulaBrowserSession.hasSessionCookie("cf_clearance=abc"))
+        // Analytics cookies that merely contain "session" must not pass.
+        #expect(!NebulaBrowserSession.hasSessionCookie("_hjSessionUser_123=abc"))
+    }
+}
+
+@Suite("LongCat cookie source selector")
+struct LongCatCookieSourceTests {
+    @Test("Manual mode ignores the cached browser session")
+    func manualIgnoresCache() {
+        let header = LongCatProvider.resolveHeader(
+            source: .manual, manual: "Cookie: passport_token_key=t",
+            cachedHeader: "passport_token_key=stale",
+            environment: [:])
+        #expect(header == "passport_token_key=t")
+    }
+
+    @Test("Automatic mode prefers the browser session over the environment")
+    func automaticPrefersSession() {
+        let header = LongCatProvider.resolveHeader(
+            source: .automatic, manual: "passport_token_key=stale",
+            cachedHeader: "passport_token_key=fresh",
+            environment: ["LONGCAT_MANUAL_COOKIE": "passport_token_key=env"])
+        #expect(header == "passport_token_key=fresh")
+    }
+
+    @Test("Automatic mode falls back to the environment, then nil")
+    func automaticFallback() {
+        #expect(LongCatProvider.resolveHeader(
+            source: .automatic, manual: "", cachedHeader: nil,
+            environment: ["LONGCAT_MANUAL_COOKIE": "passport_token_key=env"])
+            == "passport_token_key=env")
+        #expect(LongCatProvider.resolveHeader(
+            source: .automatic, manual: "", cachedHeader: nil, environment: [:]) == nil)
+    }
+
+    @Test("Manual mode without a valid cookie resolves to nil even with a cache")
+    func manualEmpty() {
+        #expect(LongCatProvider.resolveHeader(
+            source: .manual, manual: "", cachedHeader: "passport_token_key=x",
+            environment: [:]) == nil)
+    }
+}
+
+@Suite("Menu-bar binding constraint")
+struct MenuBarWindowTests {
+    private func snapshot(windows: [UsageWindow], product: PlanSnapshot.Product) -> ProviderSnapshot {
+        ProviderSnapshot(
+            providerName: "test", authMethod: nil,
+            plans: [PlanSnapshot(
+                id: "p", product: product, edition: nil, tier: nil, seatID: nil,
+                subscribed: true, windows: windows, expiryDate: nil, errorMessage: nil)],
+            updatedAt: Date(), errorMessage: nil)
+    }
+
+    @Test("An exhausted weekly pool outranks a fresh session")
+    func exhaustedWeeklyOutranksSession() {
+        let snapshot = self.snapshot(
+            windows: [
+                UsageWindow(label: "Session", usedPercent: 0, used: 0, total: 100, resetsAt: nil),
+                UsageWindow(label: "Weekly", usedPercent: 100, used: 100, total: 100, resetsAt: nil),
+            ],
+            product: .codingPlan)
+        #expect(snapshot.menuBarWindow?.label == "Weekly")
+        #expect(snapshot.menuBarWindow?.remainingPercent == 0)
+    }
+
+    @Test("Credit-only plans use the tightest window")
+    func creditOnlyPlan() {
+        let snapshot = self.snapshot(
+            windows: [
+                UsageWindow(label: "Monthly", usedPercent: 21, used: 21, total: 100, resetsAt: nil),
+            ],
+            product: .stepfunCodingPlan)
+        #expect(snapshot.menuBarWindow?.label == "Monthly")
+        #expect(snapshot.menuBarWindow?.remainingPercent == 79)
+    }
+
+    @Test("A healthy plan shows its session window")
+    func healthyPlan() {
+        let snapshot = self.snapshot(
+            windows: [
+                UsageWindow(label: "Session", usedPercent: 10, used: 10, total: 100, resetsAt: nil),
+                UsageWindow(label: "Weekly", usedPercent: 20, used: 20, total: 100, resetsAt: nil),
+            ],
+            product: .codingPlan)
+        #expect(snapshot.menuBarWindow?.label == "Session")
+        #expect(snapshot.menuBarWindow?.remainingPercent == 90)
+    }
+}
+
+@Suite("Reminder scheduler")
+struct ReminderSchedulerTests {
+    @Test("An unchanged reminder list does not republish")
+    @MainActor
+    func noRepublish() {
+        let settings = AppSettings.shared
+        let previousEnabled = settings.expiryReminderEnabled
+        let previousDays = settings.expiryReminderDays
+        defer {
+            settings.expiryReminderEnabled = previousEnabled
+            settings.expiryReminderDays = previousDays
+        }
+        settings.expiryReminderEnabled = true
+        settings.expiryReminderDays = 7
+
+        let scheduler = ReminderScheduler(settings: settings)
+        var emissions = 0
+        let cancellable = scheduler.$items.dropFirst().sink { _ in emissions += 1 }
+        defer { cancellable.cancel() }
+
+        let source = PlanReminderSource(
+            tab: .ark, planID: "p1",
+            expiryDate: Date().addingTimeInterval(3 * 86400), remainingPercent: 80)
+        scheduler.update(planSources: [source], manual: [])
+        let count = scheduler.items.count
+        #expect(count == 1)
+        #expect(emissions == 1)
+
+        scheduler.update(planSources: [source], manual: [])
+        #expect(scheduler.items.count == count)
+        #expect(emissions == 1)
+    }
+}
+
+
+@Suite("Alibaba Cloud console login")
+struct AliyunConsoleLoginTests {
+    @Test("Login URL carries the loopback notice and state")
+    func loginURL() {
+        #expect(AliyunConsoleLogin.loginURL(port: 54321, state: "abc123")
+            == "https://bailian.console.aliyun.com/console-login?notice=127.0.0.1:54321?state=abc123")
+    }
+
+    @Test("GET callback carries the token in the query")
+    func getCallback() {
+        let raw = "GET /cb?state=s1&access_token=tok123 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+        let request = AliyunConsoleLogin.CallbackRequest.parse(Data(raw.utf8))
+        #expect(request?.method == "GET")
+        #expect(request?.query["state"] == "s1")
+        #expect(request?.accessToken == "tok123")
+    }
+
+    @Test("POST urlencoded callback body carries the token")
+    func postFormCallback() {
+        let body = "access_token=tok%20xyz"
+        let raw = "POST /cb?state=s1 HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+            + "Content-Type: application/x-www-form-urlencoded\r\n"
+            + "Content-Length: \(body.utf8.count)\r\n\r\n\(body)"
+        let request = AliyunConsoleLogin.CallbackRequest.parse(Data(raw.utf8))
+        #expect(request?.query["state"] == "s1")
+        #expect(request?.accessToken == "tok xyz")
+    }
+
+    @Test("POST JSON callback body carries the token, including nested data")
+    func postJSONCallback() {
+        let body = #"{"access_token":"json-tok"}"#
+        let raw = "POST /cb?state=s1 HTTP/1.1\r\nContent-Type: application/json\r\n"
+            + "Content-Length: \(body.utf8.count)\r\n\r\n\(body)"
+        #expect(AliyunConsoleLogin.CallbackRequest.parse(Data(raw.utf8))?.accessToken == "json-tok")
+
+        let nested = #"{"data":{"accessToken":"nested-tok"}}"#
+        let rawNested = "POST /cb?state=s1 HTTP/1.1\r\nContent-Type: application/json\r\n"
+            + "Content-Length: \(nested.utf8.count)\r\n\r\n\(nested)"
+        #expect(AliyunConsoleLogin.CallbackRequest.parse(Data(rawNested.utf8))?.accessToken
+            == "nested-tok")
+    }
+
+    @Test("A callback without a token yields nil")
+    func noToken() {
+        let raw = "GET /cb?state=s1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+        #expect(AliyunConsoleLogin.CallbackRequest.parse(Data(raw.utf8))?.accessToken == nil)
+        #expect(AliyunConsoleLogin.CallbackRequest.parse(Data("garbage".utf8)) == nil)
+    }
+
+    @Test("multipart/form-data callback body carries the token")
+    func multipartCallback() {
+        let boundary = "----WebKitFormBoundary7MA4YWxk"
+        let body = "--\(boundary)\r\n"
+            + "Content-Disposition: form-data; name=\"state\"\r\n\r\ns1\r\n"
+            + "--\(boundary)\r\n"
+            + "Content-Disposition: form-data; name=\"access_token\"\r\n\r\nmultipart-tok\r\n"
+            + "--\(boundary)--\r\n"
+        let raw = "POST /cb HTTP/1.1\r\n"
+            + "Content-Type: multipart/form-data; boundary=\(boundary)\r\n"
+            + "Content-Length: \(body.utf8.count)\r\n\r\n\(body)"
+        #expect(AliyunConsoleLogin.CallbackRequest.parse(Data(raw.utf8))?.accessToken
+            == "multipart-tok")
+    }
+}
+
+@Suite("Alibaba Cloud console login callback server")
+struct AliyunCallbackServerTests {
+    /// A proxy-free session: the callback listener is on 127.0.0.1 and must be
+    /// reached directly, whatever the machine's proxy setup looks like.
+    private static func session() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.connectionProxyDictionary = [:]
+        configuration.timeoutIntervalForRequest = 5
+        return URLSession(configuration: configuration)
+    }
+
+    /// The listener is installed after `serve` starts running, so retry the
+    /// connect until it is up rather than sleeping a guessed interval.
+    private static func call(
+        _ url: String,
+        method: String = "GET",
+        body: Data? = nil,
+        contentType: String? = nil
+    ) async throws -> (status: Int, body: String, allowOrigin: String?) {
+        var request = URLRequest(url: URL(string: url)!)
+        request.httpMethod = method
+        if let body {
+            request.httpBody = body
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        }
+        var lastError: Error = URLError(.cannotConnectToHost)
+        for _ in 0..<40 {
+            do {
+                let (data, response) = try await session().data(for: request)
+                let http = response as? HTTPURLResponse
+                let allowOrigin = http?.allHeaderFields
+                    .first { "\($0.key)".lowercased() == "access-control-allow-origin" }?
+                    .value as? String
+                return (
+                    http?.statusCode ?? 0,
+                    String(data: data, encoding: .utf8) ?? "",
+                    allowOrigin)
+            } catch {
+                lastError = error
+                try await Task.sleep(nanoseconds: 50_000_000)
+            }
+        }
+        throw lastError
+    }
+
+    @Test("A real loopback callback hands the token to serve()")
+    func deliversTheToken() async throws {
+        let server = try AliyunConsoleLogin.CallbackServer()
+        defer { server.stop() }
+        let serving = Task { try await server.serve(state: "s1", timeout: 15) }
+        let response = try await Self.call(
+            "http://127.0.0.1:\(server.port)/cb?state=s1&access_token=tok-socket")
+        #expect(response.status == 200)
+        #expect(response.body.contains("登录成功"))
+        // The console posts the token with a cross-origin fetch: without this
+        // header the browser reports the round trip as failed and the page sits
+        // on 「授权中」 even though the token already landed here.
+        #expect(response.allowOrigin == "*")
+        #expect(try await serving.value == "tok-socket")
+    }
+
+    @Test("A tokenless or forged callback keeps the login waiting")
+    func keepsWaiting() async throws {
+        let server = try AliyunConsoleLogin.CallbackServer()
+        defer { server.stop() }
+        let serving = Task { try await server.serve(state: "s2", timeout: 15) }
+
+        // The console probes with the right state and no token: answer, and wait.
+        let probe = try await Self.call("http://127.0.0.1:\(server.port)/probe?state=s2")
+        #expect(probe.status == 200)
+        // A callback for another state must never end this login.
+        let forged = try await Self.call(
+            "http://127.0.0.1:\(server.port)/cb?state=wrong&access_token=stolen")
+        #expect(forged.status == 400)
+        #expect(forged.body.contains("bad state"))
+
+        let delivered = try await Self.call(
+            "http://127.0.0.1:\(server.port)/cb?state=s2&access_token=real-token")
+        #expect(delivered.status == 200)
+        #expect(try await serving.value == "real-token")
+    }
+
+    @Test("A posted form body reaches serve() over the socket")
+    func postedForm() async throws {
+        let server = try AliyunConsoleLogin.CallbackServer()
+        defer { server.stop() }
+        let serving = Task { try await server.serve(state: "s3", timeout: 15) }
+        _ = try await Self.call(
+            "http://127.0.0.1:\(server.port)/cb?state=s3",
+            method: "POST",
+            body: Data("access_token=post%20tok".utf8),
+            contentType: "application/x-www-form-urlencoded")
+        #expect(try await serving.value == "post tok")
+    }
+
+    @Test("serve() times out when the console never calls back")
+    func timesOut() async throws {
+        let server = try AliyunConsoleLogin.CallbackServer()
+        do {
+            _ = try await server.serve(state: "s4", timeout: 0.5)
+            Issue.record("serve() should have timed out")
+        } catch is AliyunConsoleLogin.LoginError {
+            // Expected — but only for the timeout, not a bind failure.
+        }
+        // The listener is closed on the way out, so nothing is left bound.
+        let probe = try? await Self.call("http://127.0.0.1:\(server.port)/cb?state=s4")
+        #expect(probe == nil)
+    }
+
+    @Test("A login that never starts still releases the port")
+    func stopBeforeServing() async throws {
+        // `run()` can bail after binding (an unusable login URL), so `stop()`
+        // must close the descriptor itself — not only via a source that was
+        // never installed.
+        let server = try AliyunConsoleLogin.CallbackServer()
+        server.stop()
+        do {
+            _ = try await server.serve(state: "s5", timeout: 5)
+            Issue.record("serving a stopped listener should fail")
+        } catch is AliyunConsoleLogin.LoginError {}
+        let probe = try? await Self.call("http://127.0.0.1:\(server.port)/cb?state=s5")
+        #expect(probe == nil)
+    }
+
+    @Test("A cancelled login releases the port instead of stacking listeners")
+    func cancellationReleasesThePort() async throws {
+        // Clicking the button again must retire the previous attempt: each one
+        // otherwise holds a loopback port for the full ten-minute timeout.
+        let server = try AliyunConsoleLogin.CallbackServer()
+        let serving = Task { try await server.serve(state: "s6", timeout: 60) }
+        _ = try await Self.call("http://127.0.0.1:\(server.port)/probe?state=s6")
+        let port = server.port
+        serving.cancel()
+        await #expect(throws: CancellationError.self) {
+            _ = try await serving.value
+        }
+        let probe = try? await Self.call("http://127.0.0.1:\(port)/cb?state=s6&access_token=x")
+        #expect(probe == nil)
+    }
+}
+
+@Suite("Alibaba Cloud console gateway payload")
+struct AliyunGatewayPayloadTests {
+    private static let success = #"{"data":{"success":true}}"#.data(using: .utf8)!
+
+    private final class BodyRecorder: HTTPTransport, @unchecked Sendable {
+        let lock = NSLock()
+        private var bodies: [String] = []
+
+        var recorded: [String] { lock.withLock { bodies } }
+
+        func response(for request: URLRequest) async throws -> HTTPResponse {
+            lock.withLock {
+                bodies.append(String(decoding: request.httpBody ?? Data(), as: UTF8.self))
+            }
+            return HTTPResponse(
+                data: AliyunGatewayPayloadTests.success,
+                statusCode: 200,
+                response: HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+    }
+
+    /// Unwraps the `params=<JSON>&region=…` form body the gateway call sent.
+    private static func params(fromBody body: String) throws -> [String: Any] {
+        #expect(body.hasSuffix("&region=cn-beijing"))
+        let encoded = body.dropFirst("params=".count).dropLast("&region=cn-beijing".count)
+        let json = String(encoded).removingPercentEncoding ?? String(encoded)
+        return try #require(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+    }
+
+    @Test("Every console call carries the cornerstone routing block")
+    func cornerstoneOnEveryCall() async throws {
+        let transport = BodyRecorder()
+        _ = try await AliyunConsoleAPI.fetchTokenPlanUsage(token: "t", transport: transport)
+        _ = try await AliyunConsoleAPI.fetchCodingPlanUsage(token: "t", transport: transport)
+        let bodies = transport.recorded
+        #expect(bodies.count == 2)
+        for body in bodies {
+            let envelope = try Self.params(fromBody: body)
+            #expect(envelope["V"] as? String == "1.0")
+            let data = try #require(envelope["Data"] as? [String: Any])
+            let cornerstone = try #require(
+                data["cornerstoneParam"] as? [String: Any],
+                "cornerstoneParam missing from \(body)")
+            #expect(cornerstone["productCode"] as? String == "p_efm")
+            #expect(cornerstone["consoleSite"] as? String == "BAILIAN_ALIYUN")
+        }
+    }
+
+    @Test("The Token Plan payload stays empty apart from the routing block")
+    func tokenPlanPayload() async throws {
+        let transport = BodyRecorder()
+        _ = try await AliyunConsoleAPI.fetchTokenPlanUsage(token: "t", transport: transport)
+        let envelope = try Self.params(fromBody: try #require(transport.recorded.first))
+        #expect(envelope["Api"] as? String == AliyunConsoleAPI.tokenPlanUsageAPI)
+        let data = try #require(envelope["Data"] as? [String: Any])
+        #expect(data.keys.sorted() == ["cornerstoneParam"])
+    }
+
+    @Test("The Coding Plan payload keeps its instance query")
+    func codingPlanPayload() async throws {
+        let transport = BodyRecorder()
+        _ = try await AliyunConsoleAPI.fetchCodingPlanUsage(token: "t", transport: transport)
+        let envelope = try Self.params(fromBody: try #require(transport.recorded.first))
+        #expect(envelope["Api"] as? String == AliyunConsoleAPI.codingPlanUsageAPI)
+        let data = try #require(envelope["Data"] as? [String: Any])
+        let query = try #require(
+            data["queryCodingPlanInstanceInfoRequest"] as? [String: Any])
+        #expect(query["commodityCode"] as? String == AliyunConsoleAPI.commodityCode)
+        #expect(query["onlyLatestOne"] as? Bool == true)
+    }
+
+    @Test("A gateway error envelope surfaces its errorMsg detail")
+    func errorMsgDetailSurfaced() async throws {
+        // Captured live: this gateway spells the detail `errorMsg`, while the
+        // CLI's other envelopes use `errorMessage`.
+        let body = #"{"data":{"success":false,"errorCode":"SomeBusinessCode","errorMsg":"套餐未激活"}}"#
+        do {
+            _ = try await AliyunConsoleAPI.fetchTokenPlanUsage(
+                token: "t", transport: BodyTransport(statusCode: 200, body: Data(body.utf8)))
+            Issue.record("the error envelope should have thrown")
+        } catch let error as UsageError {
+            #expect(
+                error.localizedDescription.contains("套餐未激活"),
+                "detail lost: \(error.localizedDescription)")
+        }
+    }
+}
+
+@Suite("Alibaba Cloud console token store")
+struct AliyunConsoleTokenStoreTests {
+    private static let credentials = AliyunCredentials(
+        accessKeyID: "LTAI-test", secretAccessKey: "secret-test")
+
+    @Test("A browser-login token wins over AK/SK and the plan key")
+    @MainActor
+    func browserLoginWins() async throws {
+        // Any mint call would answer 200 with an empty body and fail the
+        // parse, so a successful result proves no mint happened.
+        let transport = AliyunFlowTransport(replies: [:])
+        let store = AliyunConsoleTokenStore()
+        let (token, source) = try await store.accessToken(
+            consoleToken: "browser-tok",
+            credentials: Self.credentials,
+            apiKey: "sk-sp-abc",
+            transport: transport)
+        #expect(token == "browser-tok")
+        #expect(source == .browserLogin)
+        #expect(transport.requests.isEmpty)
+    }
+
+    @Test("AK/SK mints when no browser token exists")
+    @MainActor
+    func mintsFromAccessKey() async throws {
+        let transport = AliyunFlowTransport(replies: [
+            "/modelstudio/cli/generateAccessToken": [
+                (200, Data(#"{"cliAccessToken":"minted"}"#.utf8)),
+            ],
+        ])
+        let store = AliyunConsoleTokenStore()
+        let (token, source) = try await store.accessToken(
+            consoleToken: "",
+            credentials: Self.credentials,
+            apiKey: nil,
+            transport: transport)
+        #expect(token == "minted")
+        #expect(source == .accessKey)
+    }
+
+    @Test("The plan API key is the last resort")
+    @MainActor
+    func apiKeyLastResort() async throws {
+        let transport = AliyunFlowTransport(replies: [:])
+        let store = AliyunConsoleTokenStore()
+        let (token, source) = try await store.accessToken(
+            consoleToken: "",
+            credentials: nil,
+            apiKey: "sk-sp-abc",
+            transport: transport)
+        #expect(token == "sk-sp-abc")
+        #expect(source == .apiKey)
+    }
+
+    @Test("Nothing configured throws missing credentials")
+    @MainActor
+    func nothingConfigured() async throws {
+        let transport = AliyunFlowTransport(replies: [:])
+        let store = AliyunConsoleTokenStore()
+        do {
+            _ = try await store.accessToken(
+                consoleToken: "", credentials: nil, apiKey: nil, transport: transport)
+            Issue.record("expected aliyunMissingCredentials")
+        } catch let error as UsageError {
+            guard case .aliyunMissingCredentials = error else {
+                Issue.record("expected aliyunMissingCredentials, got \(error)")
+                return
+            }
+        }
+    }
+}
+
+extension AliyunProviderFetchTests {
+    @Test("A rejected plan key fails once, then is not retried this run")
+    @MainActor
+    func rejectedAPIKeyIsNotRetried() async throws {
+        // Hermetic: provide the plan key through settings and restore after,
+        // so the test never depends on whatever the developer's Keychain holds.
+        let restore = Self.clearAmbientAliyunCredentials()
+        defer { restore() }
+        AppSettings.shared.setAliyunAPIKey("sk-sp-test-key")
+
+        // The plan key is scoped to the model gateway; the console gateway
+        // answers 200 + success:false, which must surface as invalid-token.
+        let rejected = #"""
+        {"data":{"success":false,"errorCode":"InvalidParameter","errorMessage":"Bad Request"}}
+        """#.data(using: .utf8)!
+        let transport = AliyunFlowTransport(replies: [
+            "/cli/api.json?api=\(Self.tokenPlanAPI)": [(200, rejected)],
+        ])
+        let provider = AliyunProvider(settings: AppSettings.shared, transport: transport)
+
+        do {
+            _ = try await provider.fetch(environment: [:])
+            Issue.record("expected aliyunInvalidToken for the plan key")
+        } catch let error as UsageError {
+            guard case .aliyunInvalidToken = error else {
+                Issue.record("expected aliyunInvalidToken, got \(error)")
+                return
+            }
+        }
+        #expect(transport.requests.count == 1)
+
+        // The second refresh must not hit the gateway again with the same key.
+        do {
+            _ = try await provider.fetch(environment: [:])
+            Issue.record("expected aliyunInvalidToken on the cached rejection")
+        } catch let error as UsageError {
+            guard case .aliyunInvalidToken = error else {
+                Issue.record("expected aliyunInvalidToken, got \(error)")
+                return
+            }
+        }
+        #expect(transport.requests.count == 1)
     }
 }

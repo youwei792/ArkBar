@@ -29,7 +29,8 @@ enum OpenCodeGoBrowserSession {
     private static let sourceLabelKey = "tokenbar.opencodeBrowserSourceLabel"
     private static let browserKey = "tokenbar.opencodeBrowser"
     private static let client = BrowserCookieClient()
-    private static let query = BrowserCookieQuery(domains: ["opencode.ai", "app.opencode.ai"])
+    private static let domains = ["opencode.ai", "app.opencode.ai"]
+    private static let query = BrowserCookieQuery(domains: domains)
 
     /// Prefer the browser most TokenBar users already use for the dashboard, then
     /// try the remaining SweetCookieKit catalog without duplicates.
@@ -37,34 +38,6 @@ enum OpenCodeGoBrowserSession {
         let preferred: [Browser] = [.chrome, .arc, .safari, .edge, .brave, .firefox]
         return preferred + Browser.defaultImportOrder.filter { !preferred.contains($0) }
     }()
-
-    static func configureKeychainPrompt() {
-        BrowserCookieKeychainPromptHandler.handler = { context in
-            if Thread.isMainThread {
-                MainActor.assumeIsolated {
-                    presentKeychainPrompt(label: context.label)
-                }
-            } else {
-                DispatchQueue.main.sync {
-                    MainActor.assumeIsolated {
-                        presentKeychainPrompt(label: context.label)
-                    }
-                }
-            }
-        }
-    }
-
-    @MainActor
-    private static func presentKeychainPrompt(label: String) {
-        let alert = NSAlert()
-        alert.alertStyle = .informational
-        alert.messageText = L(.openCodeBrowserAccessTitle)
-        alert.informativeText = String(
-            format: L(.openCodeBrowserAccessMessage),
-            label)
-        alert.addButton(withTitle: L(.continueAction))
-        alert.runModal()
-    }
 
     static func cachedSession() -> Session? {
         guard let raw = CookieKeychainStore.load(provider: cachedCredentialAccount),
@@ -152,7 +125,11 @@ enum OpenCodeGoBrowserSession {
         do {
             let sources = try client.records(matching: query, in: browser)
             for source in sources where !source.records.isEmpty {
-                let cookies = BrowserCookieClient.makeHTTPCookies(source.records, origin: query.origin)
+                // Strict domain boundary: the query matches by substring, so
+                // lookalike domains (opencode.ai.evil.tld) could ride along.
+                let records = CookieDomainFilter.filter(source.records, allowedDomains: domains)
+                guard !records.isEmpty else { continue }
+                let cookies = BrowserCookieClient.makeHTTPCookies(records, origin: query.origin)
                 OpenCodeGoProvider.writeDiagnostic(
                     "import browser=\(source.label) domains=\(query.domains.joined(separator: ",")) "
                         + "cookies=\(cookies.map(\.name).sorted().joined(separator: ","))")

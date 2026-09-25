@@ -43,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let qaPane = ProcessInfo.processInfo.environment["TOKENBAR_SHOW_SETTINGS"]
         let qaPopMenu = ProcessInfo.processInfo.environment["TOKENBAR_POP_MENU"] == "1"
         NSApp.setActivationPolicy((qaPane != nil) ? .regular : .accessory)
-        OpenCodeGoBrowserSession.configureKeychainPrompt()
+        BrowserKeychainPrompt.configure()
 
         let store = UsageStore()
         self.store = store

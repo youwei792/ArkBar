@@ -297,7 +297,15 @@ final class KimiProvider: UsageProvider {
     private func refreshIfPossible(
         credential: KimiBrowserSession.Credential
     ) async -> KimiBrowserSession.Credential {
-        let refreshToken = credential.refreshToken ?? KimiBrowserSession.cachedRefreshToken()
+        var refreshToken = credential.refreshToken
+        if refreshToken == nil,
+           let accessToken = credential.accessToken,
+           let cached = KimiBrowserSession.cachedRefreshToken(),
+           KimiBrowserSession.sameAccount(access: accessToken, refresh: cached)
+        {
+            // Only a provably same-account cached refresh may be paired here.
+            refreshToken = cached
+        }
         guard let refreshToken else { return credential }
         do {
             let refreshed = try await KimiBrowserSession.refreshAccessToken(
@@ -418,8 +426,9 @@ final class KimiProvider: UsageProvider {
             if response.statusCode == 401 || response.statusCode == 403 {
                 throw UsageError.kimiInvalidToken
             }
-            let body = String(data: response.data, encoding: .utf8) ?? ""
-            throw UsageError.apiError(statusCode: response.statusCode, message: "Kimi Code API: \(body)")
+            throw UsageError.apiError(
+                statusCode: response.statusCode,
+                message: "Kimi Code API: \(HTTPErrorSummary.summarize(response.data))")
         }
         guard !response.data.isEmpty else {
             throw UsageError.parseFailed(
@@ -453,8 +462,9 @@ final class KimiProvider: UsageProvider {
                 Self.webSessionInvalid = true
                 throw UsageError.kimiInvalidToken
             }
-            let body = String(data: response.data, encoding: .utf8) ?? ""
-            throw UsageError.apiError(statusCode: response.statusCode, message: "Kimi web usage: \(body)")
+            throw UsageError.apiError(
+                statusCode: response.statusCode,
+                message: "Kimi web usage: \(HTTPErrorSummary.summarize(response.data))")
         }
         Self.webSessionInvalid = false
         return try JSONDecoder().decode(KimiUsageResponse.self, from: response.data)
@@ -469,8 +479,9 @@ final class KimiProvider: UsageProvider {
                 Self.webSessionInvalid = true
                 throw UsageError.kimiInvalidToken
             }
-            let body = String(data: response.data, encoding: .utf8) ?? ""
-            throw UsageError.apiError(statusCode: response.statusCode, message: "Kimi subscription stats: \(body)")
+            throw UsageError.apiError(
+                statusCode: response.statusCode,
+                message: "Kimi subscription stats: \(HTTPErrorSummary.summarize(response.data))")
         }
         Self.webSessionInvalid = false
         return try JSONDecoder().decode(KimiSubscriptionStatsResponse.self, from: response.data)

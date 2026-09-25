@@ -467,18 +467,18 @@ final class SummaryRowView: NSView {
         case let .stale(snapshot, _):
             if showsBalance, let balance = balanceText(for: tab, snapshot: snapshot) {
                 return (balance, .labelColor,
-                        snapshot.sessionWindow?.remainingPercent, true)
+                        snapshot.menuBarWindow?.remainingPercent, true)
             }
-            if let pct = snapshot.sessionWindow?.remainingPercent {
+            if let pct = snapshot.menuBarWindow?.remainingPercent {
                 return ("\(Int(pct.rounded()))%", .labelColor, pct, true)
             }
             return (L(.staleData), .systemOrange, nil, true)
         case let .ok(snapshot):
             if showsBalance, let balance = balanceText(for: tab, snapshot: snapshot) {
                 return (balance, .labelColor,
-                        snapshot.sessionWindow?.remainingPercent, false)
+                        snapshot.menuBarWindow?.remainingPercent, false)
             }
-            if let pct = snapshot.sessionWindow?.remainingPercent {
+            if let pct = snapshot.menuBarWindow?.remainingPercent {
                 return ("\(Int(pct.rounded()))%", .labelColor, pct, false)
             }
             return ("–", .secondaryLabelColor, nil, false)

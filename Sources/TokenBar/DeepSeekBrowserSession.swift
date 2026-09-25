@@ -20,6 +20,7 @@ enum DeepSeekBrowserSession {
     private static let origin = "https://platform.deepseek.com"
     private static let sourceLabelKey = "tokenbar.deepseekBrowserSourceLabel"
     private static let validationCache = DeepSeekBrowserValidationCache()
+    private static let scanCache = DeepSeekBrowserScanCache()
 
     /// Browser-session label shown in settings ("Google Chrome — 个人资料 1").
     static func cachedSourceLabel() -> String? {
@@ -27,19 +28,28 @@ enum DeepSeekBrowserSession {
     }
 
     /// Silently scans Chrome profiles and returns the first session whose token
-    /// validates against the usage API. Validation results are cached so routine
-    /// refreshes do not rescan LevelDB on every tick.
+    /// validates against the usage API. Both the LevelDB scan and the network
+    /// validation are cached for 30 minutes, so routine refreshes do not rescan
+    /// the disk or re-probe on every tick.
     static func resolveAutomaticSession(
         transport: any HTTPTransport,
         logger: ((String) -> Void)? = nil) async -> Session?
     {
-        let candidates = importTokens(logger: logger)
+        let candidates = scanCache.candidates { importTokens(logger: logger) }
         guard !candidates.isEmpty else { return nil }
         let valid = await validatedCandidates(candidates, transport: transport, logger: logger)
         guard let winner = valid.first else { return nil }
         let session = Session(token: winner.token, sourceLabel: winner.sourceLabel)
         UserDefaults.standard.set(session.sourceLabel, forKey: sourceLabelKey)
         return session
+    }
+
+    /// Drops the in-memory scan and validation caches, e.g. after a 401 proved
+    /// a cached token stale, so the next refresh rescans the browser store
+    /// instead of retrying the dead token.
+    static func invalidateAutomaticSession() async {
+        scanCache.reset()
+        await validationCache.reset()
     }
 
     /// Read-only variant for tests; skips the source-label persistence.
@@ -204,5 +214,38 @@ actor DeepSeekBrowserValidationCache {
 
     func record(id: String, token: String, isValid: Bool, now: Date) {
         entries[id] = Entry(token: token, isValid: isValid, checkedAt: now)
+    }
+
+    func reset() {
+        entries.removeAll()
+    }
+}
+
+/// Short-lived in-memory cache of the LevelDB scan itself, so routine
+/// refreshes skip the disk walk for 30 minutes. Lock-based (not an actor)
+/// because the scan closure captures a non-Sendable logger.
+final class DeepSeekBrowserScanCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private let ttl: TimeInterval = 30 * 60
+    private var cached: (at: Date, tokens: [DeepSeekBrowserSession.TokenInfo])?
+
+    func candidates(scan: () -> [DeepSeekBrowserSession.TokenInfo]) -> [DeepSeekBrowserSession.TokenInfo] {
+        lock.lock()
+        if let cached, Date().timeIntervalSince(cached.at) < ttl {
+            lock.unlock()
+            return cached.tokens
+        }
+        lock.unlock()
+        let tokens = scan()
+        lock.lock()
+        cached = (Date(), tokens)
+        lock.unlock()
+        return tokens
+    }
+
+    func reset() {
+        lock.lock()
+        cached = nil
+        lock.unlock()
     }
 }

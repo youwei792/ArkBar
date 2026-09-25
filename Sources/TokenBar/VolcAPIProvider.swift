@@ -142,24 +142,7 @@ final class VolcAPIProvider: UsageProvider {
     }
 
     private static func errorSummary(_ data: Data) -> String {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return text.isEmpty ? "unexpected response" : text
-        }
-        if let meta = json["ResponseMetadata"] as? [String: Any],
-           let err = meta["Error"] as? [String: Any]
-        {
-            let code = (err["Code"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let msg = (err["Message"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let code, let msg, !code.isEmpty, !msg.isEmpty { return "\(code): \(msg)" }
-            if let code, !code.isEmpty { return code }
-            if let msg, !msg.isEmpty { return msg }
-        }
-        if let err = json["error"] as? [String: Any], let msg = err["message"] as? String, !msg.isEmpty {
-            return msg
-        }
-        if let msg = json["message"] as? String, !msg.isEmpty { return msg }
-        return "unexpected response"
+        HTTPErrorSummary.summarize(data)
     }
 }
 

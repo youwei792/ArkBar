@@ -35,13 +35,14 @@ enum NebulaBrowserSession {
     private static let browserKey = "tokenbar.nebulaBrowser"
     private static let userIdKey = "tokenbar.nebulaUserId"
     private static let client = BrowserCookieClient()
-    private static let query = BrowserCookieQuery(domains: [
+    private static let domains = [
         "apinebula.ai",
         "apinebula.com",
         "api.yhlxj.ai",
         "www.apinebula.ai",
         "www.apinebula.com",
-    ])
+    ]
+    private static let query = BrowserCookieQuery(domains: domains)
 
     private static let preferredBrowsers: [Browser] = {
         let preferred: [Browser] = [.chrome, .arc, .safari, .edge, .brave, .firefox]
@@ -50,13 +51,26 @@ enum NebulaBrowserSession {
 
     static func cachedSession() -> Session? {
         guard let raw = CookieKeychainStore.load(provider: cachedCredentialAccount),
-              let header = Self.requestCookieHeader(from: raw)
+              let header = Self.requestCookieHeader(from: raw),
+              Self.hasSessionCookie(header)
         else {
             return nil
         }
         let source = UserDefaults.standard.string(forKey: sourceLabelKey) ?? L(.browserSession)
         let userId = UserDefaults.standard.string(forKey: userIdKey)
         return Session(cookieHeader: header, userId: userId, sourceLabel: source)
+    }
+
+    /// The new-api console authenticates with a `session` cookie; analytics,
+    /// Cloudflare or marketing cookies alone mean the browser is signed out.
+    static func hasSessionCookie(_ header: String) -> Bool {
+        for part in header.split(separator: ";") {
+            let trimmed = part.trimmingCharacters(in: .whitespaces)
+            guard let eq = trimmed.firstIndex(of: "=") else { continue }
+            let name = trimmed[..<eq].lowercased()
+            if name == "session" || name.hasSuffix("_session") { return true }
+        }
+        return false
     }
 
     static func cachedSourceLabel() -> String? {
@@ -98,21 +112,44 @@ enum NebulaBrowserSession {
         }
         do {
             let sources = try client.records(matching: query, in: browser)
+            var sawCookiesButNoUserId = false
             for source in sources where !source.records.isEmpty {
-                let cookies = BrowserCookieClient.makeHTTPCookies(source.records, origin: query.origin)
+                // Strict domain boundary: the query itself matches by
+                // substring, so lookalike domains could otherwise ride along.
+                let records = CookieDomainFilter.filter(source.records, allowedDomains: domains)
+                guard !records.isEmpty else { continue }
+                let cookies = BrowserCookieClient.makeHTTPCookies(records, origin: query.origin)
                 let rawHeader = cookies
                     .map { "\($0.name)=\($0.value)" }
                     .joined(separator: "; ")
-                guard let header = Self.requestCookieHeader(from: rawHeader) else {
+                // A bag without a session cookie is not a sign-in; importing it
+                // would just cache junk that fails every request.
+                guard let header = Self.requestCookieHeader(from: rawHeader),
+                      Self.hasSessionCookie(header)
+                else {
                     continue
                 }
                 // The console's New-Api-User header needs the account id, which
-                // new-api keeps in the site's localStorage (plaintext).
-                let userId = Self.resolveUserId(browser: browser, sourceLabel: source.label)
+                // new-api keeps in the site's localStorage (plaintext) — in the
+                // SAME profile the session cookie came from.
+                let profileDirectory = URL(fileURLWithPath: source.store.profile.id).lastPathComponent
+                guard let userId = Self.resolveUserId(
+                    browser: browser, profileDirectory: profileDirectory, sourceLabel: source.label)
+                else {
+                    sawCookiesButNoUserId = true
+                    continue
+                }
                 let session = Session(cookieHeader: header, userId: userId, sourceLabel: source.label)
                 cache(session, browser: browser)
                 return session
             }
+            // Without the console account id every request 400s; fail the
+            // import explicitly instead of caching a session that cannot work.
+            if sawCookiesButNoUserId {
+                throw ImportError.noSession(L(.errorNebulaUserIdMissing))
+            }
+        } catch let error as ImportError {
+            throw error
         } catch {
             UsageStore.log("Nebula browser session import failed \(browser.displayName): \(error.localizedDescription)")
             throw ImportError.noSession("\(browser.displayName): \(error.localizedDescription)")
@@ -128,8 +165,12 @@ enum NebulaBrowserSession {
     }
 
     /// Reads the console account id from the browser's localStorage for the
-    /// matching profile (localStorage is plaintext; no Keychain prompt).
-    private static func resolveUserId(browser: Browser, sourceLabel: String) -> String? {
+    /// profile the session cookie came from (localStorage is plaintext; no
+    /// Keychain prompt). `profileDirectory` binds the lookup to that profile:
+    /// an id from a different profile would pair two accounts.
+    private static func resolveUserId(
+        browser: Browser, profileDirectory: String?, sourceLabel: String) -> String?
+    {
         let roots = ChromiumProfileLocator.roots(
             for: [browser],
             homeDirectories: BrowserCookieClient.defaultHomeDirectories())
@@ -145,6 +186,7 @@ enum NebulaBrowserSession {
                 else { continue }
                 let name = directory.lastPathComponent
                 guard name == "Default" || name.hasPrefix("Profile ") || name.hasPrefix("user-") else { continue }
+                if let profileDirectory, name != profileDirectory { continue }
                 let levelDB = directory.appendingPathComponent("Local Storage").appendingPathComponent("leveldb")
                 guard FileManager.default.fileExists(atPath: levelDB.path) else { continue }
                 let entries = ChromiumLocalStorageReader.readEntries(

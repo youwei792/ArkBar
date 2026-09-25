@@ -21,7 +21,10 @@ let package = Package(
             ]),
         .testTarget(
             name: "TokenBarTests",
-            dependencies: ["TokenBar"],
+            dependencies: [
+                "TokenBar",
+                .product(name: "SweetCookieKit", package: "SweetCookieKit"),
+            ],
             path: "Tests/TokenBarTests"),
     ]
 )

@@ -160,6 +160,7 @@ struct PlanSnapshot: Sendable, Equatable, Identifiable {
         case grokPool = "grok-pool"
         case longcat = "longcat"
         case aliyunCodingPlan = "aliyun-coding-plan"
+        case aliyunTokenPlan = "aliyun-token-plan"
         case stepfunCodingPlan = "stepfun-coding-plan"
         case senseNovaCodingPlan = "sensenova-coding-plan"
 
@@ -172,7 +173,7 @@ struct PlanSnapshot: Sendable, Equatable, Identifiable {
             switch self {
             case .codingPlanTeam, .agentPlanTeam: true
             case .codingPlan, .agentPlan, .openCodeGo, .deepseek, .nebula, .grokPool, .longcat,
-                 .aliyunCodingPlan, .stepfunCodingPlan, .senseNovaCodingPlan: false
+                 .aliyunCodingPlan, .aliyunTokenPlan, .stepfunCodingPlan, .senseNovaCodingPlan: false
             }
         }
     }
@@ -309,6 +310,7 @@ enum UsageError: LocalizedError, Sendable {
     case aliyunMissingCredentials
     case aliyunInvalidToken
     case aliyunNotActivated
+    case aliyunConsoleLoginExpired
     case stepFunMissingCredentials
     case stepFunInvalidSession
     case senseNovaMissingCredentials
@@ -378,6 +380,8 @@ enum UsageError: LocalizedError, Sendable {
             L(.errorAliyunInvalidToken)
         case .aliyunNotActivated:
             L(.errorAliyunNotActivated)
+        case .aliyunConsoleLoginExpired:
+            L(.errorAliyunConsoleLoginExpired)
         case .stepFunMissingCredentials:
             L(.errorStepFunMissingCredentials)
         case .stepFunInvalidSession:

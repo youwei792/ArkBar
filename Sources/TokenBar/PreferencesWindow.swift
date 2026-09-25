@@ -1087,20 +1087,24 @@ private struct KimiPreferencesPane: View {
 private struct AliyunPreferencesPane: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var store: UsageStore
+    @State private var accessKeyIDField: String
+    @State private var secretAccessKeyField: String
     @State private var apiKeyField: String
 
     init(settings: AppSettings, store: UsageStore) {
         self.settings = settings
         self.store = store
+        _accessKeyIDField = State(initialValue: settings.aliyunAccessKeyID)
+        _secretAccessKeyField = State(initialValue: settings.aliyunSecretAccessKey)
         _apiKeyField = State(initialValue: settings.aliyunAPIKey)
     }
 
     var body: some View {
         PreferencesPaneContainer(title: L(.settingsAliyun), symbol: "cloud.fill", subtitle: L(.settingsAliyunSubtitle)) {
             Form {
-                // Key field and Save share one row (a Save button floating on
-                // its own line below the field is a web-form habit); the
-                // explanatory text is a section footer, not a second card.
+                // Primary path: the console browser login. AK/SK and the plan
+                // key are optional fallbacks; each Save shares its row (a
+                // button on its own line below the field is a web-form habit).
                 Section {
                     Toggle(L(.showProvider), isOn: Binding(
                         get: { settings.showAliyun },
@@ -1108,12 +1112,48 @@ private struct AliyunPreferencesPane: View {
                         .toggleStyle(.switch)
 
                     HStack(spacing: 8) {
+                        Button {
+                            store.reimportAliyunConsoleLogin()
+                        } label: {
+                            Label(L(.aliyunBrowserLogin), systemImage: "person.crop.circle")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Text(String(
+                            format: L(.aliyunConsoleLoginStatus),
+                            settings.aliyunConsoleLoggedIn
+                                ? L(.aliyunConsoleSignedIn)
+                                : L(.aliyunConsoleNotSignedIn)))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack(spacing: 8) {
                         SecureField(
                             L(.aliyunAPIKeyLabel),
                             text: $apiKeyField,
                             prompt: Text("sk-sp-…"))
-                            .onSubmit(saveAPIKey)
-                        Button(L(.saveCredential), action: saveAPIKey)
+                            .onSubmit(saveCredentials)
+                        Button(L(.saveCredential), action: saveCredentials)
+                            .buttonStyle(.bordered)
+                    }
+
+                    HStack(spacing: 8) {
+                        SecureField(
+                            L(.aliyunAccessKeyIDLabel),
+                            text: $accessKeyIDField,
+                            prompt: Text("LTAI…"))
+                            .onSubmit(saveCredentials)
+                        Button(L(.saveCredential), action: saveCredentials)
+                            .buttonStyle(.bordered)
+                    }
+
+                    HStack(spacing: 8) {
+                        SecureField(
+                            L(.aliyunAccessKeySecretLabel),
+                            text: $secretAccessKeyField,
+                            prompt: Text("…"))
+                            .onSubmit(saveCredentials)
+                        Button(L(.saveCredential), action: saveCredentials)
                             .buttonStyle(.bordered)
                     }
 
@@ -1126,7 +1166,7 @@ private struct AliyunPreferencesPane: View {
                 } footer: {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(L(.aliyunCredentialsHint))
-                        Text(L(.aliyunPendingHint))
+                        Text(L(.aliyunTokenHint))
                     }
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -1158,8 +1198,10 @@ private struct AliyunPreferencesPane: View {
         }
     }
 
-    private func saveAPIKey() {
+    private func saveCredentials() {
         settings.setAliyunAPIKey(apiKeyField)
+        settings.setAliyunAccessKeyID(accessKeyIDField)
+        settings.setAliyunSecretAccessKey(secretAccessKeyField)
     }
 }
 
@@ -1177,7 +1219,7 @@ private struct StepFunPreferencesPane: View {
     }
 
     var body: some View {
-        PreferencesPaneContainer(title: L(.settingsStepFun), symbol: "stairs", subtitle: "阶跃 Step Plan 月度 Credit 额度") {
+        PreferencesPaneContainer(title: L(.settingsStepFun), symbol: "stairs", subtitle: L(.settingsStepFunSubtitle)) {
             Form {
                 Section(L(.sectionDisplay)) {
                     Toggle(L(.showProvider), isOn: Binding(
@@ -1275,7 +1317,7 @@ private struct SenseNovaPreferencesPane: View {
     }
 
     var body: some View {
-        PreferencesPaneContainer(title: L(.settingsSenseNova), symbol: "sparkle.magnifyingglass", subtitle: "日日新 Token Plan（公测免费：60,000 积分/5 小时）") {
+        PreferencesPaneContainer(title: L(.settingsSenseNova), symbol: "sparkle.magnifyingglass", subtitle: L(.settingsSenseNovaSubtitle)) {
             Form {
                 Section(L(.sectionDisplay)) {
                     Toggle(L(.showProvider), isOn: Binding(

@@ -47,10 +47,11 @@ enum KimiBrowserSession {
     private static let sourceLabelKey = "tokenbar.kimiBrowserSourceLabel"
     private static let browserKey = "tokenbar.kimiBrowser"
     private static let client = BrowserCookieClient()
-    private static let query = BrowserCookieQuery(domains: [
+    private static let domains = [
         "www.kimi.com",
         "kimi.com",
-    ])
+    ]
+    private static let query = BrowserCookieQuery(domains: domains)
     private static let localStorageOrigin = "https://www.kimi.com"
 
     private static let preferredBrowsers: [Browser] = {
@@ -103,10 +104,9 @@ enum KimiBrowserSession {
             if response.statusCode == 401 || response.statusCode == 403 {
                 throw UsageError.kimiInvalidToken
             }
-            let body = String(data: response.data, encoding: .utf8) ?? ""
             throw UsageError.apiError(
                 statusCode: response.statusCode,
-                message: "Kimi token refresh: \(body)")
+                message: "Kimi token refresh: \(HTTPErrorSummary.summarize(response.data))")
         }
         guard let object = try? JSONSerialization.jsonObject(with: response.data) as? [String: Any],
               let accessToken = object["access_token"] as? String,
@@ -139,7 +139,9 @@ enum KimiBrowserSession {
         {
             return Credential(
                 accessToken: cached,
-                refreshToken: cachedRefresh,
+                refreshToken: cachedRefresh.flatMap {
+                    sameAccount(access: cached, refresh: $0) ? $0 : nil
+                },
                 source: cachedSourceLabel() ?? "cache")
         }
 
@@ -160,19 +162,41 @@ enum KimiBrowserSession {
         let best = preferredAuthToken(from: candidates)
         let refresh = bestRefreshToken(from: candidates) ?? cachedRefresh
         if let best {
+            // Never pair a refresh token with another account's access token:
+            // refreshing it would mint the OLD account's token and silently
+            // replace the one the user just imported.
+            let paired = refresh.flatMap {
+                sameAccount(access: best.token, refresh: $0) ? $0 : nil
+            }
             return Credential(
                 accessToken: best.token,
-                refreshToken: refresh,
+                refreshToken: paired,
                 source: best.source)
         }
-        // 3. No valid access token, but a refresh token may still work.
+        // 3. No valid access token, but a refresh token may still work. The
+        // expired cached access token still decodes, so a mismatched account
+        // is detectable even here.
         if let refresh {
+            if let cached = normalizeToken(cached),
+               !sameAccount(access: cached, refresh: refresh)
+            {
+                return nil
+            }
             return Credential(
                 accessToken: nil,
                 refreshToken: refresh,
                 source: "refresh")
         }
         return nil
+    }
+
+    /// True when both JWTs belong to the same account (matching `sub` claim),
+    /// or when either side lacks the claim so a mismatch cannot be proven.
+    static func sameAccount(access: String, refresh: String) -> Bool {
+        guard let accessSub = decodeJWTPayload(access)?["sub"] as? String, !accessSub.isEmpty,
+              let refreshSub = decodeJWTPayload(refresh)?["sub"] as? String, !refreshSub.isEmpty
+        else { return true }
+        return accessSub == refreshSub
     }
 
     /// Reads Kimi.app's localStorage without touching the Keychain or browser
@@ -477,7 +501,11 @@ enum KimiBrowserSession {
         do {
             let sources = try client.records(matching: query, in: browser)
             for source in sources where !source.records.isEmpty {
-                let cookies = BrowserCookieClient.makeHTTPCookies(source.records, origin: query.origin)
+                // Strict domain boundary: the query matches by substring, so
+                // lookalike domains (kimi.com.evil.tld) could ride along.
+                let records = CookieDomainFilter.filter(source.records, allowedDomains: domains)
+                guard !records.isEmpty else { continue }
+                let cookies = BrowserCookieClient.makeHTTPCookies(records, origin: query.origin)
                 let rawHeader = cookies
                     .map { "\($0.name)=\($0.value)" }
                     .joined(separator: "; ")
@@ -502,6 +530,14 @@ enum KimiBrowserSession {
             CookieKeychainStore.store(
                 cookie: refreshToken,
                 provider: refreshCredentialAccount)
+        } else if let cached = CookieKeychainStore.load(provider: refreshCredentialAccount)
+            .flatMap(normalizeToken),
+            !sameAccount(access: session.authToken, refresh: cached)
+        {
+            // A fresh import that found no refresh token must not inherit one
+            // cached from a different account; a provably same-account one
+            // (e.g. a re-import where the scan missed it) is kept.
+            CookieKeychainStore.clear(provider: refreshCredentialAccount)
         }
         UserDefaults.standard.set(session.sourceLabel, forKey: sourceLabelKey)
         if let browser {

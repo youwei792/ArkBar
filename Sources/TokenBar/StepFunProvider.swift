@@ -62,9 +62,9 @@ final class StepFunProvider: UsageProvider {
         // it needs no Full Disk Access or Keychain approvals.
         let manual = await MainActor.run { self.settings.stepFunManualCookie }
         let session: StepFunBrowserSession.Session
-        if let manual = Self.trimmed(manual) {
+        if let header = CookieHeaderNormalizer.normalize(manual) {
             session = StepFunBrowserSession.Session(
-                cookieHeader: manual, sourceLabel: L(.manualCookie))
+                cookieHeader: header, sourceLabel: L(.manualCookie))
         } else if let cached = StepFunBrowserSession.cachedSession() {
             session = cached
         } else {
@@ -73,8 +73,12 @@ final class StepFunProvider: UsageProvider {
 
         // The console session token lives in the Oasis-Token cookie and
         // expires in ~30 minutes; RefreshToken rotates it (and issues a new
-        // Oasis-Webid) on every call, so refresh first, then query.
+        // Oasis-Webid) on every call, so refresh first, then query — and
+        // persist the rotated pair, or the cached session dies within the hour.
         let refreshed = try await refreshSession(cookieHeader: session.cookieHeader)
+        if refreshed != session.cookieHeader {
+            StepFunBrowserSession.updateCachedCookieHeader(refreshed)
+        }
         var usage = try await fetchRateLimit(cookieHeader: refreshed)
         if let status = try? await fetchPlanStatus(cookieHeader: refreshed) {
             usage.expiryDate = status.expiryDate
@@ -83,17 +87,7 @@ final class StepFunProvider: UsageProvider {
         return Self.makeSnapshot(from: usage, authMethod: session.sourceLabel)
     }
 
-    private static func trimmed(_ value: String?) -> String? {
-        guard let value else { return nil }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
     // MARK: - Console RPC
-
-    /// Last HTTPURLResponse seen by `rpc`, so Set-Cookie rotation headers can
-    /// be read. The provider is used from a single serialized refresh path.
-    private nonisolated(unsafe) static var lastResponse: HTTPURLResponse?
 
     private static let apiBase = "https://platform.stepfun.com"
     private static let refreshPath =
@@ -104,8 +98,9 @@ final class StepFunProvider: UsageProvider {
         "/api/step.openapi.devcenter.Dashboard/GetStepPlanStatus"
 
     /// POSTs a Connect-RPC call with the console's Oasis-* headers. Returns
-    /// the raw body; non-2xx maps to session/api errors.
-    private func rpc(_ path: String, cookieHeader: String) async throws -> Data {
+    /// the raw body and the response (Set-Cookie rotation headers live on the
+    /// response); non-2xx maps to session/api errors.
+    private func rpc(_ path: String, cookieHeader: String) async throws -> (Data, HTTPURLResponse) {
         guard let url = URL(string: Self.apiBase + path) else {
             throw UsageError.parseFailed("Invalid StepFun console URL.")
         }
@@ -124,43 +119,39 @@ final class StepFunProvider: UsageProvider {
         request.httpBody = Data("{}".utf8)
 
         let response = try await transport.response(for: request)
-        Self.lastResponse = response.response
         switch response.statusCode {
         case 200:
-            return response.data
+            return (response.data, response.response)
         case 401, 403:
             Self.writeDiagnostic("rpc \(path) http=\(response.statusCode)")
             throw UsageError.stepFunInvalidSession
         default:
-            let body = String(data: response.data, encoding: .utf8) ?? ""
             throw UsageError.apiError(
-                statusCode: response.statusCode, message: "StepFun console: \(body)")
+                statusCode: response.statusCode,
+                message: "StepFun console: \(HTTPErrorSummary.summarize(response.data))")
         }
     }
 
     /// Rotates the session and returns the NEW cookie header (the response's
     /// Set-Cookie carries a fresh Oasis-Token JWT plus a new Oasis-Webid).
     private func refreshSession(cookieHeader: String) async throws -> String {
-        let data = try await rpc(Self.refreshPath, cookieHeader: cookieHeader)
-        // Set-Cookie values live on the HTTPURLResponse.
+        let (data, http) = try await rpc(Self.refreshPath, cookieHeader: cookieHeader)
         var refreshed: [String: String] = [:]
-        if let http = Self.lastResponse {
-            for (key, value) in http.allHeaderFields {
-                if let key = key as? String, let value = value as? String,
-                   key.lowercased() == "set-cookie"
-                {
-                    // A Set-Cookie header can carry several pairs; take the
-                    // first name=value of each.
-                    for part in value.split(separator: ",") {
-                        let pair = part.split(separator: ";")[0]
-                        if let eq = pair.firstIndex(of: "=") {
-                            let name = pair[..<eq].trimmingCharacters(in: .whitespaces)
-                            let val = pair[pair.index(after: eq)...]
-                                .split(separator: ";", maxSplits: 1)[0]
-                                .trimmingCharacters(in: .whitespaces)
-                            if !name.isEmpty {
-                                refreshed[String(name)] = String(val)
-                            }
+        for (key, value) in http.allHeaderFields {
+            if let key = key as? String, let value = value as? String,
+               key.lowercased() == "set-cookie"
+            {
+                // A Set-Cookie header can carry several pairs; take the
+                // first name=value of each.
+                for part in value.split(separator: ",") {
+                    let pair = part.split(separator: ";")[0]
+                    if let eq = pair.firstIndex(of: "=") {
+                        let name = pair[..<eq].trimmingCharacters(in: .whitespaces)
+                        let val = pair[pair.index(after: eq)...]
+                            .split(separator: ";", maxSplits: 1)[0]
+                            .trimmingCharacters(in: .whitespaces)
+                        if !name.isEmpty {
+                            refreshed[String(name)] = String(val)
                         }
                     }
                 }
@@ -193,12 +184,12 @@ final class StepFunProvider: UsageProvider {
     }
 
     private func fetchRateLimit(cookieHeader: String) async throws -> StepFunUsageSnapshot {
-        let data = try await rpc(Self.rateLimitPath, cookieHeader: cookieHeader)
+        let (data, _) = try await rpc(Self.rateLimitPath, cookieHeader: cookieHeader)
         return try Self.parseRateLimit(data)
     }
 
     private func fetchPlanStatus(cookieHeader: String) async throws -> PlanStatus? {
-        let data = try await rpc(Self.statusPath, cookieHeader: cookieHeader)
+        let (data, _) = try await rpc(Self.statusPath, cookieHeader: cookieHeader)
         return try Self.parsePlanStatus(data)
     }
 

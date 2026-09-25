@@ -31,6 +31,9 @@ final class ReminderScheduler: ObservableObject {
             now: now,
             daysThreshold: settings.expiryReminderDays)
         let previous = items
+        // An unchanged list must not re-publish: every emission rebuilds the
+        // open menu, and with unchanged items there is nothing to notify.
+        guard next != previous else { return }
         items = next
         guard settings.expiryReminderNotify else { return }
         // Only touch notifications when an item is new or its countdown moved
