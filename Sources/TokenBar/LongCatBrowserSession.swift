@@ -161,15 +161,6 @@ enum LongCatBrowserSession {
         UserDefaults.standard.removeObject(forKey: browserKey)
     }
 
-    /// Keep session/auth cookies only. Forward everything that looks like an
-    /// authentication token so the console accepts the request.
-    ///
-    /// LongCat's console auth depends on a set of cookies (passport_token_key,
-    /// _lxsdk_cuid, long_cat_region_key, and the sankuai strategy cookies),
-    /// so the filter is intentionally broad: it keeps every cookie whose name
-    /// suggests identity or session state and only drops obvious tracking /
-    /// analytics cookies. When nothing matches the broad filter, all cookies
-    /// are forwarded (the caller already scoped the query to longcat.chat).
     static func requestCookieHeader(from raw: String) -> String? {
         let pairs = raw
             .split(separator: ";")
@@ -181,13 +172,11 @@ enum LongCatBrowserSession {
                 guard !name.isEmpty, !value.isEmpty else { return nil }
                 return (name, value)
             }
-        // Drop only obvious tracking / analytics cookies; keep everything else.
-        let dropped: Set<String> = ["utm_source_rg", "utm_source", "utm_medium", "utm_campaign"]
-        let preferred = pairs.filter { name, _ in
-            let lower = name.lowercased()
-            return !dropped.contains(name) && !lower.hasPrefix("utm_")
-        }
-        let chosen = preferred.isEmpty ? pairs : preferred
+        let allowed: Set<String> = [
+            "passport_token_key", "_lxsdk_cuid", "long_cat_region_key",
+            "sankuai_strategy", "sankuai_ab_strategy",
+        ]
+        let chosen = pairs.filter { allowed.contains($0.0) }
         guard !chosen.isEmpty else { return nil }
         return chosen.map { "\($0.0)=\($0.1)" }.joined(separator: "; ")
     }

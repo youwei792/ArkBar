@@ -145,6 +145,8 @@ final class UsageStore: ObservableObject {
     /// Tabs whose refresh was requested while a fetch was already in flight;
     /// drained (re-fetched with the current settings) when that fetch ends.
     private var pendingRefresh: Set<ProviderTab> = []
+    /// Consecutive failure count per tab, used for exponential backoff.
+    private var failureCounts: [ProviderTab: Int] = [:]
 
     init(settings: AppSettings = .shared) {
         self.settings = settings
@@ -447,7 +449,12 @@ final class UsageStore: ObservableObject {
             }
         }
         let fetch = track.fetch!
+        let failures = failureCounts[tab] ?? 0
+        let backoffSeconds = failures > 0 ? min(pow(2.0, Double(failures - 1)), 60.0) : 0
         Task { [weak self] in
+            if backoffSeconds > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(backoffSeconds * 1_000_000_000))
+            }
             await self?.run(tab, fetch: fetch, environment: environment)
         }
     }
@@ -582,6 +589,7 @@ final class UsageStore: ObservableObject {
                 state.status = .ok(snapshot: snapshot)
                 state.isRefreshing = false
             }
+            failureCounts[tab] = 0
         } catch {
             let message = track?.errorMessage(error) ?? error.localizedDescription
             Self.log("✗ \(track?.logName ?? "provider"): \(message)")
@@ -593,6 +601,7 @@ final class UsageStore: ObservableObject {
                     state.status = .error(message: message)
                 }
             }
+            failureCounts[tab] = (failureCounts[tab] ?? 0) + 1
         }
         // A refresh queued while this fetch was in flight re-runs now, with
         // the current settings (fetchers read credentials at fetch time).

@@ -160,11 +160,10 @@ enum StepFunBrowserSession {
         UserDefaults.standard.set(browser.rawValue, forKey: browserKey)
     }
 
-    /// Keeps all identity cookies, dropping only `utm_*` tracking cookies.
-    /// Returns nil when nothing survives.
     private static func requestCookieHeader(from cookies: [HTTPCookie]) -> String {
-        cookies
-            .filter { !$0.name.lowercased().hasPrefix("utm_") }
+        let allowed: Set<String> = ["Oasis-Token", "refresh_token", "csrf_token"]
+        return cookies
+            .filter { allowed.contains($0.name) }
             .map { "\($0.name)=\($0.value)" }
             .joined(separator: "; ")
     }

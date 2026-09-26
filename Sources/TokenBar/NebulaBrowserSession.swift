@@ -231,7 +231,6 @@ enum NebulaBrowserSession {
         return nil
     }
 
-    /// Keep session-related cookies only. new-api commonly uses `session`.
     static func requestCookieHeader(from raw: String) -> String? {
         let pairs = raw
             .split(separator: ";")
@@ -243,14 +242,8 @@ enum NebulaBrowserSession {
                 guard !name.isEmpty, !value.isEmpty else { return nil }
                 return (name, value)
             }
-        let preferred = pairs.filter { name, _ in
-            let lower = name.lowercased()
-            return lower == "session"
-                || lower.contains("session")
-                || lower.contains("token")
-                || lower == "cf_clearance"
-        }
-        let chosen = preferred.isEmpty ? pairs : preferred
+        let allowed: Set<String> = ["session", "cf_clearance"]
+        let chosen = pairs.filter { allowed.contains($0.0) }
         guard !chosen.isEmpty else { return nil }
         return chosen.map { "\($0.0)=\($0.1)" }.joined(separator: "; ")
     }

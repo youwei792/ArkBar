@@ -209,24 +209,27 @@ enum AliyunConsoleLogin {
             if request.method == "OPTIONS" {
                 Self.writeAll(
                     connection,
-                    Self.response(status: 204, body: nil, optionsPreflight: true))
+                    Self.response(status: 204, body: nil, optionsPreflight: true,
+                                  origin: request.origin))
                 return
             }
             guard request.query["state"] == state else {
                 // Not our callback (or a forged one): answer and keep waiting.
-                Self.writeAll(connection, Self.response(status: 400, body: "bad state"))
+                Self.writeAll(connection, Self.response(status: 400, body: "bad state",
+                                                        origin: request.origin))
                 return
             }
             guard let token = request.accessToken else {
                 // The console posts intermediate requests before the token
                 // lands; the official CLI answers them and keeps waiting.
-                Self.writeAll(connection, Self.response(status: 200, body: "OK\n"))
+                Self.writeAll(connection, Self.response(status: 200, body: "OK\n",
+                                                        origin: request.origin))
                 return
             }
             Self.writeAll(connection, Self.response(status: 200, body: """
                 <html><body style="font-family:system-ui;text-align:center;padding:60px">\
                 <h2>登录成功</h2><p>可以关闭这个页面，回到 TokenBar。</p></body></html>
-                """, contentType: "text/html; charset=utf-8"))
+                """, contentType: "text/html; charset=utf-8", origin: request.origin))
             succeed(token)
         }
 
@@ -291,21 +294,20 @@ enum AliyunConsoleLogin {
             status: Int,
             body: String?,
             contentType: String = "text/plain; charset=utf-8",
-            optionsPreflight: Bool = false
+            optionsPreflight: Bool = false,
+            origin: String? = nil
         ) -> Data {
             let payload = Data((body ?? "").utf8)
             var header = "HTTP/1.1 \(status) \(Self.reasonPhrase(status))\r\n"
             header += "Content-Type: \(contentType)\r\n"
             header += "Content-Length: \(payload.count)\r\n"
             header += "Connection: close\r\n"
-            // The console posts the token with a cross-origin `fetch`, so every
-            // answer needs the CORS header — without it the browser reports the
-            // round trip as failed and the page sits on 「授权中」 even though the
-            // token already landed here. The official CLI sends it too.
-            header += "Access-Control-Allow-Origin: *\r\n"
-            if optionsPreflight {
-                header += "Access-Control-Allow-Methods: GET, POST, PUT, PATCH, OPTIONS\r\n"
-                header += "Access-Control-Allow-Headers: Content-Type\r\n"
+            if origin == consoleOrigin {
+                header += "Access-Control-Allow-Origin: \(consoleOrigin)\r\n"
+                if optionsPreflight {
+                    header += "Access-Control-Allow-Methods: GET, POST, PUT, PATCH, OPTIONS\r\n"
+                    header += "Access-Control-Allow-Headers: Content-Type\r\n"
+                }
             }
             header += "\r\n"
             return Data(header.utf8) + payload
@@ -334,10 +336,11 @@ enum AliyunConsoleLogin {
 
     // MARK: - Request parsing
 
-    /// A parsed callback request: method, query parameters, and body.
+    /// A parsed callback request: method, query parameters, body, and origin.
     struct CallbackRequest {
         let method: String
         let query: [String: String]
+        let origin: String?
         private let body: Data
         private let contentType: String
 
@@ -446,6 +449,7 @@ enum AliyunConsoleLogin {
 
             var contentType = ""
             var contentLength = 0
+            var origin: String? = nil
             for line in lines.dropFirst() {
                 let parts = line.split(separator: ":", maxSplits: 1)
                 guard parts.count == 2 else { continue }
@@ -453,11 +457,12 @@ enum AliyunConsoleLogin {
                 let value = parts[1].trimmingCharacters(in: .whitespaces)
                 if name == "content-type" { contentType = value }
                 if name == "content-length" { contentLength = Int(value) ?? 0 }
+                if name == "origin" { origin = value.isEmpty ? nil : value }
             }
             var body = Data(data[headerEnd.upperBound...])
             if contentLength > 0 { body = body.prefix(contentLength) }
             return CallbackRequest(
-                method: method, query: query, body: body, contentType: contentType)
+                method: method, query: query, origin: origin, body: body, contentType: contentType)
         }
     }
 }
