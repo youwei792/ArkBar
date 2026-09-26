@@ -35,7 +35,9 @@
      `fetch` 投递令牌的，缺这个头 → 浏览器把这次请求判为失败 → 页面永远停在「授权中」，
      而令牌其实已经到手了。这一条真机踩过；
    - 重复点击会**取消上一次尝试**（旧监听立即释放端口，不再各占 10 分钟），被取消的那次不写日志；
-   - 令牌存 Keychain（`aliyun-console`），10 分钟超时；超时/成功都会取消 source 关闭监听 fd。
+   - 令牌存 Keychain（`aliyun-console`），10 分钟超时；成功/超时/被新点击取消都会 cancel source，
+     **并由 cancel handler 以「按值捕获的 fd」关闭监听**——handler 在下一个队列轮次才跑，
+     那时 server 往往已经释放，靠 `weak self` 关 fd 会静默失败并永久占住端口（真机出现过 7 小时未释放）。
    - 过期（401）→ 清掉令牌；若同时配有 AK/SK 则自动回退，否则报
      `aliyunConsoleLoginExpired` 提示重新登录。
    - ⚠️ **这张令牌只有几分钟寿命**（实测 22:48:51 拿到、22:52:20 已 `Login.NotLogined`；

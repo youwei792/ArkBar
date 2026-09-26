@@ -102,6 +102,7 @@ OPTIONS/CORS、回调体解析（query / urlencoded / JSON / `data` 嵌套）、
 | 报「未找到有效的 Token Plan 或 Coding Plan 订阅」 | 个人版 **Essential** 的用量响应只有 `per1MonthPercentage` + `per1MonthResetTime`；官方 CLI 只打印 5 小时/每周两档，TokenBar 照抄 → 三档全无 → 误判为未订阅 | `parseTokenPlan` 增加月度档；缺哪档不显示哪档；用真实响应做固定向量测试 |
 | 卡片没有到期日/倒计时 | 用量接口根本不含日期；到期日与套餐档位在**订阅记录**接口里（控制台同页会调） | 新增 `v2/subscription` 调用，取 `endTime` → 到期日、`specCode` → `Essential` 徽标；该调用失败只降级不报错 |
 | 错误细节丢失 | 真机信封用 `errorMsg`，代码只读 `errorMessage` | 两个字段都认；两接口都"无数据"时把**两份原始响应**写进诊断文件 |
+| 资源复核：登录后端口一直占着 | cancel handler 用 `weak self` 关 fd，而它在下一个队列轮次才跑——那时 server 已释放 → 关不掉 → 端口留在 `LISTEN` 且无人 accept（实测 7 小时后仍在，TCP 能连上但永不响应） | handler 改为**按值捕获 fd**；四条测试分别钉住成功/取消/超时/未 serve 四种结束方式后端口都已释放 |
 
 顺带修掉的测试隐患：`browserTokenUsed` / `expiredBrowserTokenFallsBack` 会往共享 `AppSettings`
 写假令牌并在退出时**无条件清空**，等于跑一次测试就把真机登录状态打掉；改为保存/还原。
