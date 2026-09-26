@@ -75,7 +75,6 @@ enum AliyunConsoleLogin {
         private var continuation: CheckedContinuation<String, Error>?
         private var settled = false
         private var stopped = false
-        private var listenerClosed = false
 
         let port: Int
 
@@ -139,7 +138,13 @@ enum AliyunConsoleLogin {
                     let source = DispatchSource.makeReadSource(
                         fileDescriptor: fileDescriptor, queue: .global())
                     source.setEventHandler { [weak self] in self?.acceptOne(state: state) }
-                    source.setCancelHandler { [weak self] in self?.closeListener() }
+                    source.setCancelHandler { [fileDescriptor] in
+                        // The descriptor is captured by value: this handler runs
+                        // on a later queue turn, by which time the server may
+                        // already be deallocated, and a weak `self` there would
+                        // leave the port bound forever with nothing serving it.
+                        Darwin.close(fileDescriptor)
+                    }
                     self.continuation = continuation
                     self.source = source
                     lock.unlock()
@@ -162,24 +167,14 @@ enum AliyunConsoleLogin {
             self.source = nil
             lock.unlock()
             if let source {
-                source.cancel() // the cancel handler releases the descriptor
+                source.cancel() // its cancel handler releases the descriptor
             } else {
-                closeListener() // never installed, so nothing else will
+                Darwin.close(fileDescriptor) // never installed, so nothing else will
             }
             // A listener closed before it delivered a token was cancelled — by
             // a newer sign-in attempt, or by the caller giving up. Success and
             // timeout settle first, so this is a no-op for them.
             fail(CancellationError())
-        }
-
-        /// Idempotent: the cancel handler and the never-installed path both
-        /// route here, and a descriptor must not be closed twice.
-        private func closeListener() {
-            lock.lock()
-            guard !listenerClosed else { lock.unlock(); return }
-            listenerClosed = true
-            lock.unlock()
-            Darwin.close(fileDescriptor)
         }
 
         private static func bindError() -> LoginError {

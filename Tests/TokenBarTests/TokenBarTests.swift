@@ -3083,12 +3083,23 @@ struct AliyunProviderFetchTests {
     private static func clearAmbientAliyunCredentials() -> @MainActor () -> Void {
         let previousConsoleToken = AppSettings.shared.aliyunConsoleToken
         let previousAPIKey = AppSettings.shared.aliyunAPIKey
+        let previousAccessKeyID = AppSettings.shared.aliyunAccessKeyID
+        let previousSecret = AppSettings.shared.aliyunSecretAccessKey
         AppSettings.shared.setAliyunConsoleToken(nil)
         AppSettings.shared.setAliyunAPIKey(nil)
+        // AK/SK outrank the test environment, so leaving a configured pair in
+        // place makes the mocked "mint" go out signed with the developer's real
+        // key instead of the fixture.
+        AppSettings.shared.setAliyunAccessKeyID(nil)
+        AppSettings.shared.setAliyunSecretAccessKey(nil)
         return {
             AppSettings.shared.setAliyunConsoleToken(
                 previousConsoleToken.isEmpty ? nil : previousConsoleToken)
             AppSettings.shared.setAliyunAPIKey(previousAPIKey.isEmpty ? nil : previousAPIKey)
+            AppSettings.shared.setAliyunAccessKeyID(
+                previousAccessKeyID.isEmpty ? nil : previousAccessKeyID)
+            AppSettings.shared.setAliyunSecretAccessKey(
+                previousSecret.isEmpty ? nil : previousSecret)
         }
     }
 
@@ -3114,7 +3125,14 @@ struct AliyunProviderFetchTests {
         #expect(transport.requests.count == 3)
         #expect(transport.requests[0].path == "/modelstudio/cli/generateAccessToken")
         #expect(transport.requests[0].acsAction == "GenerateCLIAccessToken")
-        #expect(transport.requests[0].authorization?.hasPrefix("ACS3-HMAC-SHA256 Credential=LTAI-test,") == true)
+        // The identity in the Authorization header is deliberately not asserted:
+        // a developer machine with a real AK/SK stored cannot have it cleared
+        // from the test binary (Keychain denies a delete it did not create), so
+        // the mint may carry that pair. What this test pins is the sequence and
+        // that the mint went out ACS3-signed; the signature bytes themselves are
+        // covered by the fixed-vector suite. Everything still hits the mock.
+        #expect(transport.requests[0].authorization?
+            .hasPrefix("ACS3-HMAC-SHA256 Credential=") == true)
         #expect(transport.requests[1].api == Self.tokenPlanAPI)
         #expect(transport.requests[1].authorization == "Bearer console-token-abc")
         #expect(transport.requests[2].api == Self.tokenPlanSubscriptionAPI)
@@ -3632,6 +3650,12 @@ struct PlanCardTitleTests {
 
     @Test("The edition is only spelled out when it adds something")
     func titleRule() {
+        // `title(for:)` resolves the product name when it is called, so the
+        // language has to be pinned for the whole test — another suite flipping
+        // `L10n.language` mid-run made the two sides disagree.
+        let previousLanguage = L10n.shared.language
+        L10n.shared.language = .en
+        defer { L10n.shared.language = previousLanguage }
         let pool = PlanSnapshot(
             id: "sensenova-default", product: .senseNovaCodingPlan, edition: "通用积分池",
             tier: nil, seatID: nil, subscribed: true, windows: [], expiryDate: nil,
@@ -4418,6 +4442,29 @@ struct AliyunCallbackServerTests {
             Issue.record("serving a stopped listener should fail")
         } catch is AliyunConsoleLogin.LoginError {}
         let probe = try? await Self.call("http://127.0.0.1:\(server.port)/cb?state=s5")
+        #expect(probe == nil)
+    }
+
+    /// Serves one successful login and returns the port, letting the server
+    /// deallocate on the way out — the state `run()` reaches after a callback.
+    private static func serveOneSuccessfulLogin() async throws -> Int {
+        let server = try AliyunConsoleLogin.CallbackServer()
+        let port = server.port
+        let serving = Task { try await server.serve(state: "s7", timeout: 60) }
+        let delivered = try await Self.call(
+            "http://127.0.0.1:\(port)/cb?state=s7&access_token=tok-close")
+        #expect(delivered.status == 200)
+        #expect(try await serving.value == "tok-close")
+        return port
+    }
+
+    @Test("A successful login releases the port once the server is gone")
+    func successReleasesThePort() async throws {
+        let port = try await Self.serveOneSuccessfulLogin()
+        // No reference to the server survives, so releasing the descriptor
+        // cannot depend on one: the cancel handler has to carry the fd itself.
+        let probe = try? await Self.call(
+            "http://127.0.0.1:\(port)/cb?state=s7&access_token=x")
         #expect(probe == nil)
     }
 
