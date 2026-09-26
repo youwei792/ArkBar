@@ -73,14 +73,15 @@ enum CredentialFileCache {
         guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys]) else {
             return false
         }
-        // Atomically write with 0600 permissions.
+        // Atomically write with 0600 permissions and complete file protection
+        // so the system encrypts the credential cache on disk.
         let fm = FileManager.default
         // Unique staging name: two concurrent writers must not share a temp
         // path (a write racing a rename would clobber the other's data).
         let tempURL = url.deletingLastPathComponent()
             .appendingPathComponent(".\(fileName).\(UUID().uuidString).tmp")
         do {
-            try data.write(to: tempURL, options: .atomic)
+            try data.write(to: tempURL, options: [.atomic, .completeFileProtection])
             try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tempURL.path)
             _ = try fm.replaceItemAt(url, withItemAt: tempURL,
                                      backupItemName: nil, options: .usingNewMetadataOnly)

@@ -102,9 +102,21 @@ enum CookieKeychainStore {
 
     // MARK: - Keychain helpers
 
-    /// Write a value to the Keychain (v3 service). Uses `applyNoUI` for the
-    /// update attempt; add uses the default ACL (no custom wildcard, since
-    /// `SecTrustedApplicationCreateFromPath` is deprecated on macOS 14+).
+    /// Creates an ACL restricting access to this app only. On macOS 14+ the
+    /// path-based ACL may be ignored by securityd, but it remains a best-effort
+    /// defense on older systems and signals intent on newer ones.
+    private static func appAccess() -> SecAccess? {
+        let path = Bundle.main.bundlePath
+        guard !path.isEmpty else { return nil }
+        var app: SecTrustedApplication?
+        let appStatus = path.withCString { SecTrustedApplicationCreateFromPath($0, &app) }
+        guard appStatus == errSecSuccess, let app else { return nil }
+        var access: SecAccess?
+        let accessStatus = SecAccessCreate("TokenBar" as CFString, [app] as CFArray, &access)
+        guard accessStatus == errSecSuccess, let access else { return nil }
+        return access
+    }
+
     @discardableResult
     private static func store(keychainOnly value: String, account: String) -> Bool {
         let data = Data(value.utf8)
@@ -127,10 +139,9 @@ enum CookieKeychainStore {
         add[kSecValueData as String] = data
         add[kSecAttrLabel as String] = "TokenBar Cache"
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        // Note: no kSecAttrAccess — modern securityd on macOS 14+ ignores the
-        // deprecated SecTrustedApplication path-based ACL, so we rely on the
-        // default Keychain access control. The file cache handles the "no
-        // prompt on restart" use case instead.
+        if let access = appAccess() {
+            add[kSecAttrAccess as String] = access
+        }
         let addStatus = SecItemAdd(add as CFDictionary, nil)
         if addStatus != errSecSuccess {
             UsageStore.log("Keychain cookie add failed (\(account)): OSStatus \(addStatus)")

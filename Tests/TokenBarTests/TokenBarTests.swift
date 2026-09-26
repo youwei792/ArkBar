@@ -1614,12 +1614,12 @@ struct NebulaCardTests {
 
 @Suite("Nebula browser session")
 struct NebulaBrowserSessionTests {
-    @Test("Keeps session-like cookies and drops unrelated ones")
+    @Test("Keeps only whitelisted session cookies")
     func filtersCookieHeader() {
         let header = NebulaBrowserSession.requestCookieHeader(
-            from: "theme=dark; session=abc123; analytics=drop; access_token=tok-xyz")
+            from: "theme=dark; session=abc123; analytics=drop; cf_clearance=cf-xyz")
         #expect(header?.contains("session=abc123") == true)
-        #expect(header?.contains("access_token=tok-xyz") == true)
+        #expect(header?.contains("cf_clearance=cf-xyz") == true)
         #expect(header?.contains("theme=dark") != true)
         #expect(header?.contains("analytics=drop") != true)
     }
@@ -1627,7 +1627,7 @@ struct NebulaBrowserSessionTests {
     @Test("Rejects empty cookie strings")
     func rejectsEmptyCookie() {
         #expect(NebulaBrowserSession.requestCookieHeader(from: "") == nil)
-        #expect(NebulaBrowserSession.requestCookieHeader(from: "theme=dark") != nil)
+        #expect(NebulaBrowserSession.requestCookieHeader(from: "theme=dark") == nil)
     }
 }
 
@@ -2241,32 +2241,30 @@ struct KimiBrowserSessionTokenTests {
 
 @Suite("LongCat browser session")
 struct LongCatBrowserSessionTests {
-    @Test("Keeps identity cookies and drops only tracking cookies")
+    @Test("Keeps only whitelisted identity cookies")
     func filtersCookieHeader() {
         let header = LongCatBrowserSession.requestCookieHeader(
             from: "theme=dark; session=abc123; analytics=drop; passport_token_key=tok-xyz; utm_source=spam")
-        #expect(header?.contains("session=abc123") == true)
         #expect(header?.contains("passport_token_key=tok-xyz") == true)
-        #expect(header?.contains("theme=dark") == true)
-        #expect(header?.contains("analytics=drop") == true)
+        #expect(header?.contains("theme=dark") != true)
+        #expect(header?.contains("analytics=drop") != true)
         #expect(header?.contains("utm_source=spam") != true)
     }
 
-    @Test("Keeps all cookies when none are tracking cookies")
-    func fallsBackToAllCookies() {
+    @Test("Returns nil when no whitelisted cookies are present")
+    func returnsNilForNonWhitelisted() {
         let header = LongCatBrowserSession.requestCookieHeader(
             from: "foo=bar; baz=qux")
-        #expect(header?.contains("foo=bar") == true)
-        #expect(header?.contains("baz=qux") == true)
+        #expect(header == nil)
     }
 
     @Test("Rejects empty cookie strings")
     func rejectsEmptyCookie() {
         #expect(LongCatBrowserSession.requestCookieHeader(from: "") == nil)
-        #expect(LongCatBrowserSession.requestCookieHeader(from: "theme=dark") != nil)
+        #expect(LongCatBrowserSession.requestCookieHeader(from: "theme=dark") == nil)
     }
 
-    @Test("Drops only utm_ prefixed tracking cookies")
+    @Test("Keeps only whitelisted cookies and drops tracking")
     func dropsUtmTracking() {
         let header = LongCatBrowserSession.requestCookieHeader(
             from: "utm_source=spam; utm_medium=cpc; _lxsdk_cuid=user123; passport_token_key=tok")
@@ -4338,13 +4336,17 @@ struct AliyunCallbackServerTests {
         _ url: String,
         method: String = "GET",
         body: Data? = nil,
-        contentType: String? = nil
+        contentType: String? = nil,
+        origin: String? = nil
     ) async throws -> (status: Int, body: String, allowOrigin: String?) {
         var request = URLRequest(url: URL(string: url)!)
         request.httpMethod = method
         if let body {
             request.httpBody = body
             request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        }
+        if let origin {
+            request.setValue(origin, forHTTPHeaderField: "Origin")
         }
         var lastError: Error = URLError(.cannotConnectToHost)
         for _ in 0..<40 {
@@ -4372,14 +4374,25 @@ struct AliyunCallbackServerTests {
         defer { server.stop() }
         let serving = Task { try await server.serve(state: "s1", timeout: 15) }
         let response = try await Self.call(
-            "http://127.0.0.1:\(server.port)/cb?state=s1&access_token=tok-socket")
+            "http://127.0.0.1:\(server.port)/cb?state=s1&access_token=tok-socket",
+            origin: "https://bailian.console.aliyun.com")
         #expect(response.status == 200)
         #expect(response.body.contains("登录成功"))
-        // The console posts the token with a cross-origin fetch: without this
-        // header the browser reports the round trip as failed and the page sits
-        // on 「授权中」 even though the token already landed here.
-        #expect(response.allowOrigin == "*")
+        #expect(response.allowOrigin == "https://bailian.console.aliyun.com")
         #expect(try await serving.value == "tok-socket")
+    }
+
+    @Test("A callback without a valid Origin does not receive CORS headers")
+    func rejectsForeignOrigin() async throws {
+        let server = try AliyunConsoleLogin.CallbackServer()
+        defer { server.stop() }
+        let serving = Task { try await server.serve(state: "s4", timeout: 15) }
+        let response = try await Self.call(
+            "http://127.0.0.1:\(server.port)/cb?state=s4&access_token=tok-xyz",
+            origin: "https://evil.example.com")
+        #expect(response.status == 200)
+        #expect(response.allowOrigin == nil)
+        #expect(try await serving.value == "tok-xyz")
     }
 
     @Test("A tokenless or forged callback keeps the login waiting")
